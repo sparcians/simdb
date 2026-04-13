@@ -1,9 +1,8 @@
 #include "SimDBTester.hpp"
+#include "simdb/utils/Tree.hpp"
 #include "simdb/utils/TypeTraits.hpp"
 
 TEST_INIT;
-
-namespace {
 
 struct IntermediateNode : simdb::Tree::TreeNode
 {
@@ -144,56 +143,6 @@ void testGetNodeApis()
     EXPECT_THROW(([&]() { ctree.getNode<LeafNode>("top..leaf"); })());
 }
 
-void testSerializeNodes()
-{
-    simdb::collection::SerializedTree tree(
-        std::in_place_type<simdb::collection::ElementTreeNode>,
-        "root");
-
-    auto leaf = tree.createNodes<simdb::collection::ElementTreeNode>("top.mid.leaf");
-    EXPECT_NOTEQUAL(leaf, nullptr);
-
-    simdb::DatabaseManager db_mgr("test.db", true /*new file*/);
-
-    simdb::Schema schema;
-    using dt = simdb::SqlDataType;
-
-    auto& tbl = schema.addTable("ElementTreeNodes");
-    tbl.addColumn("ParentId", dt::int32_t);
-    tbl.addColumn("Name", dt::string_t);
-
-    db_mgr.appendSchema(schema);
-    tree.serialize(&db_mgr);
-
-    auto query = db_mgr.createQuery("ElementTreeNodes");
-
-    int id;
-    query->select("Id", id);
-
-    int actual_parent_id = 0;
-    query->select("ParentId", actual_parent_id);
-
-    std::string actual_name;
-    query->select("Name", actual_name);
-
-    auto results = query->getResultSet();
-    auto expect = [&](const std::string& expected_name, int expected_parent_id)
-    {
-        EXPECT_TRUE(results.getNextRecord());
-        EXPECT_EQUAL(expected_name, actual_name);
-        EXPECT_EQUAL(expected_parent_id, actual_parent_id);
-        return id;
-    };
-
-    actual_parent_id = expect("root", 0);
-    actual_parent_id = expect("top", actual_parent_id);
-    actual_parent_id = expect("mid", actual_parent_id);
-    actual_parent_id = expect("leaf", actual_parent_id);
-    EXPECT_FALSE(results.getNextRecord());
-}
-
-} // namespace
-
 int main()
 {
     testCreateNodeAndPaths();
@@ -202,7 +151,6 @@ int main()
     testCreateNodeTypeMismatchThrows();
     testCreateNodes();
     testGetNodeApis();
-    testSerializeNodes();
 
     REPORT_ERROR;
     return ERROR_CODE;

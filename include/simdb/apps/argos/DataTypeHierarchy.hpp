@@ -272,7 +272,7 @@ struct EnumDescriptor
 {
     static std::vector<EnumMember> members()
     {
-        static_assert(false, "Must specialize this template for your enum");
+        static_assert(type_traits::always_false_v<EnumT>, "Must specialize this template for your enum");
         return {};
     }
 };

@@ -312,9 +312,10 @@ struct return_type<std::shared_ptr<R> (T:: * const &)() const> { using type = R;
 template <typename R, typename T>
 struct return_type<std::shared_ptr<R> & (T:: * const &)() const> { using type = R; };
 
-/** \brief Alias Template for return_type.
-*/
 template <typename T>
 using return_type_t = typename return_type<T>::type;
+
+template <typename T>
+inline constexpr bool always_false_v = false;
 
 } // namespace simdb::type_traits

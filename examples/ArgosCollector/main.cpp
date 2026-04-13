@@ -96,7 +96,7 @@ private:
         }
         else
         {
-            static_assert(false);
+            static_assert(simdb::type_traits::always_false_v<T>);
         }
     }
 
