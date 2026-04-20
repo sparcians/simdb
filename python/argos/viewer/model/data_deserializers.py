@@ -1,6 +1,7 @@
 # Argos collection-record blob decoding.
 from collections import OrderedDict
 from viewer.model.dtype_inspector import DataTypeInspector
+import copy
 
 UNPACK_FORMATS = {
     'char':           'b',
@@ -40,6 +41,16 @@ class ByteBuffer:
 
         self._read_idx += nbytes
         return val
+
+    def Jump(self, num_bytes):
+        assert self._read_idx + num_bytes <= self._end_idx
+        self._read_idx += num_bytes
+
+    def Extract(self, num_bytes):
+        assert self._read_idx + num_bytes <= self._end_idx
+        extracted_bytes = self._data_bytes[self._read_idx : self._read_idx + num_bytes]
+        self._read_idx += num_bytes
+        return extracted_bytes
 
     def Done(self):
         assert self._read_idx <= self._end_idx
@@ -125,9 +136,28 @@ class SimpleDeserializer:
         'bool':           lambda x: bool(x)
     }
 
+    NUM_BYTES = {
+        'char':           1,
+        'signed char':    1,
+        'unsigned char':  1,
+        'short':          2,
+        'unsigned short': 2,
+        'int':            4,
+        'unsigned int':   4,
+        'long':           8,
+        'unsigned long':  8,
+        'double':         8,
+        'float':          4,
+        'bool':           1
+    }
+
     def __init__(self, dtype_name):
         self._fmt = UNPACK_FORMATS[dtype_name]
         self._converter = self.CONVERTERS[dtype_name]
+        self._num_bytes = self.NUM_BYTES[dtype_name]
+
+    def GetNumBytes(self):
+        return self._num_bytes
 
     def Deserialize(self, data_bytes):
         buf = ByteBuffer.CreateFrom(data_bytes)
@@ -140,6 +170,10 @@ class StringDeserializer:
         assert tiny_strings is not None
         self._tiny_strings = tiny_strings
 
+    def GetNumBytes(self):
+        # Always stored as uint32_t
+        return 4
+
     def Deserialize(self, data_bytes):
         buf = ByteBuffer.CreateFrom(data_bytes)
         string_id = buf.Read('I')
@@ -151,6 +185,10 @@ class EnumDeserializer:
         self._val_deserializer = val_deserializer
         self._enum_map = {k:v for v,k in enum_map.items()}
 
+    def GetNumBytes(self):
+        # Defer to the int deserializer
+        return self._val_deserializer.GetNumBytes()
+
     def Deserialize(self, data_bytes):
         enum_val = self._val_deserializer.Deserialize(data_bytes)
         enum_val = int(enum_val)
@@ -161,6 +199,16 @@ class ContigContainerDeserializer:
     def __init__(self, bin_deserializer, capacity):
         self._bin_deserializer = bin_deserializer
         self._capacity = capacity
+
+    def GetAllFieldNames(self):
+        return self._bin_deserializer.GetAllFieldNames()
+
+    def GetVisibleFieldNames(self):
+        # TODO cnyce
+        return self.GetAllFieldNames()
+
+    def GetBinNumBytes(self):
+        return self._bin_deserializer.GetNumBytes()
 
     def Deserialize(self, data_bytes):
         buf = ByteBuffer.CreateFrom(data_bytes)
@@ -182,6 +230,17 @@ class SparseContainerDeserializer:
     def __init__(self, bin_deserializer, capacity):
         self._bin_deserializer = bin_deserializer
         self._capacity = capacity
+
+    def GetAllFieldNames(self):
+        return self._bin_deserializer.GetAllFieldNames()
+
+    def GetVisibleFieldNames(self):
+        # TODO cnyce
+        return self.GetAllFieldNames()
+
+    def GetBinNumBytes(self):
+        # Account for uint16_t bin index for each element
+        return self._bin_deserializer.GetNumBytes() + 2
 
     def Deserialize(self, data_bytes):
         buf = ByteBuffer.CreateFrom(data_bytes)
@@ -208,14 +267,18 @@ class SparseContainerDeserializer:
 class StructDeserializer:
     def __init__(self, struct_defn, inspector, tiny_strings):
         self._field_deserializers = OrderedDict()
+        self._flattened_field_names = []
         StructDeserializer.__RecurseFindCollectableFields(
-            struct_defn, inspector, tiny_strings, self._field_deserializers)
+            struct_defn, inspector, tiny_strings, self._field_deserializers, self._flattened_field_names)
         assert self._field_deserializers
+        assert self._flattened_field_names
 
     @staticmethod
-    def __RecurseFindCollectableFields(struct_defn, inspector, tiny_strings, field_deserializers):
+    def __RecurseFindCollectableFields(struct_defn, inspector, tiny_strings, field_deserializers, flattened_field_names):
         for field in struct_defn.children:
             assert not field.name or field.name not in field_deserializers
+            if field.name:
+                flattened_field_names.append(field.name)
             if field.kind == 'pod' and field.type_name != 'string':
                 field_deserializers[field.name] = SimpleDeserializer(field.type_name)
             elif field.type_name == 'string':
@@ -223,9 +286,16 @@ class StructDeserializer:
             elif field.kind == 'enum':
                 field_deserializers[field.name] = CreateDeserializer(inspector, field.type_name)
             elif field.kind == 'struct':
-                StructDeserializer.__RecurseFindCollectableFields(field, inspector, tiny_strings, field_deserializers)
+                StructDeserializer.__RecurseFindCollectableFields(field, inspector, tiny_strings, field_deserializers, flattened_field_names)
             else:
                 raise ValueError(f'Unknown field data type: {field.kind}')
+
+    def GetAllFieldNames(self):
+        return copy.deepcopy(self._flattened_field_names)
+
+    def GetVisibleFieldNames(self):
+        # TODO cnyce
+        return self.GetAllFieldNames()
 
     def Deserialize(self, data_bytes):
         buf = ByteBuffer.CreateFrom(data_bytes)

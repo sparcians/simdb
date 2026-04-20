@@ -185,7 +185,6 @@ public:
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
-        collectables_tree_.createNodes(path);
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable = std::make_shared<AutoScalarCollector<CollectableT>>(
             collection, heartbeat_, std::move(dtype_hier), scalar, default_enabled, initialize_value);
@@ -203,7 +202,6 @@ public:
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
-        collectables_tree_.createNodes(path);
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable =
             std::make_shared<ScalarCollector<CollectableT>>(collection, heartbeat_,
@@ -229,7 +227,6 @@ public:
         using ElemT =
             typename detail::dtype_register_element<typename InnerContainerT::value_type>::type;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
-        collectables_tree_.createNodes(path);
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable = std::make_shared<AutoContainerCollector<ContainerT, Sparse>>(
             collection, heartbeat_, container, expected_capacity, std::move(dtype_hier),
@@ -251,7 +248,6 @@ public:
         using ElemT =
             typename detail::dtype_register_element<typename InnerContainerT::value_type>::type;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
-        collectables_tree_.createNodes(path);
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable = std::make_shared<ContainerCollector<ContainerT, Sparse>>(
             collection, heartbeat_, expected_capacity, std::move(dtype_hier), default_enabled);
@@ -340,20 +336,6 @@ private:
         db_mgr->INSERT(SQL_TABLE("CollectionGlobals"), SQL_VALUES(heartbeat_));
 
         db_mgr->safeTransaction([&]() {
-            std::map<simdb::Tree::TreeNode*, int> element_db_ids;
-            collectables_tree_.dfs([&](simdb::Tree::TreeNode* node) {
-                auto parent_id = 0;
-                if (auto* parent = node->getParent())
-                {
-                    parent_id = element_db_ids.at(parent);
-                }
-                auto rec = db_mgr->INSERT(
-                    SQL_TABLE("ElementTreeNodes"),
-                    SQL_VALUES(parent_id, node->getName()));
-                element_db_ids[node] = rec->getId();
-                return true;
-            });
-
             std::map<std::string, int> clock_db_ids;
             for (const auto& [clk_name, period] : clk_periods_)
             {
@@ -373,16 +355,14 @@ private:
                 const int clock_id = clock_db_ids.at(clk_name);
                 for (const auto& path : collection->getCollectablePaths())
                 {
-                    auto* elem_node = collectables_tree_.tryGet(path, true);
-                    const int elem_tree_id = element_db_ids.at(elem_node);
                     const auto* coll = collection->getCollectable(path);
-                    (void)db_mgr->INSERT(
+                    db_mgr->INSERT(
                         SQL_TABLE("CollectableTreeNodes"),
                         SQL_VALUES(
-                            elem_tree_id,
+                            (uint32_t)coll->getID(),
+                            path,
                             clock_id,
-                            coll->collectableTypeNameForDb(),
-                            (uint32_t)coll->getID()));
+                            coll->collectableTypeNameForDb()));
                 }
             }
         });
@@ -431,7 +411,6 @@ private:
     std::map<std::string, size_t> clk_periods_;
     std::unordered_set<std::string> all_collectable_paths_;
     DataTypeInspector dtype_inspector_;
-    simdb::Tree collectables_tree_;
     std::shared_ptr<Timestamp<TimeT>> timestamp_;
     std::unique_ptr<PipelineStager<TimeT>> stager_;
 };

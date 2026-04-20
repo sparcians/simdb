@@ -111,7 +111,7 @@ public:
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs()
     {
-        nextID_() = 0;
+        nextCID_() = 0;
     }
 
 protected:
@@ -153,7 +153,7 @@ protected:
 
 private:
     /// Unique ID generator.
-    static uint16_t& nextID_()
+    static uint16_t& nextCID_()
     {
         static uint16_t counter = 0;
         if (counter == UINT16_MAX)
@@ -166,7 +166,7 @@ private:
     }
 
     /// Unique collectable ID
-    const uint16_t cid_{nextID_()};
+    const uint16_t cid_{nextCID_()};
 
     /// Collection object that owns 'this' collectable
     DomainCollection *const collection_;
@@ -209,7 +209,7 @@ public:
                     bool default_enabled = true)
         : CollectableBase(collection, heartbeat, default_enabled)
         , dtype_hierarchy_(std::move(dtype_hierarchy))
-        , minifier_(dtype_hierarchy, heartbeat)
+        //, minifier_(dtype_hierarchy, heartbeat)
     {}
 
     std::string collectableTypeNameForDb() const override
@@ -283,7 +283,8 @@ public:
 
 private:
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
-    Minifier<ValueType> minifier_;
+    //Minifier<ValueType> minifier_;
+    //TODO cnyce
 };
 
 /// Same as ScalarCollector, but supports auto-collection using a backpointer

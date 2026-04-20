@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, zlib
 from pathlib import Path
 
 # Repo root is two levels above this directory.
@@ -8,6 +8,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ARGOS_PKG = _REPO_ROOT / 'python' / 'argos'
 if str(_ARGOS_PKG) not in sys.path:
     sys.path.insert(0, str(_ARGOS_PKG))
+
+from viewer.model.data_deserializers import ByteBuffer
 
 # Arguments
 import argparse
@@ -56,8 +58,6 @@ def DumpCollectionAtTime(timestamp_id, time_point):
     rows = cursor.fetchall()[0]
     assert len(rows) == 1
 
-    import zlib
-    from viewer.model.data_deserializers import ByteBuffer
     buf = ByteBuffer(zlib.decompress(rows[0]))
 
     printer.print(f'At time point {time_point} we collected:')

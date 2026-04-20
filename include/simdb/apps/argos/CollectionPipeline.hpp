@@ -95,15 +95,13 @@ public:
         clks_tbl.addColumn("Name", dt::string_t);
         clks_tbl.addColumn("Period", dt::int32_t);
 
-        auto& elem_tns_tbl = schema.addTable("ElementTreeNodes");
-        elem_tns_tbl.addColumn("ParentId", dt::int32_t);
-        elem_tns_tbl.addColumn("Name", dt::string_t);
-
         auto& collectable_tns_tbl = schema.addTable("CollectableTreeNodes");
-        collectable_tns_tbl.addColumn("ElementTreeNodeID", dt::int32_t);
+        collectable_tns_tbl.addColumn("SerializationCID", dt::uint32_t);
+        collectable_tns_tbl.addColumn("FullPath", dt::string_t);
         collectable_tns_tbl.addColumn("ClockID", dt::int32_t);
         collectable_tns_tbl.addColumn("TypeName", dt::string_t);
-        collectable_tns_tbl.addColumn("SerializationCID", dt::uint32_t);
+        collectable_tns_tbl.ensureUnique("SerializationCID");
+        collectable_tns_tbl.unsetPrimaryKey();
 
         auto& collection_records_tbl = schema.addTable("CollectionRecords");
         collection_records_tbl.addColumn("TimestampID", dt::int32_t);

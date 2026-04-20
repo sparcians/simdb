@@ -328,7 +328,6 @@ class WidgetContainerDropTarget(wx.TextDropTarget):
         self.widget_creator = widget_creator
 
     def OnDropText(self, x, y, text):
-        import pdb; pdb.set_trace()
         widget = self.widget_container.GetWidget()
         if widget:
             current_widget_is_tool = widget.GetWidgetCreationString().find('$') == -1

@@ -1,6 +1,11 @@
-import zlib, struct, copy, re
-from enum import IntEnum
+import zlib, copy
 from viewer.gui.view_settings import DirtyReasons
+from viewer.model.data_deserializers import ByteBuffer
+from viewer.model.data_deserializers import SimpleDeserializer
+from viewer.model.data_deserializers import StringDeserializer
+from viewer.model.data_deserializers import EnumDeserializer
+from viewer.model.data_deserializers import ContigContainerDeserializer
+from viewer.model.data_deserializers import SparseContainerDeserializer
 
 class DataRetriever:
     def __init__(self, frame, db, simhier, dtype_inspector):
@@ -152,7 +157,6 @@ class DataRetriever:
         return self._auto_colorize_column_by_struct_name.get(struct_name)
 
     def GetDeserializer(self, elem_path):
-        import pdb; pdb.set_trace()
         dtype = self._dtypes_by_elem_path[elem_path]
         return self.dtype_inspector.GetDeserializer(dtype)
 
@@ -163,9 +167,50 @@ class DataRetriever:
         return {id:0 for id in self.simhier.GetContainerIDs()}
 
     def Unpack(self, elem_path, time_range=None):
-        # TODO cnyce
+        # TODO cnyce: time range for systemwide tools
+        assert time_range is not None
+        start, end = time_range
+        assert start == end
+
+        # TODO cnyce: make this flexible for double-precision time values too
+        start = str(start).zfill(20)
+
+        cmd = f'SELECT Id FROM Timestamps WHERE Timestamp="{start}"'
+        self.cursor.execute(cmd)
+
+        timestamp_id = self.cursor.fetchone()
+        if not timestamp_id:
+            return {'TimeVals': [], 'DataVals': []}
+
+        # TODO cnyce: incorporate enabled/disabled collectables
+        cmd = f'SELECT Records FROM CollectionRecords WHERE TimestampID={timestamp_id[0]}'
+        self.cursor.execute(cmd)
+        collected_bytes = self.cursor.fetchone()
+        if not collected_bytes:
+            return {'TimeVals': [], 'DataVals': []}
+        else:
+            buf = ByteBuffer(zlib.decompress(collected_bytes[0]))
+
+        # Walk the bytes and look for the target CID.
         import pdb; pdb.set_trace()
-        return {'TimeVals': [], 'DataVals': []}
+        target_cid = self.simhier.GetCollectionID(elem_path)
+        while not buf.Done():
+            this_cid = buf.Read('H')
+            this_elem_path = self.simhier.GetElemPath(this_cid)
+            this_deserializer = self.GetDeserializer(this_elem_path)
+            if type(this_deserializer) in (SimpleDeserializer, StringDeserializer, EnumDeserializer):
+                this_cid_num_bytes = this_deserializer.GetNumBytes()
+            else:
+                assert type(this_deserializer) in (ContigContainerDeserializer, SparseContainerDeserializer)
+                this_cid_num_elems = buf.Read('H')
+                this_cid_num_bytes = this_deserializer.GetBinNumBytes() * this_cid_num_elems
+
+            if cid != target_cid:
+                buf.Jump(this_cid_num_bytes)
+            else:
+                cid_bytes = buf.Extract(this_cid_num_bytes)
+                deserialized = this_deserializer.Deserialize(cid_bytes)
+                return {'TimeVals': start, 'DataVals': deserialized}
 
     def GetAllTimeVals(self):
         return copy.deepcopy(self._time_vals)
