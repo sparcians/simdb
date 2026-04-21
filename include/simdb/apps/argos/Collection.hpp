@@ -170,24 +170,19 @@ public:
     /// lives in the simulator.
     /// \param clk_name Name of the clock this collection point belongs to. Must have already
     /// called addCollection() with this clock name.
-    /// \param default_enabled If false, remember to call enable() prior to starting collection.
-    /// \param initialize_value If true, the CollectableT will be serialized to its initial
-    /// bytes.
     /// \throw Throws if collection does not exist for the given clock.
     template <typename CollectableT>
     std::shared_ptr<AutoScalarCollector<CollectableT>> collectScalarWithAutoCollection(
         const std::string& path,
         const std::string& clk_name,
-        const CollectableT* scalar,
-        bool default_enabled = true,
-        bool initialize_value = false)
+        const CollectableT* scalar)
     {
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable = std::make_shared<AutoScalarCollector<CollectableT>>(
-            collection, heartbeat_, std::move(dtype_hier), scalar, default_enabled, initialize_value);
+            collection, heartbeat_, std::move(dtype_hier), scalar);
         collection->addCollectable(path, collectable, true /*auto collect*/);
         return collectable;
     }
@@ -196,8 +191,7 @@ public:
     template <typename CollectableT>
     std::shared_ptr<ScalarCollector<CollectableT>> collectScalarManually(
         const std::string& path,
-        const std::string& clk_name,
-        bool default_enabled = true)
+        const std::string& clk_name)
     {
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
@@ -205,7 +199,7 @@ public:
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable =
             std::make_shared<ScalarCollector<CollectableT>>(collection, heartbeat_,
-                std::move(dtype_hier), default_enabled);
+                std::move(dtype_hier));
         collection->addCollectable(path, collectable, false /*manually collect*/);
         return collectable;
     }
@@ -218,9 +212,7 @@ public:
         const std::string& path,
         const std::string& clk_name,
         const ContainerT* container,
-        size_t expected_capacity,
-        bool default_enabled = true,
-        bool initialize_value = false)
+        size_t expected_capacity)
     {
         verifyNoDupPaths_(path);
         using InnerContainerT = type_traits::remove_any_pointer_t<ContainerT>;
@@ -229,8 +221,7 @@ public:
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable = std::make_shared<AutoContainerCollector<ContainerT, Sparse>>(
-            collection, heartbeat_, container, expected_capacity, std::move(dtype_hier),
-            default_enabled, initialize_value);
+            collection, heartbeat_, container, expected_capacity, std::move(dtype_hier));
         collection->addCollectable(path, collectable, true /*auto collect*/);
         return collectable;
     }
@@ -240,8 +231,7 @@ public:
     std::shared_ptr<ContainerCollector<ContainerT, Sparse>> collectContainerManually(
         const std::string& path,
         const std::string& clk_name,
-        size_t expected_capacity,
-        bool default_enabled = true)
+        size_t expected_capacity)
     {
         verifyNoDupPaths_(path);
         using InnerContainerT = type_traits::remove_any_pointer_t<ContainerT>;
@@ -250,7 +240,7 @@ public:
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable = std::make_shared<ContainerCollector<ContainerT, Sparse>>(
-            collection, heartbeat_, expected_capacity, std::move(dtype_hier), default_enabled);
+            collection, heartbeat_, expected_capacity, std::move(dtype_hier));
         collection->addCollectable(path, collectable, false /*manually collect*/);
         return collectable;
     }

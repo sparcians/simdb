@@ -214,7 +214,9 @@ class DataRetriever:
             else:
                 cid_bytes = buf.Extract(this_cid_num_bytes)
                 deserialized = this_deserializer.Deserialize(cid_bytes)
-                return {'TimeVals': start, 'DataVals': deserialized}
+                return {'TimeVals': [start], 'DataVals': deserialized}
+
+        return {'TimeVals': [], 'DataVals': {}}
 
     def GetAllTimeVals(self):
         return copy.deepcopy(self._time_vals)

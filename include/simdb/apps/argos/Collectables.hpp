@@ -117,10 +117,9 @@ public:
     }
 
 protected:
-    CollectableBase(DomainCollection* collection, size_t heartbeat, bool default_enabled=true)
+    CollectableBase(DomainCollection* collection, size_t heartbeat)
         : collection_(collection)
         , heartbeat_(heartbeat)
-        , enabled_(default_enabled)
     {}
 
     /// Get the heartbeat value for all collection points.
@@ -207,9 +206,8 @@ public:
 
     ScalarCollector(DomainCollection* collection,
                     size_t heartbeat,
-                    std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
-                    bool default_enabled = true)
-        : CollectableBase(collection, heartbeat, default_enabled)
+                    std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
+        : CollectableBase(collection, heartbeat)
         , dtype_hierarchy_(std::move(dtype_hierarchy))
         //, minifier_(dtype_hierarchy, heartbeat)
     {}
@@ -224,24 +222,6 @@ public:
         {
             return simdb::demangle_type<ValueType>();
         }
-    }
-
-    void initializeValue(const ValueType& value)
-    {
-        //TODO cnyce
-        (void)value;
-
-        //CollectedData initial(getID());
-        //dtype_hierarchy_->writeBuffer(initial.getBuffer(), value);
-        //setInitialValue_(std::move(initial));
-    }
-
-    template <typename T>
-    std::enable_if_t<type_traits::is_any_pointer_v<T>, void>
-    initializeValue(const T& ptr)
-    {
-        assert(ptr != nullptr);
-        initializeValue(*ptr);
     }
 
     /// \brief On-demand collection, also called by auto-collecting subclass
@@ -300,18 +280,10 @@ public:
     AutoScalarCollector(DomainCollection* collection,
                         size_t heartbeat,
                         std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
-                        const ScalarT* scalar,
-                        bool default_enabled = true,
-                        bool initialize_value = false)
-        : ScalarCollector<ScalarT>(collection, heartbeat, std::move(dtype_hierarchy), default_enabled)
+                        const ScalarT* scalar)
+        : ScalarCollector<ScalarT>(collection, heartbeat, std::move(dtype_hierarchy))
         , scalar_(scalar)
-        , auto_collecting_(default_enabled)
-    {
-        if (initialize_value)
-        {
-            this->initializeValue(scalar);
-        }
-    }
+    {}
 
     /// Run auto-collection for this collectable
     void autoCollect() override
@@ -363,9 +335,8 @@ public:
     ContainerCollector(DomainCollection* collection,
                        size_t heartbeat,
                        size_t expected_capacity,
-                       std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
-                       bool default_enabled = true)
-        : ContainerCollectorBase(collection, heartbeat, default_enabled)
+                       std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
+        : ContainerCollectorBase(collection, heartbeat)
         , expected_capacity_(expected_capacity)
         , dtype_hierarchy_(std::move(dtype_hierarchy))
     {}
@@ -378,26 +349,6 @@ public:
             return base + "_sparse_capacity" + std::to_string(expected_capacity_);
         }
         return base + "_contig_capacity" + std::to_string(expected_capacity_);
-    }
-
-    template <typename T = ContainerT>
-    std::enable_if_t<!type_traits::is_any_pointer_v<T>, void>
-    initializeValue(const T& container)
-    {
-        //TODO cnyce
-        (void)container;
-
-        //CollectedData initial(getID());
-        //dtype_hierarchy_->writeBuffer(initial.getBuffer(), container);
-        //setInitialValue_(std::move(initial));
-    }
-
-    template <typename T = ContainerT>
-    std::enable_if_t<type_traits::is_any_pointer_v<T>, void>
-    initializeValue(const T& ptr)
-    {
-        assert(ptr != nullptr);
-        initializeValue(*ptr);
     }
 
     /// \brief On-demand collection, also called by auto-collecting subclass
@@ -507,20 +458,12 @@ public:
                            size_t heartbeat,
                            const ContainerT* container,
                            size_t expected_capacity,
-                           std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
-                           bool default_enabled = true,
-                           bool initialize_value = false)
+                           std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
         : ContainerCollector<ContainerT, Sparse>(
             collection, heartbeat, expected_capacity,
-            std::move(dtype_hierarchy), default_enabled)
+            std::move(dtype_hierarchy))
         , container_(container)
-        , auto_collecting_(default_enabled)
-    {
-        if (initialize_value)
-        {
-            this->initializeValue(container);
-        }
-    }
+    {}
 
     /// Run auto-collection for this collectable
     void autoCollect() override
