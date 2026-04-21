@@ -301,8 +301,8 @@ class ViewSettings:
                 self._frame.data_retriever.ApplyUserSettings(settings['DataRetriever'])
                 self._frame.inspector.ApplyUserSettings(settings['Inspector'])
                 self._frame.widget_renderer.ApplyUserSettings(settings['WidgetRenderer'])
-        except:
-            print ("Error loading user settings. Deleting settings file.")
+        except Exception as ex:
+            print (f"Error loading user settings. Deleting settings file. Error: '{ex}'")
             os.remove(settings_file)
 
     def __AskToSaveChangesToCurrentView(self, prompt):

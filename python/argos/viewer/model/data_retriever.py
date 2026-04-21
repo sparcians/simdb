@@ -32,16 +32,19 @@ class DataRetriever:
         self._cached_utiliz_sizes = {}
         self._cached_utiliz_time_val = None
 
-        self._collection_ids_by_elem_path = {}
-        for elem_path in simhier.GetElemPaths():
-            collection_id = simhier.GetCollectionID(elem_path)
-            if collection_id:
-                self._collection_ids_by_elem_path[elem_path] = collection_id
+        self._cids_by_elem_path = {}
+        self._elem_paths_by_cid = {}
+        def HandleLeaf(leaf):
+            cid = leaf.GetMeta('CID')
+            elem_path = leaf.GetPath()
+            self._cids_by_elem_path[elem_path] = cid
+            self._elem_paths_by_cid[cid] = elem_path
 
-        cursor.execute('SELECT ElementTreeNodeID,TypeName FROM CollectableTreeNodes')
+        simhier.GetTree().VisitLeaves(HandleLeaf)
+
+        cursor.execute('SELECT FullPath,TypeName FROM CollectableTreeNodes')
         self._dtypes_by_elem_path = {}
-        for elem_id, dtype in cursor.fetchall():
-            elem_path = self.simhier.GetElemPath(elem_id)
+        for elem_path, dtype in cursor.fetchall():
             self._dtypes_by_elem_path[elem_path] = dtype
 
     def IsDevDebug(self):
@@ -161,6 +164,7 @@ class DataRetriever:
         return self.dtype_inspector.GetDeserializer(dtype)
 
     def GetIterableSizesByCollectionID(self, time_val):
+        # TODO cnyce: what was this code even doing?
         if self._cached_utiliz_time_val is not None and time_val == self._cached_utiliz_time_val:
             return self._cached_utiliz_sizes
 
@@ -196,7 +200,7 @@ class DataRetriever:
         target_cid = self.simhier.GetCollectionID(elem_path)
         while not buf.Done():
             this_cid = buf.Read('H')
-            this_elem_path = self.simhier.GetElemPath(this_cid)
+            this_elem_path = self._elem_paths_by_cid[this_cid]
             this_deserializer = self.GetDeserializer(this_elem_path)
             if type(this_deserializer) in (SimpleDeserializer, StringDeserializer, EnumDeserializer):
                 this_cid_num_bytes = this_deserializer.GetNumBytes()
@@ -205,7 +209,7 @@ class DataRetriever:
                 this_cid_num_elems = buf.Read('H')
                 this_cid_num_bytes = this_deserializer.GetBinNumBytes() * this_cid_num_elems
 
-            if cid != target_cid:
+            if this_cid != target_cid:
                 buf.Jump(this_cid_num_bytes)
             else:
                 cid_bytes = buf.Extract(this_cid_num_bytes)

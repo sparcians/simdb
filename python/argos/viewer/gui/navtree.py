@@ -8,12 +8,12 @@ class NavTree(wx.TreeCtrl):
         self.simhier = frame.simhier
 
         self._root = self.AddRoot("root")
-        self._tree_items_by_db_id = {self.simhier.GetRootID(): self._root }
+        self._tree_items_by_id = {0: self._root }
         self._tree_items_by_elem_path = {}
-        self.__RecurseBuildTree(self.simhier.GetRootID())
+        self.__RecurseBuildTree(self.simhier.GetTree().GetRoot())
 
         self._leaf_elem_paths_by_tree_item = {}
-        for db_id, tree_item in self._tree_items_by_db_id.items():
+        for db_id, tree_item in self._tree_items_by_id.items():
             if not self.GetChildrenCount(tree_item):
                 self._leaf_elem_paths_by_tree_item[tree_item] = self.simhier.GetElemPath(db_id).replace('root.','')
 
@@ -36,7 +36,7 @@ class NavTree(wx.TreeCtrl):
             assert elem_path.find('root.') == -1
 
     def UpdateUtilizBitmaps(self):
-        for elem_path in self.simhier.GetElemPaths():
+        for elem_path in self.simhier.GetElemPaths(True):
             elem_id = self.simhier.GetElemID(elem_path)
             if self.simhier.GetWidgetType(elem_id) == 'QueueTable':
                 utiliz_pct = self.frame.widget_renderer.utiliz_handler.GetUtilizPct(elem_path)
@@ -45,6 +45,8 @@ class NavTree(wx.TreeCtrl):
                 self.SetItemImage(item, image_idx)
 
                 capacity = self.simhier.GetCapacityByElemPath(elem_path)
+                if capacity is None:
+                    capacity = 0 # TODO cnyce
                 size = int(capacity * utiliz_pct)
                 tooltip = '{}\nUtilization: {}% ({}/{} bins filled)'.format(elem_path, round(utiliz_pct*100), size, capacity)
             elif self.simhier.GetWidgetType(elem_id) == 'Timeseries':
@@ -62,7 +64,7 @@ class NavTree(wx.TreeCtrl):
     def ExpandAll(self):
         self.Unbind(wx.EVT_TREE_ITEM_EXPANDED)
         super(NavTree, self).ExpandAll()
-        self.UpdateUtilizBitmaps()
+        self.UpdateUtilizBitmaps() # TODO cnyce
         self.Bind(wx.EVT_TREE_ITEM_EXPANDED, self.__OnItemExpanded)
 
     def GetItemElemPath(self, item):
@@ -130,13 +132,24 @@ class NavTree(wx.TreeCtrl):
 
         return expanded_items
 
-    def __RecurseBuildTree(self, parent_id):
-        for child_id in self.simhier.GetChildIDs(parent_id):
-            child_name = self.simhier.GetName(child_id)
-            child = self.AppendItem(self._tree_items_by_db_id[parent_id], child_name)
-            self._tree_items_by_db_id[child_id] = child
+    def __RecurseBuildTree(self, node):
+        if node is self.simhier.GetTree().GetRoot():
+            for child in node.GetChildren():
+                self.__RecurseBuildTree(child)
+        else:
+            if node.GetParent():
+                parent_id = node.GetParent().GetID()
+            else:
+                parent_id = 0
+
+            child_name = node.GetName()
+            child_id = node.GetID()
+            child = self.AppendItem(self._tree_items_by_id[parent_id], child_name)
+            self._tree_items_by_id[child_id] = child
             self._tree_items_by_elem_path[self.simhier.GetElemPath(child_id)] = child
-            self.__RecurseBuildTree(child_id)
+
+            for child in node.GetChildren():
+                self.__RecurseBuildTree(child)
 
     def __OnRightClick(self, event):
         item = self.HitTest(event.GetPosition())
