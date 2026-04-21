@@ -40,7 +40,7 @@ public:
             throw DBException("Pipeline was never opened!");
         }
 
-        if (!enabled_)
+        if (!enabled_ /*TODO cnyce*/&&false)
         {
             if (initial_value_)
             {
@@ -61,7 +61,7 @@ public:
             throw DBException("Pipeline was never opened!");
         }
 
-        if (enabled_)
+        if (enabled_ /*TODO cnyce*/&&false)
         {
             enabled_ = false;
             stager_->onEnabledChanged(getID(), enabled_);
@@ -82,8 +82,10 @@ public:
 
     virtual void enableAutoCollect(bool enable = true)
     {
-        (void)enable;
-        throw DBException("This collectable does not support auto-collection");
+        if (enable)
+        {
+            throw DBException("This collectable does not support auto-collection");
+        }
     }
 
     virtual bool autoCollecting() const

@@ -96,8 +96,8 @@ public:
         clks_tbl.addColumn("Period", dt::int32_t);
 
         auto& collectable_tns_tbl = schema.addTable("CollectableTreeNodes");
-        collectable_tns_tbl.addColumn("FullPath", dt::string_t);
         collectable_tns_tbl.addColumn("SerializationCID", dt::uint32_t);
+        collectable_tns_tbl.addColumn("FullPath", dt::string_t);
         collectable_tns_tbl.addColumn("ClockID", dt::int32_t);
         collectable_tns_tbl.addColumn("TypeName", dt::string_t);
         collectable_tns_tbl.ensureUnique("SerializationCID");
