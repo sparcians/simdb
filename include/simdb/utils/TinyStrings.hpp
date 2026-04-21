@@ -49,8 +49,6 @@ public:
                 (*map_)[str] = id;
             }
         }
-
-        inserter_ = db_mgr->prepareINSERT(SQL_TABLE("TinyStringIDs"));
     }
 
     /// Add or get a string ID for the given string.
@@ -121,9 +119,10 @@ public:
                 lock.lock();
             }
 
+            auto inserter = db_mgr_->prepareINSERT(SQL_TABLE("TinyStringIDs"));
             for (const auto& [string_id, string_val] : unserialized_map_)
             {
-                inserter_->createRecordWithColValues(string_val, string_id);
+                inserter->createRecordWithColValues(string_val, string_id);
             }
 
             unserialized_map_.clear();
@@ -183,7 +182,6 @@ private:
     unserialized_string_map_t unserialized_map_;
 
     DatabaseManager *const db_mgr_;
-    std::unique_ptr<PreparedINSERT> inserter_;
     mutable std::mutex mutex_;
 };
 
