@@ -28,7 +28,7 @@ class ByteBuffer:
         self._end_idx = len(data_bytes)
         self._data_bytes = data_bytes
 
-    def Read(self, fmt):
+    def Read(self, fmt, advance=True):
         if fmt in UNPACK_FORMATS:
             fmt = UNPACK_FORMATS[fmt]
         nbytes = struct.calcsize(fmt)
@@ -39,8 +39,12 @@ class ByteBuffer:
         if len(fmt) == 1:
             val = val[0]
 
-        self._read_idx += nbytes
+        if advance:
+            self._read_idx += nbytes
         return val
+
+    def Peek(self, fmt):
+        return self.Read(fmt, advance=False)
 
     def Jump(self, num_bytes):
         assert self._read_idx + num_bytes <= self._end_idx
@@ -164,6 +168,35 @@ class SimpleDeserializer:
         val = buf.Read(self._fmt)
         return self._converter(val)
 
+    class ReplayerHead:
+        def __init__(self, deserializer, cid_bytes):
+            self.deserializer = deserializer
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
+    class ReplayerDelta:
+        def __init__(self, prev, cid_bytes):
+            self.prev = prev
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        @property
+        def deserializer(self):
+            assert self.prev
+            return self.prev.deserializer
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
 # This class deserializes string types.
 class StringDeserializer:
     def __init__(self, tiny_strings):
@@ -178,6 +211,35 @@ class StringDeserializer:
         buf = ByteBuffer.CreateFrom(data_bytes)
         string_id = buf.Read('I')
         return self._tiny_strings.GetString(string_id, must_exist=True)
+
+    class ReplayerHead:
+        def __init__(self, deserializer, cid_bytes):
+            self.deserializer = deserializer
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
+    class ReplayerDelta:
+        def __init__(self, prev, cid_bytes):
+            self.prev = prev
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        @property
+        def deserializer(self):
+            assert self.prev
+            return self.prev.deserializer
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
 
 # This class deserializes enum types.
 class EnumDeserializer:
@@ -194,11 +256,43 @@ class EnumDeserializer:
         enum_val = int(enum_val)
         return self._enum_map[enum_val]
 
+    class ReplayerHead:
+        def __init__(self, deserializer, cid_bytes):
+            self.deserializer = deserializer
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
+    class ReplayerDelta:
+        def __init__(self, prev, cid_bytes):
+            self.prev = prev
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        @property
+        def deserializer(self):
+            assert self.prev
+            return self.prev.deserializer
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
 # This class deserializes contiguous container types.
 class ContigContainerDeserializer:
     def __init__(self, bin_deserializer, capacity):
         self._bin_deserializer = bin_deserializer
         self._capacity = capacity
+
+    def GetCapacity(self):
+        return self._capacity
 
     def GetAllFieldNames(self):
         return self._bin_deserializer.GetAllFieldNames()
@@ -225,11 +319,43 @@ class ContigContainerDeserializer:
 
         return container
 
+    class ReplayerHead:
+        def __init__(self, deserializer, cid_bytes):
+            self.deserializer = deserializer
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
+    class ReplayerDelta:
+        def __init__(self, prev, cid_bytes):
+            self.prev = prev
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        @property
+        def deserializer(self):
+            assert self.prev
+            return self.prev.deserializer
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
 # This class deserializes sparse container types.
 class SparseContainerDeserializer:
     def __init__(self, bin_deserializer, capacity):
         self._bin_deserializer = bin_deserializer
         self._capacity = capacity
+
+    def GetCapacity(self):
+        return self._capacity
 
     def GetAllFieldNames(self):
         return self._bin_deserializer.GetAllFieldNames()
@@ -263,6 +389,35 @@ class SparseContainerDeserializer:
 
         return container
 
+    class ReplayerHead:
+        def __init__(self, deserializer, cid_bytes):
+            self.deserializer = deserializer
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
+    class ReplayerDelta:
+        def __init__(self, prev, cid_bytes):
+            self.prev = prev
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        @property
+        def deserializer(self):
+            assert self.prev
+            return self.prev.deserializer
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
 # This class deserializes struct types.
 class StructDeserializer:
     def __init__(self, struct_defn, inspector, tiny_strings):
@@ -273,10 +428,64 @@ class StructDeserializer:
         assert self._field_deserializers
         assert self._flattened_field_names
 
+    def GetAllFieldNames(self):
+        return copy.deepcopy(self._flattened_field_names)
+
+    def GetVisibleFieldNames(self):
+        # TODO cnyce
+        return self.GetAllFieldNames()
+
+    def GetNumBytes(self):
+        num_bytes = 0
+        for fds in self._field_deserializers.values():
+            num_bytes += fds.GetNumBytes()
+        return num_bytes
+
+    def Deserialize(self, data_bytes):
+        buf = ByteBuffer.CreateFrom(data_bytes)
+        deserialized = OrderedDict()
+
+        for field_name, deserializer in self._field_deserializers.items():
+            deserialized[field_name] = deserializer.Deserialize(buf)
+
+        return deserialized
+
+    class ReplayerHead:
+        def __init__(self, deserializer, cid_bytes):
+            self.deserializer = deserializer
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
+    class ReplayerDelta:
+        def __init__(self, prev, cid_bytes):
+            self.prev = prev
+            self.cid_bytes = cid_bytes
+            self.unpacked = None
+
+        @property
+        def deserializer(self):
+            assert self.prev
+            return self.prev.deserializer
+
+        def Unpack(self):
+            if not self.unpacked:
+                self.unpacked = self.deserializer.Deserialize(self.cid_bytes)
+
+            return self.unpacked
+
     @staticmethod
     def __RecurseFindCollectableFields(struct_defn, inspector, tiny_strings, field_deserializers, flattened_field_names):
         for field in struct_defn.children:
-            assert not field.name or field.name not in field_deserializers
+            if field.name and field.name in field_deserializers:
+                # DataType metadata keeps first field instance by name.
+                # Ignore subsequent duplicates for backward compatibility.
+                continue
             if field.name:
                 flattened_field_names.append(field.name)
             if field.kind == 'pod' and field.type_name != 'string':
@@ -289,19 +498,3 @@ class StructDeserializer:
                 StructDeserializer.__RecurseFindCollectableFields(field, inspector, tiny_strings, field_deserializers, flattened_field_names)
             else:
                 raise ValueError(f'Unknown field data type: {field.kind}')
-
-    def GetAllFieldNames(self):
-        return copy.deepcopy(self._flattened_field_names)
-
-    def GetVisibleFieldNames(self):
-        # TODO cnyce
-        return self.GetAllFieldNames()
-
-    def Deserialize(self, data_bytes):
-        buf = ByteBuffer.CreateFrom(data_bytes)
-        deserialized = OrderedDict()
-
-        for field_name, deserializer in self._field_deserializers.items():
-            deserialized[field_name] = deserializer.Deserialize(buf)
-
-        return deserialized

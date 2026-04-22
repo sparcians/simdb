@@ -50,11 +50,18 @@ struct EnumDescriptor<InstType>
 class Instruction
 {
 private:
+    uint32_t uid_{nextUID_()};
     InstType type_ = InstType::NO_OP;
     uint64_t opcode_ = 0;
     std::string mnemonic_;
     uint32_t csr_ = 0;
     bool last_inst_ = 0;
+
+    static uint32_t nextUID_()
+    {
+        static uint32_t uid = 100;
+        return uid++;
+    }
 
     template <typename T>
     void compareAndAdvance_(const char*& theirs, const T& mine, simdb::TinyStrings<>* tiny_strings) const
@@ -103,6 +110,7 @@ private:
     friend std::ostream& operator<<(std::ostream&, const Instruction&);
 
 public:
+    uint32_t getUID() const { return uid_; }
     InstType getType() const { return type_; }
     uint64_t getOpcode() const { return opcode_; }
     const std::string& getMnemonic() const { return mnemonic_; }
@@ -171,6 +179,7 @@ public:
     class ArgosCollector : public simdb::collection::ArgosCollectorBase<Instruction>
     {
     public:
+        ARGOS_COLLECT(uid,      &Instruction::getUID, "Unique ID");
         ARGOS_COLLECT(type,     &Instruction::getType, "Instruction type");
         ARGOS_COLLECT(opcode,   &Instruction::getOpcode, "Opcode");
         ARGOS_COLLECT(mnemonic, &Instruction::getMnemonic, "Mnemonic");
@@ -871,11 +880,19 @@ namespace simdb::collection::detail {
 
 class Unit
 {
+    uint32_t uid_{nextUID_()};
     uint64_t foo_ = 0;
     double bar_ = 0;
     SharedPtr<Instruction> inst_{Instruction::newRandom()};
 
+    static uint32_t nextUID_()
+    {
+        static uint32_t uid = UINT32_MAX - 100;
+        return uid--;
+    }
+
 public:
+    uint32_t getUID() const { return uid_; }
     uint64_t getFoo() const { return foo_; }
     double getBar() const { return bar_; }
     SharedPtr<Instruction> getInstPtr() const { return inst_; }
@@ -889,6 +906,7 @@ public:
 
     class ArgosCollector : public simdb::collection::ArgosCollectorBase<Unit>
     {
+        ARGOS_COLLECT(uid, &Unit::getUID);
         ARGOS_COLLECT(foo, &Unit::getFoo);
         ARGOS_COLLECT(bar, &Unit::getBar);
         ARGOS_FLATTEN(     &Unit::getInstPtr);

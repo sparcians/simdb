@@ -170,38 +170,102 @@ class DataRetriever:
 
         return {id:0 for id in self.simhier.GetContainerIDs()}
 
-    def Unpack(self, elem_path, time_range=None):
-        # TODO cnyce: time range for systemwide tools
-        assert time_range is not None
+    def Unpack(self, elem_path, time_range):
+        timestamps = []
+
+        cmd1 = 'SELECT Id,Timestamp FROM Timestamps '
+        assert type(time_range) in (tuple, list)
+        assert len(time_range) == 2
+
         start, end = time_range
-        assert start == end
+        if type(start) in (int, str):
+            start = str(start).zfill(20)
+            end = str(end).zfill(20)
+            start = f'"{start}"'
+            end = f'"{end}"'
 
-        # TODO cnyce: make this flexible for double-precision time values too
-        start = str(start).zfill(20)
+        cmd1 += f'WHERE Timestamp <= {start} '
+        cmd1 += f'ORDER BY Timestamp DESC LIMIT {self._heartbeat}'
 
-        cmd = f'SELECT Id FROM Timestamps WHERE Timestamp="{start}"'
-        self.cursor.execute(cmd)
+        cmd2 = 'SELECT Id,Timestamp FROM Timestamps '
+        cmd2 += f'WHERE Timestamp > {start} AND Timestamp <= {end}'
 
-        timestamp_id = self.cursor.fetchone()
-        if not timestamp_id:
-            return {'TimeVals': [], 'DataVals': []}
+        self.cursor.execute(cmd1)
+        for timestamp_id, timestamp in self.cursor.fetchall():
+            timestamps.append((timestamp_id, timestamp))
+        timestamps.reverse()
 
-        # TODO cnyce: incorporate enabled/disabled collectables
-        cmd = f'SELECT Records FROM CollectionRecords WHERE TimestampID={timestamp_id[0]}'
-        self.cursor.execute(cmd)
-        collected_bytes = self.cursor.fetchone()
-        if not collected_bytes:
-            return {'TimeVals': [], 'DataVals': []}
-        else:
-            buf = ByteBuffer(zlib.decompress(collected_bytes[0]))
+        self.cursor.execute(cmd2)
+        for timestamp_id, timestamp in self.cursor.fetchall():
+            timestamps.append((timestamp_id, timestamp))
 
-        # Walk the bytes and look for the target CID.
+        unpacked = {'TimeVals': [], 'DataVals': []}
+        if not timestamps:
+            return unpacked
+
+        replayer = Replayer(self, self._elem_paths_by_cid)
+        for timestamp_id, timestamp in timestamps:
+            cmd = 'SELECT Records,EnabledCIDs,DisabledCIDs FROM CollectionRecords '
+            cmd += f'WHERE TimestampID={timestamp_id}'
+            self.cursor.execute(cmd)
+
+            for blob, en_cids, dis_cids in self.cursor.fetchall():
+                replayer.Replay(timestamp, blob, en_cids, dis_cids)
+
+        for timestamp_id, timestamp in timestamps:
+            if type(timestamp) in (int, str):
+                timestamp = str(timestamp).zfill(20)
+            if timestamp >= start and timestamp <= end:
+                data_at_time = replayer.GetDataAtTime(timestamp, elem_path)
+                if data_at_time:
+                    if isinstance(timestamp, str):
+                        timestamp = int(timestamp)
+                    unpacked['TimeVals'].append(timestamp)
+                    unpacked['DataVals'].append(data_at_time)
+                else:
+                    break
+
+        return unpacked
+
+    def GetAllTimeVals(self):
+        return copy.deepcopy(self._time_vals)
+
+class Replayer:
+    def __init__(self, data_retriever, elem_paths_by_cid):
+        self.data_retriever = data_retriever
+        self.elem_paths_by_cid = elem_paths_by_cid
+
+        # Build a data structure like this:
+        #
+        # {
+        #   'path.to.foo': [
+        #     (100, Node(blob)),
+        #     (101, Node(blob)),
+        #     ...
+        #   ],
+        #   'path.to.bar': [
+        #     (100, Node(blob)),
+        #     (101, Node(blob)),
+        #     ...
+        #   ]
+        # }
+        self.replayed = {}
+
+    def Replay(self, timestamp, blob, enabled_cids, disabled_cids):
         import pdb; pdb.set_trace()
-        target_cid = self.simhier.GetCollectionID(elem_path)
+        # This blob first needs to be decompressed
+        blob = zlib.decompress(blob)
+
+        # The blob holds data in this format:
+        #   [cid][bytes][cid][bytes][cid][bytes]...
+        buf = ByteBuffer(blob)
         while not buf.Done():
             this_cid = buf.Read('H')
-            this_elem_path = self._elem_paths_by_cid[this_cid]
-            this_deserializer = self.GetDeserializer(this_elem_path)
+            this_elem_path = self.elem_paths_by_cid[this_cid]
+            if this_elem_path.find('LoadStorePipeline') != -1:
+                import pdb; pdb.set_trace()
+            this_deserializer = self.data_retriever.GetDeserializer(this_elem_path)
+
             if type(this_deserializer) in (SimpleDeserializer, StringDeserializer, EnumDeserializer):
                 this_cid_num_bytes = this_deserializer.GetNumBytes()
             else:
@@ -209,14 +273,18 @@ class DataRetriever:
                 this_cid_num_elems = buf.Read('H')
                 this_cid_num_bytes = this_deserializer.GetBinNumBytes() * this_cid_num_elems
 
-            if this_cid != target_cid:
-                buf.Jump(this_cid_num_bytes)
+            cid_bytes = buf.Extract(this_cid_num_bytes)
+            if this_elem_path not in self.replayed:
+                head = this_deserializer.ReplayerHead(this_deserializer, cid_bytes)
+                if head:
+                    self.replayed[this_elem_path] = [(timestamp, head)]
             else:
-                cid_bytes = buf.Extract(this_cid_num_bytes)
-                deserialized = this_deserializer.Deserialize(cid_bytes)
-                return {'TimeVals': [start], 'DataVals': deserialized}
+                prev = self.replayed[this_elem_path][-1][1]
+                delta = this_deserializer.ReplayerDelta(prev, cid_bytes)
+                self.replayed[this_elem_path].append((timestamp, delta))
 
-        return {'TimeVals': [], 'DataVals': {}}
-
-    def GetAllTimeVals(self):
-        return copy.deepcopy(self._time_vals)
+    def GetDataAtTime(self, timestamp, elem_path):
+        nodes = self.replayed[this_elem_path]
+        for node_timestamp, node in nodes:
+            if node_timestamp == timestamp:
+                return node.Unpack()

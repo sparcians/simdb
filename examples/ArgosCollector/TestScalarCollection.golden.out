@@ -46,34 +46,34 @@ CID 1: 4
 CID 2: foo
 CID 3: MEM
 CID 4: True
-CID 5: OrderedDict([('type', 'ILLEGAL'), ('opcode', 846930886), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
+CID 5: OrderedDict([('uid', 100), ('type', 'ILLEGAL'), ('opcode', 846930886), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
 At time point 2 we collected:
 CID 1: 5
 CID 2: bar
 CID 3: NO_OP
 CID 4: False
-CID 5: OrderedDict([('type', 'MEM'), ('opcode', 424238335), ('mnemonic', 'addi'), ('csr', 0), ('last', False)])
+CID 5: OrderedDict([('uid', 101), ('type', 'MEM'), ('opcode', 424238335), ('mnemonic', 'addi'), ('csr', 0), ('last', False)])
 At time point 3 we collected:
 CID 1: 6
 CID 2: fiz
 CID 3: MEM
 CID 4: True
-CID 5: OrderedDict([('type', 'MEM'), ('opcode', 1189641421), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
+CID 5: OrderedDict([('uid', 102), ('type', 'MEM'), ('opcode', 1189641421), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
 At time point 4 we collected:
 CID 1: 7
 CID 2: biz
 CID 3: ILLEGAL
 CID 4: False
-CID 5: OrderedDict([('type', 'CSR'), ('opcode', 1102520059), ('mnemonic', 'b'), ('csr', 70), ('last', False)])
+CID 5: OrderedDict([('uid', 103), ('type', 'CSR'), ('opcode', 1102520059), ('mnemonic', 'b'), ('csr', 70), ('last', False)])
 At time point 5 we collected:
 CID 1: 8
 CID 2: fuz
 CID 3: ILLEGAL
 CID 4: True
-CID 5: OrderedDict([('type', 'CSR'), ('opcode', 304089172), ('mnemonic', 'addi'), ('csr', 27), ('last', False)])
+CID 5: OrderedDict([('uid', 104), ('type', 'CSR'), ('opcode', 304089172), ('mnemonic', 'addi'), ('csr', 27), ('last', False)])
 At time point 6 we collected:
 CID 1: 9
 CID 2: buz
 CID 3: CSR
 CID 4: False
-CID 5: OrderedDict([('type', 'ILLEGAL'), ('opcode', 1726956429), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
+CID 5: OrderedDict([('uid', 105), ('type', 'ILLEGAL'), ('opcode', 1726956429), ('mnemonic', 'li'), ('csr', 0), ('last', False)])

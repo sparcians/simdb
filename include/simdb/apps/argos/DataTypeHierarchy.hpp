@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -352,6 +353,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         node.kind = NodeKind::Struct;
 
         std::vector<std::string> active_struct_stack{node.type_name};
+        std::unordered_set<std::string> seen_field_names;
 
         auto populate_children = [&](DataTypeNode& parent,
                                      const auto& fields,
@@ -363,10 +365,22 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                 {
                     continue;
                 }
+                const std::string field_name = field->getName();
+                if (!field_name.empty() &&
+                    seen_field_names.find(field_name) != seen_field_names.end())
+                {
+                    // Keep the first field with a given name and suppress all later
+                    // duplicates, including flattened nested fields.
+                    continue;
+                }
+                if (!field_name.empty())
+                {
+                    seen_field_names.insert(field_name);
+                }
 
                 auto child = std::make_unique<DataTypeNode>();
                 child->parent = &parent;
-                child->field_name = field->getName();
+                child->field_name = field_name;
                 child->description = field->getDescription();
                 child->type_name = field->getTypeName();
                 child->source_field = const_cast<void*>(static_cast<const void*>(field));
