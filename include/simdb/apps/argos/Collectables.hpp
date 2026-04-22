@@ -209,7 +209,7 @@ public:
                     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
         : CollectableBase(collection, heartbeat)
         , dtype_hierarchy_(std::move(dtype_hierarchy))
-        //, minifier_(dtype_hierarchy, heartbeat)
+        , minifier_(dtype_hierarchy_, heartbeat)
     {}
 
     std::string collectableTypeNameForDb() const override
@@ -237,8 +237,14 @@ public:
         if (enabled())
         {
             CollectedData collected(getID());
-            dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
-            //minifier_.minifyAndAppend(value, collected.getBuffer());
+            if constexpr (detail::has_argos_collector_v<ValueType>)
+            {
+                minifier_.minifyAndAppend(collected.getBuffer(), value);
+            }
+            else
+            {
+                dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
+            }
             stage_(std::move(collected));
         }
     }
@@ -265,8 +271,7 @@ public:
 
 private:
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
-    //Minifier<ValueType> minifier_;
-    //TODO cnyce
+    Minifier<ValueType> minifier_;
 };
 
 /// Same as ScalarCollector, but supports auto-collection using a backpointer
@@ -338,7 +343,11 @@ public:
                        std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
         : ContainerCollectorBase(collection, heartbeat)
         , expected_capacity_(expected_capacity)
-        , dtype_hierarchy_(std::move(dtype_hierarchy))
+        , minifier_(
+            std::move(dtype_hierarchy),
+            heartbeat,
+            expected_capacity,
+            simdb::demangle_type<ValueType>())
     {}
 
     std::string collectableTypeNameForDb() const override
@@ -366,46 +375,9 @@ public:
         }
 
         CollectedData collected(getID());
-        auto& buffer = collected.getBuffer();
-
         auto num_elements = getNumElements<T, Sparse>(container);
-        buffer << num_elements;
         max_size_collected_ = std::max(max_size_collected_, num_elements);
-
-        uint16_t bin_idx = 0;
-        for (auto it = container.begin(), end = container.end(); it != end; ++it)
-        {
-            bool valid = false;
-            if constexpr (type_traits::is_collectable_stl_v<std::remove_cv_t<T>>)
-            {
-                if (*it)
-                {
-                    valid = true;
-                }
-            }
-            else
-            {
-                if (it.isValid())
-                {
-                    valid = true;
-                }
-            }
-
-            if (valid)
-            {
-                if (Sparse)
-                {
-                    buffer << bin_idx;
-                }
-                dtype_hierarchy_->writeBuffer(buffer, *it);
-            }
-            else if (!Sparse)
-            {
-                break;
-            }
-
-            ++bin_idx;
-        }
+        minifier_.minifyAndAppend(collected.getBuffer(), container);
 
         stage_(std::move(collected));
     }
@@ -439,7 +411,11 @@ protected:
     const size_t expected_capacity_;
 
 private:
-    std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
+    using MinifierType = std::conditional_t<
+        Sparse,
+        SparseContainerMinifier<InnerContainerT>,
+        ContigContainerMinifier<InnerContainerT>>;
+    MinifierType minifier_;
     uint16_t max_size_collected_ = 0;
 };
 

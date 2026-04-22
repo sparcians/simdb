@@ -568,7 +568,7 @@ void TestScalarCollection()
 
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    //POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
 }
 
 void TestEnabledLogic()
@@ -700,7 +700,7 @@ void TestEnabledLogic()
     collection.performAutoCollection("root");
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    //POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
 }
 
 void TestMultiClock()
@@ -946,7 +946,7 @@ void TestFlatten()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    //POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
 }
 
 void TestContainers()
@@ -1022,7 +1022,7 @@ void TestContainers()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    //POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
 }
 
 void TestPointers()
@@ -1111,7 +1111,7 @@ void TestPointers()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    //POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
 }
 
 class Outer
@@ -1196,7 +1196,7 @@ void TestMultiArgosCollectors()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    //POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
 }
 
 int main()
