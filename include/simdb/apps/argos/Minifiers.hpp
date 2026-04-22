@@ -106,9 +106,10 @@ private:
     std::vector<char> last_sent_bytes_;
     std::vector<char> cur_extracted_bytes_;
 
+    /// Heartbeat is validated non-zero in \c Collection<TimeT> ctor. \c heartbeat_ == 1 ⇒ FULL every collect.
     bool shouldWriteFull_() const
     {
-        return heartbeat_ > 0 && (cycles_since_last_full_ + 1) >= heartbeat_;
+        return (cycles_since_last_full_ + 1) % heartbeat_ == 0;
     }
 };
 
@@ -296,9 +297,10 @@ private:
         return MinifierAction::FULL;
     }
 
+    /// Heartbeat is validated non-zero in \c Collection<TimeT> ctor. \c heartbeat_ == 1 ⇒ FULL every collect.
     bool shouldWriteFull_() const
     {
-        return heartbeat_ > 0 && (cycles_since_last_full_ + 1) >= heartbeat_;
+        return (cycles_since_last_full_ + 1) % heartbeat_ == 0;
     }
 
     static size_t findSwapIndex_(
@@ -571,9 +573,10 @@ private:
         }
     }
 
+    /// Heartbeat is validated non-zero in \c Collection<TimeT> ctor. \c heartbeat_ == 1 ⇒ FULL every collect.
     bool shouldWriteFull_() const
     {
-        return heartbeat_ > 0 && (cycles_since_last_full_ + 1) >= heartbeat_;
+        return (cycles_since_last_full_ + 1) % heartbeat_ == 0;
     }
 
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
