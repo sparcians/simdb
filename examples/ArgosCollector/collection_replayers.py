@@ -12,6 +12,7 @@ import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
 from viewer.model.data_deserializers import ByteBuffer
+from viewer.model.dtype_inspector import DataTypeInspector
 
 
 def _split_container_type_name(type_name: str) -> Optional[Tuple[str, int, bool]]:
@@ -237,16 +238,54 @@ def CreateCollectableReplayer(cid: int, type_name: str, inspector: Any) -> Colle
     return ScalarRawReplayer(cid, type_name, inspector)
 
 
+def _GetDbFilePath(db_conn: Any) -> str:
+    cursor = db_conn.cursor()
+    cursor.execute("PRAGMA database_list")
+    for _, db_name, db_file in cursor.fetchall():
+        if db_name == "main" and db_file:
+            return str(db_file)
+    raise RuntimeError("Could not infer DB file path from sqlite connection")
+
+
+def CreateReplayersByCID(
+    db_conn: Any,
+    inspector: Optional[Any] = None,
+    db_file: Optional[str] = None
+) -> Dict[int, CollectableReplayerBase]:
+    if inspector is None:
+        if db_file is None:
+            db_file = _GetDbFilePath(db_conn)
+        inspector = DataTypeInspector(db_file)
+
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT TypeName,SerializationCID FROM CollectableTreeNodes")
+
+    replayers_by_cid: Dict[int, CollectableReplayerBase] = {}
+    for type_name, cid in cursor.fetchall():
+        replayers_by_cid[int(cid)] = CreateCollectableReplayer(int(cid), type_name, inspector)
+    return replayers_by_cid
+
+
 class CollectionReplaySession:
     """
     Rebuild collectable values for a requested time point by replaying only that
     time point's heartbeat window from the DB.
     """
 
-    def __init__(self, db_conn: Any, replayers_by_cid: Dict[int, CollectableReplayerBase]) -> None:
+    def __init__(
+        self,
+        db_conn: Any,
+        replayers_by_cid: Optional[Dict[int, CollectableReplayerBase]] = None,
+        inspector: Optional[Any] = None,
+        db_file: Optional[str] = None
+    ) -> None:
         self._conn = db_conn
         self._cursor = db_conn.cursor()
-        self._replayers_by_cid = replayers_by_cid
+        self._replayers_by_cid = (
+            replayers_by_cid
+            if replayers_by_cid is not None
+            else CreateReplayersByCID(db_conn, inspector=inspector, db_file=db_file)
+        )
         self._last_replayed_time_point: Optional[int] = None
         self._values_by_time_point: Dict[int, Dict[int, Any]] = {}
 

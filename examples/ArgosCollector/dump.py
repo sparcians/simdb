@@ -51,15 +51,11 @@ dtype_inspector = DataTypeInspector(db_file)
 # CID -> replayer (stateful across time points for minified collectables)
 import sqlite3
 
-from collection_replayers import CollectionReplaySession, CreateCollectableReplayer
+from collection_replayers import CollectionReplaySession, CreateReplayersByCID
 
 conn = sqlite3.connect(db_file)
 cursor = conn.cursor()
-cursor.execute("SELECT TypeName,SerializationCID FROM CollectableTreeNodes")
-
-replayers_by_cid = {}
-for type_name, cid in cursor.fetchall():
-    replayers_by_cid[cid] = CreateCollectableReplayer(cid, type_name, dtype_inspector)
+replayers_by_cid = CreateReplayersByCID(conn, inspector=dtype_inspector)
 
 replay_session = CollectionReplaySession(conn, replayers_by_cid)
 
