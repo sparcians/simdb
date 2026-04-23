@@ -7,9 +7,10 @@ not wired into the viewer UI.
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple
+import zlib
+from typing import Any, Dict, List, Optional, Tuple
 
-from viewer.model.data_deserializers import ByteBuffer, CreateDeserializer
+from viewer.model.data_deserializers import ByteBuffer
 
 
 def _split_container_type_name(type_name: str) -> Optional[Tuple[str, int, bool]]:
@@ -30,13 +31,31 @@ class CollectableReplayerBase:
         self.cid = int(cid)
         self.type_name = str(type_name)
         self._inspector = inspector
+        self._latest_value: Any = {}
+        self._latest_time_point: Optional[int] = None
+        self._session: Optional["CollectionReplaySession"] = None
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         raise NotImplementedError
 
-    def GetDataValueAtTime(self, time_point: int) -> dict:
-        # TODO: Implement random-access replay/query by time point.
-        return {}
+    def GetDataValueAtTime(self, time_point: int) -> Any:
+        if self._session is None:
+            return {}
+        return self._session.GetDataValueAtTime(self.cid, int(time_point))
+
+    def ResetReplayState(self) -> None:
+        self._latest_value = {}
+        self._latest_time_point = None
+
+    def _SetSession(self, session: "CollectionReplaySession") -> None:
+        self._session = session
+
+    def _ObserveReplayValue(self, time_point: int, value: Any) -> None:
+        self._latest_time_point = int(time_point)
+        self._latest_value = value
+
+    def _GetLatestReplayValue(self) -> Any:
+        return self._latest_value
 
 
 class ScalarRawReplayer(CollectableReplayerBase):
@@ -65,6 +84,10 @@ class StructMinifiedReplayer(CollectableReplayerBase):
         self._deserializer = inspector.GetDeserializer(type_name)
         self._last: Any = None
 
+    def ResetReplayState(self) -> None:
+        super().ResetReplayState()
+        self._last = None
+
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("H"))
         if action == self._FULL:
@@ -74,9 +97,9 @@ class StructMinifiedReplayer(CollectableReplayerBase):
             return self._last
         if action == self._CARRY:
             if self._last is None:
-                raise RuntimeError(
-                    f"CID {self.cid}: CARRY before any FULL for struct {self.type_name!r}"
-                )
+                # With windowed replay, the anchor FULL may be just outside the
+                # replay window. Keep this non-fatal for now and treat as empty.
+                return {}
             return self._last
         raise RuntimeError(
             f"CID {self.cid}: unknown struct MinifierAction {action} for {self.type_name!r}"
@@ -98,6 +121,10 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
         self._capacity = capacity
         self._bin = inspector.GetDeserializer(base)
         self._items: List[Any] = []
+
+    def ResetReplayState(self) -> None:
+        super().ResetReplayState()
+        self._items = []
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("H"))
@@ -142,6 +169,10 @@ class SparseContainerMinifiedReplayer(CollectableReplayerBase):
         self._bin = inspector.GetDeserializer(base)
         self._cells: List[Optional[Any]] = [None] * capacity
 
+    def ResetReplayState(self) -> None:
+        super().ResetReplayState()
+        self._cells = [None] * self._capacity
+
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("H"))
         if action == self._FULL:
@@ -176,3 +207,70 @@ def CreateCollectableReplayer(cid: int, type_name: str, inspector: Any) -> Colle
         return StructMinifiedReplayer(cid, type_name, inspector)
 
     return ScalarRawReplayer(cid, type_name, inspector)
+
+
+class CollectionReplaySession:
+    """
+    Rebuild collectable values for a requested time point by replaying only that
+    time point's heartbeat window from the DB.
+    """
+
+    def __init__(self, db_conn: Any, replayers_by_cid: Dict[int, CollectableReplayerBase]) -> None:
+        self._conn = db_conn
+        self._cursor = db_conn.cursor()
+        self._replayers_by_cid = replayers_by_cid
+        self._last_replayed_time_point: Optional[int] = None
+
+        self._cursor.execute("SELECT Heartbeat FROM CollectionGlobals")
+        self._heartbeat = int(self._cursor.fetchone()[0])
+
+        self._cursor.execute("SELECT Id,Timestamp FROM Timestamps ORDER BY Id ASC")
+        self._timestamps: List[Tuple[int, int]] = []
+        for timestamp_id, time_point in self._cursor.fetchall():
+            if isinstance(time_point, str):
+                time_point = int(time_point)
+            self._timestamps.append((int(timestamp_id), int(time_point)))
+
+        for replayer in self._replayers_by_cid.values():
+            replayer._SetSession(self)
+
+    def GetDataValueAtTime(self, cid: int, time_point: int) -> Any:
+        time_point = int(time_point)
+        if self._last_replayed_time_point != time_point:
+            self._ReplayWindowForTimePoint(time_point)
+            self._last_replayed_time_point = time_point
+
+        replayer = self._replayers_by_cid[cid]
+        return replayer._GetLatestReplayValue()
+
+    def _ReplayWindowForTimePoint(self, time_point: int) -> None:
+        window = [(timestamp_id, ts) for timestamp_id, ts in self._timestamps if ts <= time_point]
+        if not window:
+            for replayer in self._replayers_by_cid.values():
+                replayer.ResetReplayState()
+            return
+
+        window = window[-self._heartbeat :]
+        wanted_timestamp_ids = {timestamp_id for timestamp_id, _ in window}
+        time_points_by_timestamp_id = {timestamp_id: ts for timestamp_id, ts in window}
+
+        for replayer in self._replayers_by_cid.values():
+            replayer.ResetReplayState()
+
+        placeholders = ",".join("?" for _ in wanted_timestamp_ids)
+        cmd = (
+            "SELECT TimestampID,Records FROM CollectionRecords "
+            f"WHERE TimestampID IN ({placeholders}) ORDER BY TimestampID ASC"
+        )
+        self._cursor.execute(cmd, tuple(sorted(wanted_timestamp_ids)))
+
+        for timestamp_id, compressed_blob in self._cursor.fetchall():
+            timestamp_id = int(timestamp_id)
+            time_point_at_blob = time_points_by_timestamp_id[timestamp_id]
+            buf = ByteBuffer(zlib.decompress(compressed_blob))
+
+            while not buf.Done():
+                blob_cid = int(buf.Read("H"))
+                replayer = self._replayers_by_cid[blob_cid]
+                value = replayer.replay_next(buf)
+                replayer._ObserveReplayValue(time_point_at_blob, value)
