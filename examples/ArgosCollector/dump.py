@@ -51,13 +51,12 @@ dtype_inspector = DataTypeInspector(db_file)
 # CID -> replayer (stateful across time points for minified collectables)
 import sqlite3
 
-from viewer.model.collection_replayers import CollectionReplaySession, CreateReplayersByCID
+from viewer.model.collection_replayers import CollectionReplaySession
 
 conn = sqlite3.connect(db_file)
 cursor = conn.cursor()
-replayers_by_cid = CreateReplayersByCID(conn, inspector=dtype_inspector)
-
-replay_session = CollectionReplaySession(conn, replayers_by_cid)
+replay_session = CollectionReplaySession(db_file, dtype_inspector)
+replayers_by_cid = replay_session.replayers_by_cid
 
 # Mapping from:
 #   {

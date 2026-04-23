@@ -8,6 +8,7 @@ not wired into the viewer UI.
 from __future__ import annotations
 
 import copy
+import sqlite3
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -274,17 +275,15 @@ class CollectionReplaySession:
 
     def __init__(
         self,
-        db_conn: Any,
-        replayers_by_cid: Optional[Dict[int, CollectableReplayerBase]] = None,
-        inspector: Optional[Any] = None,
-        db_file: Optional[str] = None
+        db_file: str,
+        inspector: Any
     ) -> None:
-        self._conn = db_conn
-        self._cursor = db_conn.cursor()
-        self._replayers_by_cid = (
-            replayers_by_cid
-            if replayers_by_cid is not None
-            else CreateReplayersByCID(db_conn, inspector=inspector, db_file=db_file)
+        self._conn = sqlite3.connect(db_file)
+        self._cursor = self._conn.cursor()
+        self._replayers_by_cid = CreateReplayersByCID(
+            self._conn,
+            inspector=inspector,
+            db_file=db_file
         )
         self._last_replayed_time_point: Optional[int] = None
         self._values_by_time_point: Dict[int, Dict[int, Any]] = {}
@@ -301,6 +300,15 @@ class CollectionReplaySession:
 
         for replayer in self._replayers_by_cid.values():
             replayer._SetSession(self)
+
+    @property
+    def replayers_by_cid(self) -> Dict[int, CollectableReplayerBase]:
+        try:
+            return copy.deepcopy(self._replayers_by_cid)
+        except Exception:
+            # Some internals (e.g., active sqlite handles referenced via session objects)
+            # are not deepcopy-able in practice.
+            return dict(self._replayers_by_cid)
 
     def GetDataValueAtTime(self, cid: int, time_point: int) -> Any:
         time_point = int(time_point)
