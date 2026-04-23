@@ -974,7 +974,7 @@ void TestContainers()
     TEST_METHOD_INIT;
 
     uint64_t tick = 0;
-    size_t heartbeat = 3;
+    size_t heartbeat = 100;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
@@ -983,12 +983,12 @@ void TestContainers()
 
     using ContigQ = std::vector<std::shared_ptr<Instruction>>;
     ContigQ contig_q;
-    collection.collectContainerWithAutoCollection<ContigQ, false>(
+    auto contig_collector = collection.collectContainerWithAutoCollection<ContigQ, false>(
         "contig", "root", &contig_q, capacity);
 
     using SparseQ = std::vector<SharedPtr<Instruction>>;
     SparseQ sparse_q;
-    collection.collectContainerWithAutoCollection<SparseQ, true>(
+    auto sparse_collector = collection.collectContainerWithAutoCollection<SparseQ, true>(
         "sparse", "root", &sparse_q, capacity);
 
     auto randomize = [&]()
@@ -1041,8 +1041,53 @@ void TestContainers()
         step();
     }
 
+    // Deterministic action-coverage tail.
+    auto collect_next_tick = [&]()
+    {
+        ++tick;
+        collect();
+    };
+
+    // Baseline FULL
+    contig_q.clear();
+    contig_q.push_back(Instruction::genRandom());
+    contig_q.push_back(Instruction::genRandom());
+    contig_q.push_back(Instruction::genRandom());
+    sparse_q.clear();
+    sparse_q.resize(capacity);
+    sparse_q[4] = SharedPtr<Instruction>(Instruction::newRandom());
+    sparse_q[7] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick();
+
+    // CARRY
+    collect_next_tick();
+
+    // Contig SWAP + Sparse EXCHANGE
+    contig_q[1] = Instruction::genRandom();
+    sparse_q[4] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick();
+
+    // Contig ARRIVE
+    contig_q.push_back(Instruction::genRandom());
+    collect_next_tick();
+
+    // Contig DEPART + Sparse REMOVE
+    contig_q.erase(contig_q.begin());
+    sparse_q[7] = SharedPtr<Instruction>();
+    collect_next_tick();
+
+    // Contig BOOKENDS
+    contig_q.erase(contig_q.begin());
+    contig_q.push_back(Instruction::genRandom());
+    collect_next_tick();
+
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    DumpCollection(app_mgr.getDatabaseManager(), TEST_FILENAME);
+    if (std::filesystem::exists(GOLDEN_FILENAME)) {
+        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME));
+    }
+    EXPECT_TRUE(contig_collector->minifierSawAllActions());
+    EXPECT_TRUE(sparse_collector->minifierSawAllActions());
 }
 
 void TestPointers()
