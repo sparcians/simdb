@@ -7,6 +7,7 @@ not wired into the viewer UI.
 """
 from __future__ import annotations
 
+import copy
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -247,6 +248,7 @@ class CollectionReplaySession:
         self._cursor = db_conn.cursor()
         self._replayers_by_cid = replayers_by_cid
         self._last_replayed_time_point: Optional[int] = None
+        self._values_by_time_point: Dict[int, Dict[int, Any]] = {}
 
         self._cursor.execute("SELECT Heartbeat FROM CollectionGlobals")
         self._heartbeat = int(self._cursor.fetchone()[0])
@@ -263,12 +265,20 @@ class CollectionReplaySession:
 
     def GetDataValueAtTime(self, cid: int, time_point: int) -> Any:
         time_point = int(time_point)
+        if time_point in self._values_by_time_point:
+            return self._values_by_time_point[time_point].get(cid, {})
+
         if self._last_replayed_time_point != time_point:
             self._ReplayWindowForTimePoint(time_point)
             self._last_replayed_time_point = time_point
 
-        replayer = self._replayers_by_cid[cid]
-        return replayer._GetLatestReplayValue()
+        return self._values_by_time_point.get(time_point, {}).get(cid, {})
+
+    def _SnapshotCurrentValues(self) -> Dict[int, Any]:
+        return {
+            cid: copy.deepcopy(replayer._GetLatestReplayValue())
+            for cid, replayer in self._replayers_by_cid.items()
+        }
 
     def _ReplayWindowForTimePoint(self, time_point: int) -> None:
         end_idx = -1
@@ -289,6 +299,7 @@ class CollectionReplaySession:
             window = self._timestamps[start_idx : end_idx + 1]
             wanted_timestamp_ids = {timestamp_id for timestamp_id, _ in window}
             time_points_by_timestamp_id = {timestamp_id: ts for timestamp_id, ts in window}
+            replayed_values_by_time_point: Dict[int, Dict[int, Any]] = {}
 
             for replayer in self._replayers_by_cid.values():
                 replayer.ResetReplayState()
@@ -311,10 +322,15 @@ class CollectionReplaySession:
                     value = replayer.replay_next(buf)
                     replayer._ObserveReplayValue(time_point_at_blob, value)
 
+                replayed_values_by_time_point[time_point_at_blob] = self._SnapshotCurrentValues()
+
             needs_backfill = any(
                 replayer._NeedsBackfill() for replayer in self._replayers_by_cid.values()
             )
             if not needs_backfill or start_idx == 0:
+                for tp, values_by_cid in replayed_values_by_time_point.items():
+                    if tp not in self._values_by_time_point:
+                        self._values_by_time_point[tp] = values_by_cid
                 break
 
             start_idx = max(0, start_idx - self._heartbeat)
