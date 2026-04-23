@@ -34,6 +34,7 @@ class CollectableReplayerBase:
         self._latest_value: Any = {}
         self._latest_time_point: Optional[int] = None
         self._session: Optional["CollectionReplaySession"] = None
+        self._needs_backfill = False
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         raise NotImplementedError
@@ -46,6 +47,7 @@ class CollectableReplayerBase:
     def ResetReplayState(self) -> None:
         self._latest_value = {}
         self._latest_time_point = None
+        self._needs_backfill = False
 
     def _SetSession(self, session: "CollectionReplaySession") -> None:
         self._session = session
@@ -56,6 +58,12 @@ class CollectableReplayerBase:
 
     def _GetLatestReplayValue(self) -> Any:
         return self._latest_value
+
+    def _MarkNeedsBackfill(self) -> None:
+        self._needs_backfill = True
+
+    def _NeedsBackfill(self) -> bool:
+        return self._needs_backfill
 
 
 class ScalarRawReplayer(CollectableReplayerBase):
@@ -97,8 +105,8 @@ class StructMinifiedReplayer(CollectableReplayerBase):
             return self._last
         if action == self._CARRY:
             if self._last is None:
-                # With windowed replay, the anchor FULL may be just outside the
-                # replay window. Keep this non-fatal for now and treat as empty.
+                # Mark this replay as requiring older state, then keep going.
+                self._MarkNeedsBackfill()
                 return {}
             return self._last
         raise RuntimeError(
@@ -263,33 +271,50 @@ class CollectionReplaySession:
         return replayer._GetLatestReplayValue()
 
     def _ReplayWindowForTimePoint(self, time_point: int) -> None:
-        window = [(timestamp_id, ts) for timestamp_id, ts in self._timestamps if ts <= time_point]
-        if not window:
+        end_idx = -1
+        for idx, (_, ts) in enumerate(self._timestamps):
+            if ts <= time_point:
+                end_idx = idx
+            else:
+                break
+
+        if end_idx < 0:
             for replayer in self._replayers_by_cid.values():
                 replayer.ResetReplayState()
             return
 
-        window = window[-self._heartbeat :]
-        wanted_timestamp_ids = {timestamp_id for timestamp_id, _ in window}
-        time_points_by_timestamp_id = {timestamp_id: ts for timestamp_id, ts in window}
+        start_idx = max(0, end_idx - self._heartbeat + 1)
 
-        for replayer in self._replayers_by_cid.values():
-            replayer.ResetReplayState()
+        while True:
+            window = self._timestamps[start_idx : end_idx + 1]
+            wanted_timestamp_ids = {timestamp_id for timestamp_id, _ in window}
+            time_points_by_timestamp_id = {timestamp_id: ts for timestamp_id, ts in window}
 
-        placeholders = ",".join("?" for _ in wanted_timestamp_ids)
-        cmd = (
-            "SELECT TimestampID,Records FROM CollectionRecords "
-            f"WHERE TimestampID IN ({placeholders}) ORDER BY TimestampID ASC"
-        )
-        self._cursor.execute(cmd, tuple(sorted(wanted_timestamp_ids)))
+            for replayer in self._replayers_by_cid.values():
+                replayer.ResetReplayState()
 
-        for timestamp_id, compressed_blob in self._cursor.fetchall():
-            timestamp_id = int(timestamp_id)
-            time_point_at_blob = time_points_by_timestamp_id[timestamp_id]
-            buf = ByteBuffer(zlib.decompress(compressed_blob))
+            placeholders = ",".join("?" for _ in wanted_timestamp_ids)
+            cmd = (
+                "SELECT TimestampID,Records FROM CollectionRecords "
+                f"WHERE TimestampID IN ({placeholders}) ORDER BY TimestampID ASC"
+            )
+            self._cursor.execute(cmd, tuple(sorted(wanted_timestamp_ids)))
 
-            while not buf.Done():
-                blob_cid = int(buf.Read("H"))
-                replayer = self._replayers_by_cid[blob_cid]
-                value = replayer.replay_next(buf)
-                replayer._ObserveReplayValue(time_point_at_blob, value)
+            for timestamp_id, compressed_blob in self._cursor.fetchall():
+                timestamp_id = int(timestamp_id)
+                time_point_at_blob = time_points_by_timestamp_id[timestamp_id]
+                buf = ByteBuffer(zlib.decompress(compressed_blob))
+
+                while not buf.Done():
+                    blob_cid = int(buf.Read("H"))
+                    replayer = self._replayers_by_cid[blob_cid]
+                    value = replayer.replay_next(buf)
+                    replayer._ObserveReplayValue(time_point_at_blob, value)
+
+            needs_backfill = any(
+                replayer._NeedsBackfill() for replayer in self._replayers_by_cid.values()
+            )
+            if not needs_backfill or start_idx == 0:
+                break
+
+            start_idx = max(0, start_idx - self._heartbeat)
