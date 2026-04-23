@@ -111,6 +111,9 @@ public:
     /// Demangled element type for scalars, or element demangle + \c _contig_capacityN / \c _sparse_capacityN for queues.
     virtual std::string collectableTypeNameForDb() const = 0;
 
+    /// \brief Return true if this collectable exercised all minifier actions relevant to its type.
+    virtual bool minifierSawAllActions() const = 0;
+
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs()
     {
@@ -284,7 +287,7 @@ public:
         return {};
     }
 
-    bool minifierSawAllActions() const
+    bool minifierSawAllActions() const override
     {
         if constexpr (detail::has_argos_collector_v<ValueType>)
         {
@@ -436,7 +439,7 @@ public:
         return minifier_.getActionCounts();
     }
 
-    bool minifierSawAllActions() const
+    bool minifierSawAllActions() const override
     {
         return minifier_.sawAllActions();
     }

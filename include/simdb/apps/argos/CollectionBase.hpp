@@ -20,6 +20,7 @@ public:
     virtual void connectToPipeline(ConcurrentQueue<QueueCollectionData>* pipeline_head) = 0;
     virtual TinyStrings<>* getTinyStrings() const = 0;
     virtual void sendCollectedDataToPipeline() = 0;
+    virtual bool minifiersSawAllActions() const = 0;
     virtual void writeMetaOnPostTeardown(DatabaseManager* db_mgr) = 0;
 };
 

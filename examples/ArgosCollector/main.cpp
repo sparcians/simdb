@@ -275,11 +275,12 @@ bool CompareFiles(const std::string& f1, const std::string& f2)
 
 #define TEST_OFSTREAM(varname) std::ofstream varname(TEST_FILENAME)
 
-#define POST_TEST_VALIDATE(db_mgr)                                 \
+#define POST_TEST_VALIDATE(db_mgr, collection)                     \
     DumpCollection(db_mgr, TEST_FILENAME);                         \
     if (std::filesystem::exists(GOLDEN_FILENAME)) {                \
         EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME)); \
-    }    
+    }                                                              \
+    EXPECT_TRUE(collection.minifiersSawAllActions());
 
 void RunSmokeTest()
 {
@@ -568,7 +569,7 @@ void TestScalarCollection()
 
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestEnabledLogic()
@@ -700,7 +701,7 @@ void TestEnabledLogic()
     collection.performAutoCollection("root");
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestMultiClock()
@@ -946,7 +947,7 @@ void TestFlatten()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestContainers()
@@ -1022,7 +1023,7 @@ void TestContainers()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestPointers()
@@ -1111,7 +1112,7 @@ void TestPointers()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 class Outer
@@ -1196,7 +1197,7 @@ void TestMultiArgosCollectors()
     }
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 int main()

@@ -281,6 +281,18 @@ public:
         collection->sendCollectedDataToPipeline();
     }
 
+    bool minifiersSawAllActions() const override
+    {
+        for (const auto& [_, collection] : collections_)
+        {
+            if (!collection->minifiersSawAllActions())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
 private:
     /// \brief Verify that all collectables are uniquely owned by clock-specific
     /// \ref TimeDomainCollection instances

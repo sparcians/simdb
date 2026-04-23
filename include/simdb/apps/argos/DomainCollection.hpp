@@ -78,6 +78,18 @@ public:
         return paths;
     }
 
+    bool minifiersSawAllActions() const
+    {
+        for (const auto& collectable : all_collectables_)
+        {
+            if (!collectable->minifierSawAllActions())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// \brief Connect the collectables to the CollectorPipeline's main input queue
     virtual void connectToPipeline(ConcurrentQueue<QueueCollectionData>* pipeline_head)
     {
