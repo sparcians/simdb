@@ -138,21 +138,34 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
             return list(self._items)
         if action == self._SWAP:
             idx = int(buf.Read("H"))
-            self._items[idx] = self._bin.Deserialize(buf)
+            new_value = self._bin.Deserialize(buf)
+            if idx < len(self._items):
+                self._items[idx] = new_value
+            elif idx < self._capacity:
+                # Windowed replay can start mid-stream; fill unknown slots.
+                self._items.extend([{}] * (idx - len(self._items)))
+                self._items.append(new_value)
             return list(self._items)
         if action == self._ARRIVE:
-            self._items.append(self._bin.Deserialize(buf))
+            if len(self._items) < self._capacity:
+                self._items.append(self._bin.Deserialize(buf))
+            else:
+                # Keep parser in sync, but do not grow past declared capacity.
+                _ = self._bin.Deserialize(buf)
             return list(self._items)
         if action == self._DEPART:
             if not self._items:
-                raise RuntimeError(f"CID {self.cid}: DEPART on empty container")
+                return list(self._items)
             self._items.pop(0)
             return list(self._items)
         if action == self._BOOKENDS:
+            new_value = self._bin.Deserialize(buf)
             if not self._items:
-                raise RuntimeError(f"CID {self.cid}: BOOKENDS on empty container")
+                if self._capacity > 0:
+                    self._items.append(new_value)
+                return list(self._items)
             self._items.pop(0)
-            self._items.append(self._bin.Deserialize(buf))
+            self._items.append(new_value)
             return list(self._items)
         raise RuntimeError(f"CID {self.cid}: unknown contig MinifierAction {action}")
 
@@ -180,17 +193,23 @@ class SparseContainerMinifiedReplayer(CollectableReplayerBase):
             self._cells = [None] * self._capacity
             for _ in range(n):
                 idx = int(buf.Read("H"))
-                self._cells[idx] = self._bin.Deserialize(buf)
+                if idx < self._capacity:
+                    self._cells[idx] = self._bin.Deserialize(buf)
+                else:
+                    _ = self._bin.Deserialize(buf)
             return list(self._cells)
         if action == self._CARRY:
             return list(self._cells)
         if action == self._EXCHANGE:
             idx = int(buf.Read("H"))
-            self._cells[idx] = self._bin.Deserialize(buf)
+            new_value = self._bin.Deserialize(buf)
+            if idx < self._capacity:
+                self._cells[idx] = new_value
             return list(self._cells)
         if action == self._REMOVE:
             idx = int(buf.Read("H"))
-            self._cells[idx] = None
+            if idx < self._capacity:
+                self._cells[idx] = None
             return list(self._cells)
         raise RuntimeError(f"CID {self.cid}: unknown sparse MinifierAction {action}")
 
