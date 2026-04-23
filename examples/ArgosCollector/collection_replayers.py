@@ -34,6 +34,10 @@ class CollectableReplayerBase:
     def replay_next(self, buf: ByteBuffer) -> Any:
         raise NotImplementedError
 
+    def GetDataValueAtTime(self, time_point: int) -> dict:
+        # TODO: Implement random-access replay/query by time point.
+        return {}
+
 
 class ScalarRawReplayer(CollectableReplayerBase):
     """POD, enum, string: payload is exactly one scalar (no minifier prefix)."""

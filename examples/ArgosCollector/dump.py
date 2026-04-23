@@ -61,6 +61,16 @@ replayers_by_cid = {}
 for type_name, cid in cursor.fetchall():
     replayers_by_cid[cid] = CreateCollectableReplayer(cid, type_name, dtype_inspector)
 
+# Mapping from:
+#   {
+#       time_point: {
+#           cid: expected_data,
+#           cid: expected_data,
+#           ...
+#       },
+#       ...
+#   }
+all_expected_data = {}
 
 def DumpCollectionAtTime(timestamp_id, time_point):
     cursor.execute(f"SELECT Records FROM CollectionRecords WHERE TimestampID={timestamp_id}")
@@ -71,14 +81,17 @@ def DumpCollectionAtTime(timestamp_id, time_point):
 
     printer.print(f"At time point {time_point} we have the following values (collected now or carried over unchanged):")
 
+    expected_data_at_this_time = {}
     while not buf.Done():
         cid = int(buf.Read("H"))
         replayer = replayers_by_cid[cid]
         val = replayer.replay_next(buf)
         printer.print(f"CID {cid}: {val}")
+        expected_data_at_this_time[cid] = val
 
+    all_expected_data[time_point] = expected_data_at_this_time
 
-# Dump collection at every time point
+# Dump collection at every time point (replayed from the beginning)
 printer.print("All collectables found in database:\n")
 
 cursor.execute("SELECT Id,Timestamp FROM Timestamps")
@@ -88,3 +101,16 @@ for timestamp_id, time_point in cursor.fetchall():
         time_point = int(time_point)
 
     DumpCollectionAtTime(timestamp_id, time_point)
+
+# Verify data can be accessed for specific CIDs at specific time points
+passed = True
+for time_point, expected_data_at_this_time in all_expected_data.items():
+    for cid, expected_data in expected_data_at_this_time.items():
+        replayer = replayers_by_cid[cid]
+        actual_data = replayer.GetDataValueAtTime(time_point)
+        if actual_data != expected_data:
+            print (f"Data mismatch at time point {time_point} for CID {cid} (expected {expected_data}, actual {actual_data})")
+            passed = False
+
+if not passed:
+    sys.exit(1)
