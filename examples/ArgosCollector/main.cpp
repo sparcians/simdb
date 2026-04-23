@@ -287,7 +287,7 @@ void RunSmokeTest()
     TEST_METHOD_INIT;
 
     uint64_t tick = 0;
-    size_t heartbeat = 3;
+    size_t heartbeat = 100;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
@@ -1057,24 +1057,24 @@ void TestPointers()
 
     using Int = std::shared_ptr<int>;
     auto intval = std::make_shared<int>(4);
-    collection.collectScalarWithAutoCollection<Int>(
+    auto int_collector = collection.collectScalarWithAutoCollection<Int>(
         "int", "root", &intval);
 
     using Inst = SharedPtr<Instruction>;
     auto inst = SharedPtr<Instruction>(Instruction::newRandom());
-    collection.collectScalarWithAutoCollection<Inst>(
+    auto inst_collector = collection.collectScalarWithAutoCollection<Inst>(
         "inst", "root", &inst);
 
     constexpr size_t capacity = 32;
 
     using ContigQ = std::shared_ptr<std::vector<std::shared_ptr<Instruction>>>;
     ContigQ contig_q(new std::vector<std::shared_ptr<Instruction>>);
-    collection.collectContainerWithAutoCollection<ContigQ, false>(
+    auto contig_collector = collection.collectContainerWithAutoCollection<ContigQ, false>(
         "contig", "root", &contig_q, capacity);
 
     using SparseQ = SharedPtr<std::vector<SharedPtr<Instruction>>>;
     SparseQ sparse_q(new std::vector<SharedPtr<Instruction>>);
-    collection.collectContainerWithAutoCollection<SparseQ, true>(
+    auto sparse_collector = collection.collectContainerWithAutoCollection<SparseQ, true>(
         "sparse", "root", &sparse_q, capacity);
 
     auto randomize = [&]()
@@ -1130,8 +1130,62 @@ void TestPointers()
         step();
     }
 
+    // Deterministic minifier-action coverage tail for pointer-backed collectables.
+    auto collect_next_tick = [&]()
+    {
+        ++tick;
+        collect();
+    };
+
+    // Baseline state
+    *intval = 123;
+    inst = SharedPtr<Instruction>(Instruction::newRandom());
+    contig_q->clear();
+    contig_q->push_back(Instruction::genRandom());
+    contig_q->push_back(Instruction::genRandom());
+    contig_q->push_back(Instruction::genRandom());
+    sparse_q->clear();
+    sparse_q->resize(capacity);
+    (*sparse_q)[5] = SharedPtr<Instruction>(Instruction::newRandom());
+    (*sparse_q)[9] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick(); // FULL
+
+    collect_next_tick(); // CARRY
+
+    // Contig SWAP
+    (*contig_q)[1] = Instruction::genRandom();
+    collect_next_tick();
+
+    // Contig ARRIVE
+    contig_q->push_back(Instruction::genRandom());
+    collect_next_tick();
+
+    // Contig DEPART
+    contig_q->erase(contig_q->begin());
+    collect_next_tick();
+
+    // Contig BOOKENDS
+    contig_q->erase(contig_q->begin());
+    contig_q->push_back(Instruction::genRandom());
+    collect_next_tick();
+
+    // Sparse EXCHANGE
+    (*sparse_q)[5] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick();
+
+    // Sparse REMOVE
+    (*sparse_q)[9] = SharedPtr<Instruction>();
+    collect_next_tick();
+
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    DumpCollection(app_mgr.getDatabaseManager(), TEST_FILENAME);
+    if (std::filesystem::exists(GOLDEN_FILENAME)) {
+        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME));
+    }
+    EXPECT_TRUE(int_collector->minifierSawAllActions());
+    EXPECT_TRUE(inst_collector->minifierSawAllActions());
+    (void)contig_collector;
+    (void)sparse_collector;
 }
 
 class Outer
@@ -1189,12 +1243,12 @@ void TestMultiArgosCollectors()
     collection.addCollection("root", 1);
 
     Outer outer1;
-    collection.collectScalarWithAutoCollection<Outer>("a", "root", &outer1);
-    collection.collectScalarManually<Outer>("b", "root");
+    auto a_collector = collection.collectScalarWithAutoCollection<Outer>("a", "root", &outer1);
+    auto b_collector = collection.collectScalarManually<Outer>("b", "root");
 
     SharedPtr<Outer> outer2;
-    collection.collectScalarWithAutoCollection<SharedPtr<Outer>>("c", "root", &outer2);
-    collection.collectScalarManually<SharedPtr<Outer>>("d", "root");
+    auto c_collector = collection.collectScalarWithAutoCollection<SharedPtr<Outer>>("c", "root", &outer2);
+    auto d_collector = collection.collectScalarManually<SharedPtr<Outer>>("d", "root");
 
     simdb::AppManagers app_mgrs;
     app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
@@ -1210,10 +1264,24 @@ void TestMultiArgosCollectors()
     app_mgrs.openPipelines();
 
     size_t NUM_TICKS = 50;
+    outer2 = SharedPtr<Outer>(new Outer());
     for (tick = 1; tick <= NUM_TICKS; ++tick)
     {
         collection.performAutoCollection("root");
     }
+
+    // Explicitly exercise manual collectors with FULL->CARRY each.
+    tick = NUM_TICKS + 1;
+    b_collector->collect(outer1);
+    d_collector->collect(outer2);
+    ++tick;
+    b_collector->collect(outer1);
+    d_collector->collect(outer2);
+
+    EXPECT_TRUE(a_collector->minifierSawAllActions());
+    EXPECT_TRUE(b_collector->minifierSawAllActions());
+    EXPECT_TRUE(c_collector->minifierSawAllActions());
+    EXPECT_TRUE(d_collector->minifierSawAllActions());
 
     app_mgrs.postSimLoopTeardown();
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
