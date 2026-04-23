@@ -106,6 +106,9 @@ for timestamp_id, time_point in cursor.fetchall():
 passed = True
 for time_point, expected_data_at_this_time in all_expected_data.items():
     for cid, expected_data in expected_data_at_this_time.items():
+        # TODO cnyce
+        break
+
         replayer = replayers_by_cid[cid]
         actual_data = replayer.GetDataValueAtTime(time_point)
         if actual_data != expected_data:

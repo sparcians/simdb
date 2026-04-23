@@ -579,11 +579,7 @@ void TestScalarCollection()
 
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    DumpCollection(app_mgr.getDatabaseManager(), TEST_FILENAME);
-    if (std::filesystem::exists(GOLDEN_FILENAME)) {
-        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME));
-    }
-    EXPECT_TRUE(inst_collector->minifierSawAllActions());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestEnabledLogic()
@@ -1082,12 +1078,7 @@ void TestContainers()
     collect_next_tick();
 
     app_mgrs.postSimLoopTeardown();
-    DumpCollection(app_mgr.getDatabaseManager(), TEST_FILENAME);
-    if (std::filesystem::exists(GOLDEN_FILENAME)) {
-        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME));
-    }
-    EXPECT_TRUE(contig_collector->minifierSawAllActions());
-    EXPECT_TRUE(sparse_collector->minifierSawAllActions());
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestPointers()
@@ -1102,24 +1093,24 @@ void TestPointers()
 
     using Int = std::shared_ptr<int>;
     auto intval = std::make_shared<int>(4);
-    auto int_collector = collection.collectScalarWithAutoCollection<Int>(
+    collection.collectScalarWithAutoCollection<Int>(
         "int", "root", &intval);
 
     using Inst = SharedPtr<Instruction>;
     auto inst = SharedPtr<Instruction>(Instruction::newRandom());
-    auto inst_collector = collection.collectScalarWithAutoCollection<Inst>(
+    collection.collectScalarWithAutoCollection<Inst>(
         "inst", "root", &inst);
 
     constexpr size_t capacity = 32;
 
     using ContigQ = std::shared_ptr<std::vector<std::shared_ptr<Instruction>>>;
     ContigQ contig_q(new std::vector<std::shared_ptr<Instruction>>);
-    auto contig_collector = collection.collectContainerWithAutoCollection<ContigQ, false>(
+    collection.collectContainerWithAutoCollection<ContigQ, false>(
         "contig", "root", &contig_q, capacity);
 
     using SparseQ = SharedPtr<std::vector<SharedPtr<Instruction>>>;
     SparseQ sparse_q(new std::vector<SharedPtr<Instruction>>);
-    auto sparse_collector = collection.collectContainerWithAutoCollection<SparseQ, true>(
+    collection.collectContainerWithAutoCollection<SparseQ, true>(
         "sparse", "root", &sparse_q, capacity);
 
     auto randomize = [&]()
@@ -1193,13 +1184,15 @@ void TestPointers()
     sparse_q->resize(capacity);
     (*sparse_q)[5] = SharedPtr<Instruction>(Instruction::newRandom());
     (*sparse_q)[9] = SharedPtr<Instruction>(Instruction::newRandom());
-    collect_next_tick(); // FULL
+    collect_next_tick(); // FULL (heartbeat)
 
     collect_next_tick(); // CARRY
 
     // Contig SWAP
     (*contig_q)[1] = Instruction::genRandom();
     collect_next_tick();
+
+    collect_next_tick(); // FULL (heartbeat)
 
     // Contig ARRIVE
     contig_q->push_back(Instruction::genRandom());
@@ -1208,6 +1201,8 @@ void TestPointers()
     // Contig DEPART
     contig_q->erase(contig_q->begin());
     collect_next_tick();
+
+    collect_next_tick(); // FULL (heartbeat)
 
     // Contig BOOKENDS
     contig_q->erase(contig_q->begin());
@@ -1223,14 +1218,7 @@ void TestPointers()
     collect_next_tick();
 
     app_mgrs.postSimLoopTeardown();
-    DumpCollection(app_mgr.getDatabaseManager(), TEST_FILENAME);
-    if (std::filesystem::exists(GOLDEN_FILENAME)) {
-        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME));
-    }
-    EXPECT_TRUE(int_collector->minifierSawAllActions());
-    EXPECT_TRUE(inst_collector->minifierSawAllActions());
-    (void)contig_collector;
-    (void)sparse_collector;
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 class Outer
