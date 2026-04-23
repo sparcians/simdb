@@ -960,6 +960,11 @@ void TestFlatten()
         collector->collect(unit);
     }
 
+    // Force one FULL->CARRY pair for struct minifier coverage in this test.
+    tick = 101;
+    collector->collect(unit);
+    collector->collect(unit);
+
     app_mgrs.postSimLoopTeardown();
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }

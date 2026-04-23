@@ -199,3 +199,5 @@ At time point 99 we have the following values (collected now or carried over unc
 CID 1: OrderedDict([('uid', 4294967195), ('foo', 1669679262), ('bar', 47091477.992439814), ('type', 'MEM'), ('opcode', 1581539848), ('mnemonic', 'b'), ('csr', 0), ('last', False)])
 At time point 100 we have the following values (collected now or carried over unchanged):
 CID 1: OrderedDict([('uid', 4294967195), ('foo', 207026272), ('bar', 5313844135.596106), ('type', 'CSR'), ('opcode', 217927335), ('mnemonic', 'addi'), ('csr', 49), ('last', False)])
+At time point 101 we have the following values (collected now or carried over unchanged):
+CID 1: OrderedDict([('uid', 4294967195), ('foo', 207026272), ('bar', 5313844135.596106), ('type', 'CSR'), ('opcode', 217927335), ('mnemonic', 'addi'), ('csr', 49), ('last', False)])
