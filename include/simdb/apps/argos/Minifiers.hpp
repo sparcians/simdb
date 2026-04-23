@@ -5,6 +5,7 @@
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <iostream>
 #include <unordered_map>
@@ -80,6 +81,7 @@ public:
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
             buf << MinifierAction::FULL;
+            ++action_counts_[static_cast<size_t>(MinifierAction::FULL)];
             buf << cur_extracted_bytes_;
             last_sent_bytes_ = cur_extracted_bytes_;
             cycles_since_last_full_ = 0;
@@ -88,8 +90,21 @@ public:
         else
         {
             buf << MinifierAction::CARRY;
+            ++action_counts_[static_cast<size_t>(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
+    }
+
+    std::vector<size_t> getActionCounts() const
+    {
+        return std::vector<size_t>(action_counts_.begin(), action_counts_.end());
+    }
+
+    bool sawAllActions() const
+    {
+        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
+            return n > 0;
+        });
     }
 
 private:
@@ -103,6 +118,7 @@ private:
     const size_t heartbeat_;
     size_t cycles_since_last_full_ = 0;
     bool has_history_ = false;
+    std::array<size_t, 2> action_counts_{};
     std::vector<char> last_sent_bytes_;
     std::vector<char> cur_extracted_bytes_;
 
@@ -159,6 +175,18 @@ public:
         {
             ++cycles_since_last_full_;
         }
+    }
+
+    std::vector<size_t> getActionCounts() const
+    {
+        return std::vector<size_t>(action_counts_.begin(), action_counts_.end());
+    }
+
+    bool sawAllActions() const
+    {
+        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
+            return n > 0;
+        });
     }
 
 private:
@@ -320,6 +348,7 @@ private:
 
     void writeAction_(StreamBuffer& buf, const MinifierAction action, const uint16_t curr_size)
     {
+        ++action_counts_[static_cast<size_t>(action)];
         buf << action;
         switch (action)
         {
@@ -358,6 +387,7 @@ private:
     const size_t heartbeat_;
     size_t cycles_since_last_full_ = 0;
     bool has_history_ = false;
+    std::array<size_t, 6> action_counts_{};
     uint16_t prev_size_ = 0;
     std::vector<std::vector<char>> prev_bins_;
     std::vector<std::vector<char>> curr_bins_;
@@ -411,6 +441,18 @@ public:
         {
             ++cycles_since_last_full_;
         }
+    }
+
+    std::vector<size_t> getActionCounts() const
+    {
+        return std::vector<size_t>(action_counts_.begin(), action_counts_.end());
+    }
+
+    bool sawAllActions() const
+    {
+        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
+            return n > 0;
+        });
     }
 
 private:
@@ -538,6 +580,7 @@ private:
 
     void writeAction_(StreamBuffer& buf, MinifierAction action, const uint16_t exchange_idx) const
     {
+        ++action_counts_[static_cast<size_t>(action)];
         buf << action;
         switch (action)
         {
@@ -583,6 +626,7 @@ private:
     const size_t heartbeat_;
     size_t cycles_since_last_full_ = 0;
     bool has_history_ = false;
+    mutable std::array<size_t, 4> action_counts_{};
     std::unordered_map<uint16_t, std::vector<char>> prev_bins_;
     std::vector<BinPair> curr_pairs_;
 };

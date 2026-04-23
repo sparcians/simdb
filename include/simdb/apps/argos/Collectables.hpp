@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 namespace simdb::collection {
 
@@ -269,6 +270,29 @@ public:
         throw DBException("Cannot reattach a manually-collected object");
     }
 
+    bool hasMinifierActions() const
+    {
+        return detail::has_argos_collector_v<ValueType>;
+    }
+
+    std::vector<size_t> getMinifierActionCounts() const
+    {
+        if constexpr (detail::has_argos_collector_v<ValueType>)
+        {
+            return minifier_.getActionCounts();
+        }
+        return {};
+    }
+
+    bool minifierSawAllActions() const
+    {
+        if constexpr (detail::has_argos_collector_v<ValueType>)
+        {
+            return minifier_.sawAllActions();
+        }
+        return true;
+    }
+
 private:
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
     Minifier<ValueType> minifier_;
@@ -400,6 +424,21 @@ public:
     size_t getMaxContainerSizeCollected() const override final
     {
         return max_size_collected_;
+    }
+
+    bool hasMinifierActions() const
+    {
+        return true;
+    }
+
+    std::vector<size_t> getMinifierActionCounts() const
+    {
+        return minifier_.getActionCounts();
+    }
+
+    bool minifierSawAllActions() const
+    {
+        return minifier_.sawAllActions();
     }
 
     virtual void reattach(const ContainerT*)
