@@ -547,6 +547,9 @@ void TestScalarCollection()
         {8u, "fuz", InstType::ILLEGAL, true,  Instruction::genRandom()},
         {9u, "buz", InstType::CSR,     false, Instruction::genRandom()}
     };
+    // Force at least one CARRY for the struct minifier in this test:
+    // tick 2 collects the same Instruction bytes as tick 1.
+    all_data[1].inst = all_data[0].inst;
 
     TEST_OFSTREAM(fout);
     for (tick = 1; tick <= all_data.size(); ++tick)
@@ -567,9 +570,20 @@ void TestScalarCollection()
         inst_collector->collect(all_data[idx].inst);
     }
 
+    // Deterministically force a FULL then CARRY for struct minifier coverage.
+    // (Same tick is fine; PipelineStager deduplicates DB rows by CID, but minifier
+    // still sees both collect() calls.)
+    tick = 100;
+    inst_collector->collect(all_data.back().inst);
+    inst_collector->collect(all_data.back().inst);
+
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    DumpCollection(app_mgr.getDatabaseManager(), TEST_FILENAME);
+    if (std::filesystem::exists(GOLDEN_FILENAME)) {
+        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME));
+    }
+    EXPECT_TRUE(inst_collector->minifierSawAllActions());
 }
 
 void TestEnabledLogic()
