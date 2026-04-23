@@ -6,13 +6,76 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace simdb::collection {
+
+/// \brief Optional stdout tracing for minifier actions (grep for the literal token \c XXX).
+/// When enabled, each minify step prints one line:
+/// \code
+/// XXX time_point <t>, cid <id> -> <ACTION>
+/// \endcode
+/// Set \ref set_time_supplier from your \c Collection::timestampWith setup (see \c Collection.hpp)
+/// so \c time_point matches the simulation clock used for collection.
+namespace minifier_logging {
+
+inline std::atomic<bool> enabled{false};
+
+inline void set_enabled(bool on) noexcept
+{
+    enabled.store(on, std::memory_order_relaxed);
+}
+
+inline bool is_enabled() noexcept
+{
+    return enabled.load(std::memory_order_relaxed);
+}
+
+/// Supplier is read only while \ref is_enabled(); set or clear from configuration / \c Collection.
+inline std::shared_ptr<std::function<std::string()>> time_supplier;
+
+inline void set_time_supplier(std::function<std::string()> fn)
+{
+    if (fn)
+    {
+        time_supplier = std::make_shared<std::function<std::string()>>(std::move(fn));
+    }
+    else
+    {
+        time_supplier.reset();
+    }
+}
+
+inline void clear_time_supplier() noexcept
+{
+    time_supplier.reset();
+}
+
+inline void log_minifier_action(uint16_t cid, const char* action_name)
+{
+    if (!is_enabled())
+    {
+        return;
+    }
+    std::string time_str = "?";
+    if (const auto sp = time_supplier; sp && *sp)
+    {
+        time_str = (*sp)();
+    }
+    std::cout << "XXX time_point " << time_str << ", cid " << static_cast<unsigned>(cid) << " -> " << action_name
+              << '\n';
+}
+
+} // namespace minifier_logging
 
 template <typename ContainerT, bool Sparse>
 inline uint16_t getNumElements(const ContainerT& container)
@@ -73,13 +136,15 @@ public:
         , heartbeat_(heartbeat)
     {}
 
-    void minifyAndAppend(StreamBuffer& buf, const ValueType& value)
+    void minifyAndAppend(StreamBuffer& buf, const ValueType& value, const uint16_t cid)
     {
         StreamBuffer my_buffer(cur_extracted_bytes_);
         dtype_hierarchy_->writeBuffer(my_buffer, value);
 
+        MinifierAction action;
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
+            action = MinifierAction::FULL;
             buf << MinifierAction::FULL;
             ++action_counts_[static_cast<size_t>(MinifierAction::FULL)];
             buf << cur_extracted_bytes_;
@@ -89,10 +154,12 @@ public:
         }
         else
         {
+            action = MinifierAction::CARRY;
             buf << MinifierAction::CARRY;
             ++action_counts_[static_cast<size_t>(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
+        minifier_logging::log_minifier_action(cid, actionName_(action));
     }
 
     std::vector<size_t> getActionCounts() const
@@ -113,6 +180,18 @@ private:
         FULL = 0,   // Value changed or we are at a heartbeat.
         CARRY       // Same value or not at a heartbeat.
     };
+
+    static const char* actionName_(const MinifierAction action) noexcept
+    {
+        switch (action)
+        {
+            case MinifierAction::FULL:
+                return "FULL";
+            case MinifierAction::CARRY:
+                return "CARRY";
+        }
+        return "?";
+    }
 
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
     const size_t heartbeat_;
@@ -147,7 +226,7 @@ public:
         , elem_path_(elem_path)
     {}
 
-    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container)
+    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container, const uint16_t cid)
     {
         const auto curr_size = writeBins_(container, curr_bins_);
         const auto action = (!has_history_ || shouldWriteFull_())
@@ -155,6 +234,7 @@ public:
             : getMinifierAction_(curr_bins_, curr_size, prev_bins_, prev_size_);
 
         writeAction_(buf, action, curr_size);
+        minifier_logging::log_minifier_action(cid, actionName_(action));
 
         if (prev_bins_.size() < curr_bins_.size())
         {
@@ -199,6 +279,26 @@ private:
         DEPART,     // One item left the front of the container.
         BOOKENDS    // One arrived and one departed.
     };
+
+    static const char* actionName_(const MinifierAction action) noexcept
+    {
+        switch (action)
+        {
+            case MinifierAction::FULL:
+                return "FULL";
+            case MinifierAction::CARRY:
+                return "CARRY";
+            case MinifierAction::SWAP:
+                return "SWAP";
+            case MinifierAction::ARRIVE:
+                return "ARRIVE";
+            case MinifierAction::DEPART:
+                return "DEPART";
+            case MinifierAction::BOOKENDS:
+                return "BOOKENDS";
+        }
+        return "?";
+    }
 
     uint16_t writeBins_(const ContainerType& container, std::vector<std::vector<char>>& bins)
     {
@@ -414,7 +514,7 @@ public:
         curr_pairs_.reserve(expected_capacity);
     }
 
-    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container)
+    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container, const uint16_t cid)
     {
         writePairs_(container);
 
@@ -424,6 +524,7 @@ public:
             : getMinifierAction_(exchange_idx);
 
         writeAction_(buf, action, exchange_idx);
+        minifier_logging::log_minifier_action(cid, actionName_(action));
 
         prev_bins_.clear();
         prev_bins_.reserve(curr_pairs_.size());
@@ -463,6 +564,22 @@ private:
         EXCHANGE,
         REMOVE
     };
+
+    static const char* actionName_(const MinifierAction action) noexcept
+    {
+        switch (action)
+        {
+            case MinifierAction::FULL:
+                return "FULL";
+            case MinifierAction::CARRY:
+                return "CARRY";
+            case MinifierAction::EXCHANGE:
+                return "EXCHANGE";
+            case MinifierAction::REMOVE:
+                return "REMOVE";
+        }
+        return "?";
+    }
 
     void writePairs_(const ContainerType& container)
     {

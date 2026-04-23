@@ -1110,6 +1110,7 @@ void TestMultiArgosCollectors()
 
 int main()
 {
+    //simdb::collection::minifier_logging::set_enabled(true);
     system("rm -f *.test.out");
 
     TestScalarCollection();

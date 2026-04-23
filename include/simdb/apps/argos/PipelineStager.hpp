@@ -154,7 +154,7 @@ private:
         for (auto& data : collection_at_time.collection_data)
         {
             auto cid = data->getCID();
-            if (auto it = last_sent_bytes_.find(cid); it != last_sent_bytes_.end() /*TODO cnyce*/&&false)
+            if (auto it = last_sent_bytes_.find(cid); it != last_sent_bytes_.end())
             {
                 if (it->second == data->getData())
                 {
@@ -212,7 +212,7 @@ private:
             }
 
             assert(it->second > 0);
-            if (true/*TODO cnyce*/|| --it->second == 0)
+            if (--it->second == 0)
             {
                 // The CollectedData object will immediately add the uint16_t cid
                 // to the underlying buffer. Our last_sent_bytes_ also has the

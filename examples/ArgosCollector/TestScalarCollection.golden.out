@@ -68,7 +68,6 @@ CID 5: OrderedDict([('uid', 103), ('type', 'CSR'), ('opcode', 1102520059), ('mne
 At time point 5 we have the following values (collected now or carried over unchanged):
 CID 1: 8
 CID 2: fuz
-CID 3: ILLEGAL
 CID 4: True
 CID 5: OrderedDict([('uid', 104), ('type', 'CSR'), ('opcode', 304089172), ('mnemonic', 'addi'), ('csr', 27), ('last', False)])
 At time point 6 we have the following values (collected now or carried over unchanged):
@@ -79,7 +78,3 @@ CID 4: False
 CID 5: OrderedDict([('uid', 105), ('type', 'ILLEGAL'), ('opcode', 1726956429), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
 At time point 100 we have the following values (collected now or carried over unchanged):
 CID 5: OrderedDict([('uid', 105), ('type', 'ILLEGAL'), ('opcode', 1726956429), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
-CID 4: False
-CID 3: CSR
-CID 2: buz
-CID 1: 9

@@ -41,7 +41,7 @@ public:
             throw DBException("Pipeline was never opened!");
         }
 
-        if (!enabled_ /*TODO cnyce*/&&false)
+        if (!enabled_)
         {
             if (initial_value_)
             {
@@ -62,7 +62,7 @@ public:
             throw DBException("Pipeline was never opened!");
         }
 
-        if (enabled_ /*TODO cnyce*/&&false)
+        if (enabled_)
         {
             enabled_ = false;
             stager_->onEnabledChanged(getID(), enabled_);
@@ -243,7 +243,7 @@ public:
             CollectedData collected(getID());
             if constexpr (detail::has_argos_collector_v<ValueType>)
             {
-                minifier_.minifyAndAppend(collected.getBuffer(), value);
+                minifier_.minifyAndAppend(collected.getBuffer(), value, getID());
             }
             else
             {
@@ -404,7 +404,7 @@ public:
         CollectedData collected(getID());
         auto num_elements = getNumElements<T, Sparse>(container);
         max_size_collected_ = std::max(max_size_collected_, num_elements);
-        minifier_.minifyAndAppend(collected.getBuffer(), container);
+        minifier_.minifyAndAppend(collected.getBuffer(), container, getID());
 
         stage_(std::move(collected));
     }
