@@ -10,7 +10,7 @@ Collecting scalar values at tick 2
 ... str: bar
 ... itype: 0
 ... flag: 0
-... inst: itype: 1, opcode: 424238335, mnemonic: addi, csr: 0, last inst: 0
+... inst: itype: 3, opcode: 846930886, mnemonic: li, csr: 0, last inst: 0
 
 Collecting scalar values at tick 3
 ... pod: 6
@@ -52,7 +52,7 @@ CID 1: 5
 CID 2: bar
 CID 3: NO_OP
 CID 4: False
-CID 5: OrderedDict([('uid', 101), ('type', 'MEM'), ('opcode', 424238335), ('mnemonic', 'addi'), ('csr', 0), ('last', False)])
+CID 5: OrderedDict([('uid', 100), ('type', 'ILLEGAL'), ('opcode', 846930886), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
 At time point 3 we have the following values (collected now or carried over unchanged):
 CID 1: 6
 CID 2: fiz
@@ -77,3 +77,9 @@ CID 2: buz
 CID 3: CSR
 CID 4: False
 CID 5: OrderedDict([('uid', 105), ('type', 'ILLEGAL'), ('opcode', 1726956429), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
+At time point 100 we have the following values (collected now or carried over unchanged):
+CID 5: OrderedDict([('uid', 105), ('type', 'ILLEGAL'), ('opcode', 1726956429), ('mnemonic', 'li'), ('csr', 0), ('last', False)])
+CID 4: False
+CID 3: CSR
+CID 2: buz
+CID 1: 9
