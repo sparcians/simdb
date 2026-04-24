@@ -191,7 +191,6 @@ class DataRetriever:
             'DataVals': []
         }
 
-        import pdb; pdb.set_trace()
         for time_point in self._time_vals:
             if time_point >= time_range[0] and time_point <= time_range[1]:
                 data_at_this_time = self._replay_session.GetDataValueAtTime(cid, time_point)
