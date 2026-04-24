@@ -4,7 +4,7 @@
 
 namespace simdb::collection {
 
-enum class LifecycleAction : uint16_t
+enum class LifecycleAction : uint8_t
 {
     DISABLED = 0,
     ENABLED,

@@ -161,7 +161,7 @@ public:
 
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
-    static constexpr auto kActionBytes = sizeof(uint16_t);
+    static constexpr auto kActionBytes = sizeof(uint8_t);
 
     static bool isLifecycleAction_(const std::vector<char>& data)
     {
@@ -170,9 +170,9 @@ private:
             return false;
         }
 
-        uint16_t raw_action = 0;
+        uint8_t raw_action = 0;
         std::memcpy(&raw_action, data.data() + kCidBytes, kActionBytes);
-        return raw_action < static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
+        return raw_action < static_cast<uint8_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
     }
 
     void queueLifecycleAction_(

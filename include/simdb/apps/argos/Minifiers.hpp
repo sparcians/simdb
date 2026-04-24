@@ -176,7 +176,7 @@ public:
     }
 
 private:
-    enum class MinifierAction : uint16_t
+    enum class MinifierAction : uint8_t
     {
         FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),   // Value changed or we are at a heartbeat.
         CARRY       // Same value or not at a heartbeat.
@@ -277,7 +277,7 @@ public:
     }
 
 private:
-    enum class MinifierAction : uint16_t
+    enum class MinifierAction : uint8_t
     {
         FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),   // Value changed or we are at a heartbeat.
         CARRY,      // Same value or not at a heartbeat.
@@ -570,7 +570,7 @@ public:
     }
 
 private:
-    enum class MinifierAction : uint16_t
+    enum class MinifierAction : uint8_t
     {
         FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),
         CARRY,

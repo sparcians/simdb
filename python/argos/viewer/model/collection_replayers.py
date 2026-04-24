@@ -76,7 +76,7 @@ class CollectableReplayerBase:
 
 
 class ScalarMinifiedReplayer(CollectableReplayerBase):
-    """POD, enum, string: payload is [uint16 action][optional scalar bytes]."""
+    """POD, enum, string: payload is [uint8 action][optional scalar bytes]."""
 
     _FULL = _FIRST_MINIFIER_ACTION + 0
     _CARRY = _FIRST_MINIFIER_ACTION + 1
@@ -91,7 +91,7 @@ class ScalarMinifiedReplayer(CollectableReplayerBase):
         self._last = None
 
     def replay_next(self, buf: ByteBuffer) -> Any:
-        action = int(buf.Read("H"))
+        action = int(buf.Read("B"))
         if action in (_DISABLED, _QUIETD):
             self._last = {}
             return {}
@@ -119,7 +119,7 @@ class ScalarMinifiedReplayer(CollectableReplayerBase):
 
 class StructMinifiedReplayer(CollectableReplayerBase):
     """
-    Struct with ArgosCollector: payload is [uint16 action][body...].
+    Struct with ArgosCollector: payload is [uint8 action][body...].
     FULL (0): body is fixed-width struct bytes (see StructDeserializer.GetNumBytes()).
     CARRY (1): no body; value unchanged from last FULL/CARRY resolution.
     """
@@ -137,7 +137,7 @@ class StructMinifiedReplayer(CollectableReplayerBase):
         self._last = None
 
     def replay_next(self, buf: ByteBuffer) -> Any:
-        action = int(buf.Read("H"))
+        action = int(buf.Read("B"))
         if action in (_DISABLED, _QUIETD):
             self._last = {}
             return {}
@@ -180,7 +180,7 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
         self._items = []
 
     def replay_next(self, buf: ByteBuffer) -> Any:
-        action = int(buf.Read("H"))
+        action = int(buf.Read("B"))
         if action in (_DISABLED, _QUIETD):
             self._items = []
             return list(self._items)
@@ -245,7 +245,7 @@ class SparseContainerMinifiedReplayer(CollectableReplayerBase):
         self._cells = [None] * self._capacity
 
     def replay_next(self, buf: ByteBuffer) -> Any:
-        action = int(buf.Read("H"))
+        action = int(buf.Read("B"))
         if action in (_DISABLED, _QUIETD):
             self._cells = [None] * self._capacity
             return list(self._cells)
