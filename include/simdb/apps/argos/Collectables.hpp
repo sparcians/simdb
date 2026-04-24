@@ -275,6 +275,7 @@ public:
         }
         else
         {
+            collected.getBuffer() << LifecycleAction::__FIRST_MINIFIER_ACTION;
             dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
         }
         stage_(std::move(collected));

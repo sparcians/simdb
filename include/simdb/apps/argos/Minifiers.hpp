@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos/LifecycleAction.hpp"
 
 #include <algorithm>
 #include <array>
@@ -146,7 +147,7 @@ public:
         {
             action = MinifierAction::FULL;
             buf << MinifierAction::FULL;
-            ++action_counts_[static_cast<size_t>(MinifierAction::FULL)];
+            ++action_counts_[actionIndex_(MinifierAction::FULL)];
             buf << cur_extracted_bytes_;
             last_sent_bytes_ = cur_extracted_bytes_;
             cycles_since_last_full_ = 0;
@@ -156,7 +157,7 @@ public:
         {
             action = MinifierAction::CARRY;
             buf << MinifierAction::CARRY;
-            ++action_counts_[static_cast<size_t>(MinifierAction::CARRY)];
+            ++action_counts_[actionIndex_(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
         minifier_logging::log_minifier_action(cid, actionName_(action));
@@ -177,7 +178,7 @@ public:
 private:
     enum class MinifierAction : uint16_t
     {
-        FULL = 0,   // Value changed or we are at a heartbeat.
+        FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),   // Value changed or we are at a heartbeat.
         CARRY       // Same value or not at a heartbeat.
     };
 
@@ -191,6 +192,12 @@ private:
                 return "CARRY";
         }
         return "?";
+    }
+
+    static size_t actionIndex_(const MinifierAction action)
+    {
+        constexpr auto base = static_cast<size_t>(MinifierAction::FULL);
+        return static_cast<size_t>(action) - base;
     }
 
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
@@ -272,7 +279,7 @@ public:
 private:
     enum class MinifierAction : uint16_t
     {
-        FULL = 0,   // Value changed or we are at a heartbeat.
+        FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),   // Value changed or we are at a heartbeat.
         CARRY,      // Same value or not at a heartbeat.
         SWAP,       // One item changed.
         ARRIVE,     // One item arrived at the back of the container.
@@ -298,6 +305,12 @@ private:
                 return "BOOKENDS";
         }
         return "?";
+    }
+
+    static size_t actionIndex_(const MinifierAction action)
+    {
+        constexpr auto base = static_cast<size_t>(MinifierAction::FULL);
+        return static_cast<size_t>(action) - base;
     }
 
     uint16_t writeBins_(const ContainerType& container, std::vector<std::vector<char>>& bins)
@@ -448,7 +461,7 @@ private:
 
     void writeAction_(StreamBuffer& buf, const MinifierAction action, const uint16_t curr_size)
     {
-        ++action_counts_[static_cast<size_t>(action)];
+        ++action_counts_[actionIndex_(action)];
         buf << action;
         switch (action)
         {
@@ -559,7 +572,7 @@ public:
 private:
     enum class MinifierAction : uint16_t
     {
-        FULL = 0,
+        FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),
         CARRY,
         EXCHANGE,
         REMOVE
@@ -579,6 +592,12 @@ private:
                 return "REMOVE";
         }
         return "?";
+    }
+
+    static size_t actionIndex_(const MinifierAction action)
+    {
+        constexpr auto base = static_cast<size_t>(MinifierAction::FULL);
+        return static_cast<size_t>(action) - base;
     }
 
     void writePairs_(const ContainerType& container)
@@ -697,7 +716,7 @@ private:
 
     void writeAction_(StreamBuffer& buf, MinifierAction action, const uint16_t exchange_idx) const
     {
-        ++action_counts_[static_cast<size_t>(action)];
+        ++action_counts_[actionIndex_(action)];
         buf << action;
         switch (action)
         {

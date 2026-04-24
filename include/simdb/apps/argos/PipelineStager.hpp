@@ -4,7 +4,9 @@
 
 #include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/apps/argos/CollectedData.hpp"
+#include "simdb/apps/argos/LifecycleAction.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
+#include <cstring>
 #include <queue>
 
 namespace simdb::collection {
@@ -158,6 +160,54 @@ public:
     }
 
 private:
+    static constexpr auto kCidBytes = sizeof(uint16_t);
+    static constexpr auto kActionBytes = sizeof(uint16_t);
+
+    static bool isLifecycleAction_(const std::vector<char>& data)
+    {
+        if (data.size() < kCidBytes + kActionBytes)
+        {
+            return false;
+        }
+
+        uint16_t raw_action = 0;
+        std::memcpy(&raw_action, data.data() + kCidBytes, kActionBytes);
+        return raw_action < static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
+    }
+
+    void queueLifecycleAction_(
+        CollectionDataAtTimePoint& collection,
+        uint16_t cid,
+        LifecycleAction action,
+        bool append_last_payload)
+    {
+        const std::vector<char>* payload_tail = nullptr;
+        if (append_last_payload)
+        {
+            auto it = last_sent_bytes_.find(cid);
+            if (it == last_sent_bytes_.end() || it->second.size() <= kCidBytes)
+            {
+                // We cannot emit ENABLED/AWAKENED without an attached
+                // payload tail, otherwise downstream replay will desync.
+                return;
+            }
+            payload_tail = &it->second;
+        }
+
+        auto lifecycle = std::make_unique<CollectedData>(cid);
+        auto& buf = lifecycle->getBuffer();
+        buf << action;
+
+        if (payload_tail)
+        {
+            const auto src = payload_tail->data() + kCidBytes;
+            const auto src_bytes = payload_tail->size() - kCidBytes;
+            buf.append(src, src_bytes);
+        }
+
+        collection.emplace_back(std::move(lifecycle));
+    }
+
     void sendToPipeline_(QueueCollectionData& collection_at_time)
     {
         // To account for the use case where the same collectable is collected
@@ -182,9 +232,9 @@ private:
         }
 
         QueueCollectionData to_send;
+        to_send.time_point = collection_at_time.time_point;
 
         // Take into account whether the collected data has changed
-        to_send.time_point = collection_at_time.time_point;
         for (auto& data : collection_at_time.collection_data)
         {
             auto cid = data->getCID();
@@ -198,17 +248,9 @@ private:
             to_send.collection_data.emplace_back(std::move(data));
         }
 
-        // Append enabled/disabled info
-        const auto& changes_src = collection_at_time.enabled_changes;
-        auto& changes_dst = to_send.enabled_changes;
-        changes_dst.insert(
-            changes_dst.end(),
-            changes_src.begin(),
-            changes_src.end());
-
         // Update our data structures to account for enabled/disabled
         // changes at this time point.
-        for (const auto& [cid, enabled] : changes_dst)
+        for (const auto& [cid, enabled] : collection_at_time.enabled_changes)
         {
             if (!enabled)
             {
@@ -216,6 +258,7 @@ private:
                 enabled_cids_.erase(cid);
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
+                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::DISABLED, false);
             }
             else
             {
@@ -223,6 +266,7 @@ private:
                 enabled_cids_.insert(cid);
                 refreshable_cids_.insert(cid);
                 countdowns_to_refresh_[cid] = 1;
+                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::ENABLED, true);
             }
         }
 
@@ -234,11 +278,13 @@ private:
             {
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
+                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::QUIETED, false);
             }
             else if (enabled_cids_.find(cid) != enabled_cids_.end())
             {
                 refreshable_cids_.insert(cid);
                 countdowns_to_refresh_[cid] = 1;
+                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::AWAKENED, true);
             }
         }
 
@@ -247,6 +293,10 @@ private:
         auto missing_cids = refreshable_cids_;
         for (auto& data : to_send.collection_data)
         {
+            if (isLifecycleAction_(data->getData()))
+            {
+                continue;
+            }
             auto cid = data->getCID();
             missing_cids.erase(cid);
             countdowns_to_refresh_[cid] = heartbeat_;
@@ -280,7 +330,7 @@ private:
         }
 
         // Send everything to the pipeline
-        if (!to_send.collection_data.empty() || !to_send.enabled_changes.empty())
+        if (!to_send.collection_data.empty())
         {
             pipeline_head_->emplace(std::move(to_send));
         }

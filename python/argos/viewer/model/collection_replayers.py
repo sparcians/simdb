@@ -15,6 +15,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.dtype_inspector import DataTypeInspector
 
+_FIRST_MINIFIER_ACTION = 4
+_DISABLED = 0
+_ENABLED = 1
+_QUIETD = 2
+_AWAKENED = 3
+
 
 def _split_container_type_name(type_name: str) -> Optional[Tuple[str, int, bool]]:
     for which, sparse in (("_sparse_capacity", True), ("_contig_capacity", False)):
@@ -69,26 +75,11 @@ class CollectableReplayerBase:
         return self._needs_backfill
 
 
-class ScalarRawReplayer(CollectableReplayerBase):
-    """POD, enum, string: payload is exactly one scalar (no minifier prefix)."""
+class ScalarMinifiedReplayer(CollectableReplayerBase):
+    """POD, enum, string: payload is [uint16 action][optional scalar bytes]."""
 
-    def __init__(self, cid: int, type_name: str, inspector: Any) -> None:
-        super().__init__(cid, type_name, inspector)
-        self._deserializer = inspector.GetDeserializer(type_name)
-
-    def replay_next(self, buf: ByteBuffer) -> Any:
-        return self._deserializer.Deserialize(buf)
-
-
-class StructMinifiedReplayer(CollectableReplayerBase):
-    """
-    Struct with ArgosCollector: payload is [uint16 action][body...].
-    FULL (0): body is fixed-width struct bytes (see StructDeserializer.GetNumBytes()).
-    CARRY (1): no body; value unchanged from last FULL/CARRY resolution.
-    """
-
-    _FULL = 0
-    _CARRY = 1
+    _FULL = _FIRST_MINIFIER_ACTION + 0
+    _CARRY = _FIRST_MINIFIER_ACTION + 1
 
     def __init__(self, cid: int, type_name: str, inspector: Any) -> None:
         super().__init__(cid, type_name, inspector)
@@ -101,6 +92,57 @@ class StructMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("H"))
+        if action in (_DISABLED, _QUIETD):
+            self._last = {}
+            return {}
+
+        if action in (_ENABLED, _AWAKENED):
+            # Producer appends this CID's prior action+payload tail.
+            return self.replay_next(buf)
+
+        if action == self._FULL:
+            nbytes = self._deserializer.GetNumBytes()
+            raw = buf.Extract(nbytes)
+            self._last = self._deserializer.Deserialize(raw)
+            return self._last
+
+        if action == self._CARRY:
+            if self._last is None:
+                self._MarkNeedsBackfill()
+                return {}
+            return self._last
+
+        raise RuntimeError(
+            f"CID {self.cid}: unknown scalar MinifierAction {action} for {self.type_name!r}"
+        )
+
+
+class StructMinifiedReplayer(CollectableReplayerBase):
+    """
+    Struct with ArgosCollector: payload is [uint16 action][body...].
+    FULL (0): body is fixed-width struct bytes (see StructDeserializer.GetNumBytes()).
+    CARRY (1): no body; value unchanged from last FULL/CARRY resolution.
+    """
+
+    _FULL = _FIRST_MINIFIER_ACTION + 0
+    _CARRY = _FIRST_MINIFIER_ACTION + 1
+
+    def __init__(self, cid: int, type_name: str, inspector: Any) -> None:
+        super().__init__(cid, type_name, inspector)
+        self._deserializer = inspector.GetDeserializer(type_name)
+        self._last: Any = None
+
+    def ResetReplayState(self) -> None:
+        super().ResetReplayState()
+        self._last = None
+
+    def replay_next(self, buf: ByteBuffer) -> Any:
+        action = int(buf.Read("H"))
+        if action in (_DISABLED, _QUIETD):
+            self._last = {}
+            return {}
+        if action in (_ENABLED, _AWAKENED):
+            return self.replay_next(buf)
         if action == self._FULL:
             nbytes = self._deserializer.GetNumBytes()
             raw = buf.Extract(nbytes)
@@ -120,12 +162,12 @@ class StructMinifiedReplayer(CollectableReplayerBase):
 class ContigContainerMinifiedReplayer(CollectableReplayerBase):
     """Contiguous container: minifier actions match C++ enum order (0..5)."""
 
-    _FULL = 0
-    _CARRY = 1
-    _SWAP = 2
-    _ARRIVE = 3
-    _DEPART = 4
-    _BOOKENDS = 5
+    _FULL = _FIRST_MINIFIER_ACTION + 0
+    _CARRY = _FIRST_MINIFIER_ACTION + 1
+    _SWAP = _FIRST_MINIFIER_ACTION + 2
+    _ARRIVE = _FIRST_MINIFIER_ACTION + 3
+    _DEPART = _FIRST_MINIFIER_ACTION + 4
+    _BOOKENDS = _FIRST_MINIFIER_ACTION + 5
 
     def __init__(self, cid: int, type_name: str, inspector: Any, base: str, capacity: int) -> None:
         super().__init__(cid, type_name, inspector)
@@ -139,6 +181,11 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("H"))
+        if action in (_DISABLED, _QUIETD):
+            self._items = []
+            return list(self._items)
+        if action in (_ENABLED, _AWAKENED):
+            return self.replay_next(buf)
         if action == self._FULL:
             size = int(buf.Read("H"))
             if size > self._capacity:
@@ -182,10 +229,10 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
 
 
 class SparseContainerMinifiedReplayer(CollectableReplayerBase):
-    _FULL = 0
-    _CARRY = 1
-    _EXCHANGE = 2
-    _REMOVE = 3
+    _FULL = _FIRST_MINIFIER_ACTION + 0
+    _CARRY = _FIRST_MINIFIER_ACTION + 1
+    _EXCHANGE = _FIRST_MINIFIER_ACTION + 2
+    _REMOVE = _FIRST_MINIFIER_ACTION + 3
 
     def __init__(self, cid: int, type_name: str, inspector: Any, base: str, capacity: int) -> None:
         super().__init__(cid, type_name, inspector)
@@ -199,6 +246,11 @@ class SparseContainerMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("H"))
+        if action in (_DISABLED, _QUIETD):
+            self._cells = [None] * self._capacity
+            return list(self._cells)
+        if action in (_ENABLED, _AWAKENED):
+            return self.replay_next(buf)
         if action == self._FULL:
             n = int(buf.Read("H"))
             self._cells = [None] * self._capacity
@@ -236,7 +288,7 @@ def CreateCollectableReplayer(cid: int, type_name: str, inspector: Any) -> Colle
     if inspector.GetStructDefn(type_name) is not None:
         return StructMinifiedReplayer(cid, type_name, inspector)
 
-    return ScalarRawReplayer(cid, type_name, inspector)
+    return ScalarMinifiedReplayer(cid, type_name, inspector)
 
 
 def _GetDbFilePath(db_conn: Any) -> str:
