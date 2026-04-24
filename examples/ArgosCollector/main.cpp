@@ -19,6 +19,9 @@ TEST_INIT;
 /// Call once per test function.
 #define TEST_METHOD_INIT simdb::collection::CollectableBase::resetCIDs()
 
+/// Helper to create test-specific byte traces for debugging.
+#define ENABLE_BYTE_TRACER collection.enableByteTracer(__FUNCTION__ + std::string(".trace"));
+
 constexpr size_t RUN_TICKS = 1000;
 
 enum InstType
@@ -289,6 +292,7 @@ void TestScalarCollection()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
@@ -377,6 +381,7 @@ void TestEnabledLogic()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
@@ -509,6 +514,7 @@ void TestQuietLogic()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
@@ -561,6 +567,7 @@ void TestMultiClock()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1); // Root clock, period 1
     collection.addCollection("clk2", 2); // Another clock, period 2
@@ -771,6 +778,7 @@ void TestFlatten()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
@@ -812,6 +820,7 @@ void TestContainers()
     uint64_t tick = 0;
     size_t heartbeat = 100;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
@@ -928,6 +937,7 @@ void TestPointers()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
@@ -1112,6 +1122,7 @@ void TestMultiArgosCollectors()
     uint64_t tick = 0;
     size_t heartbeat = 3;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
     collection.addCollection("root", 1);
 
