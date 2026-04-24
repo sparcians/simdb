@@ -502,6 +502,58 @@ void TestEnabledLogic()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
+void TestQuietLogic()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    size_t heartbeat = 3;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    auto val1_collector = collection.collectScalarManually<int32_t>("val1", "root");
+    auto val2_collector = collection.collectScalarManually<int32_t>("val2", "root");
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    // Tick 1: both collected to establish last-seen bytes.
+    tick = 1;
+    val1_collector->collect(10);
+    val2_collector->collect(20);
+
+    // Tick 2: quiet val2 so heartbeat refreshes stop.
+    tick = 2;
+    val2_collector->quiet();
+    val1_collector->collect(11);
+
+    // Ticks 3-4: only val1 updates; val2 should stay quiet.
+    tick = 3;
+    val1_collector->collect(12);
+
+    tick = 4;
+    val1_collector->collect(13);
+
+    // Tick 5: explicit collect on val2 should implicitly awaken.
+    tick = 5;
+    val1_collector->collect(14);
+    val2_collector->collect(21);
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+}
+
 void TestMultiClock()
 {
     TEST_METHOD_INIT;
@@ -1115,6 +1167,7 @@ int main()
 
     TestScalarCollection();
     TestEnabledLogic();
+    TestQuietLogic();
     TestMultiClock();
     TestFlatten();
     TestContainers();
