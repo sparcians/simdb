@@ -63,7 +63,9 @@ private:
 class CollectionByteTraceSession
 {
 public:
-    explicit CollectionByteTraceSession(const std::string& path) : prev_(g_collection_byte_tracer)
+    CollectionByteTraceSession(const std::string& path)
+        : prev_(g_collection_byte_tracer)
+        , filepath_(path)
     {
         sink_ = std::make_unique<CollectionByteTraceFileSink>(path);
         g_collection_byte_tracer = sink_.get();
@@ -77,11 +79,14 @@ public:
         g_collection_byte_tracer = prev_;
     }
 
+    const std::string& getTraceFile() const { return filepath_; }
+
     bool sinkGood() const { return sink_ && sink_->good(); }
 
 private:
     CollectionByteTracer* prev_ = nullptr;
     std::unique_ptr<CollectionByteTraceFileSink> sink_;
+    std::string filepath_;
 };
 
 } // namespace simdb::utils

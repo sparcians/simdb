@@ -270,7 +270,19 @@ public:
     /// \c Collection is destroyed or \ref enableByteTracer is called again.
     void enableByteTracer(const std::string& path = "simdb_collection_bytes.sim") override
     {
-        tracer_ = std::make_unique<simdb::utils::CollectionByteTraceSession>(path);
+        if (tracer_ && tracer_->getTraceFile() == path)
+        {
+            return;
+        }
+        else if (tracer_)
+        {
+            std::cout << "WARNING: Ignoring request to redirect SimDB collection trace from '"
+                      << tracer_->getTraceFile() << "' to '" << path << "'" << std::endl;
+        }
+        else
+        {
+            tracer_ = std::make_unique<simdb::utils::CollectionByteTraceSession>(path);
+        }
     }
 
     /// \brief Run auto-collection on all collectables configured for it
