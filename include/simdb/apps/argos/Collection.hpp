@@ -83,7 +83,6 @@ public:
     {
         ensureTimestampReconfigurable_();
         timestamp_ = std::make_shared<Timestamp<TimeT>>(backpointer);
-        wireMinifierLogTimeSupplier_();
     }
 
     /// \brief Use a C-style function pointer to get the current time for every clock domain.
@@ -92,7 +91,6 @@ public:
     {
         ensureTimestampReconfigurable_();
         timestamp_ = std::make_shared<Timestamp<TimeT>>(fn);
-        wireMinifierLogTimeSupplier_();
     }
 
     /// \brief Use a \c std::function to get the current time for every clock domain.
@@ -101,7 +99,6 @@ public:
     {
         ensureTimestampReconfigurable_();
         timestamp_ = std::make_shared<Timestamp<TimeT>>(std::move(fn));
-        wireMinifierLogTimeSupplier_();
     }
 
     /// \brief Return the collection heartbeat
@@ -319,18 +316,6 @@ public:
     }
 
 private:
-    /// \brief Hook minifier stdout tracing to this collection's timestamp (see \ref minifier_logging).
-    void wireMinifierLogTimeSupplier_()
-    {
-        minifier_logging::set_time_supplier([this]() -> std::string {
-            if (!timestamp_)
-            {
-                return "?";
-            }
-            return timestamp_->snapshot()->getTimeAsString();
-        });
-    }
-
     /// \brief Verify that all collectables are uniquely owned by clock-specific
     /// \ref TimeDomainCollection instances
     void verifyNoDupPaths_(const std::string& path)

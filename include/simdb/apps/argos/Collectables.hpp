@@ -271,7 +271,7 @@ public:
         CollectedData collected(getID());
         if constexpr (detail::has_argos_collector_v<ValueType>)
         {
-            minifier_.minifyAndAppend(collected.getBuffer(), value, getID());
+            minifier_.minifyAndAppend(collected.getBuffer(), value);
         }
         else
         {
@@ -280,7 +280,6 @@ public:
                 static_cast<uint8_t>(LifecycleAction::AWAKENED) + 1;
             collected.getBuffer().append(&kFirstMinifierActionValue, sizeof(kFirstMinifierActionValue), "action");
             dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
-            minifier_logging::log_minifier_action(getID(), "FULL");
         }
         stage_(std::move(collected));
     }
@@ -437,7 +436,7 @@ public:
         CollectedData collected(getID());
         auto num_elements = getNumElements<T, Sparse>(container);
         max_size_collected_ = std::max(max_size_collected_, num_elements);
-        minifier_.minifyAndAppend(collected.getBuffer(), container, getID());
+        minifier_.minifyAndAppend(collected.getBuffer(), container);
 
         stage_(std::move(collected));
     }

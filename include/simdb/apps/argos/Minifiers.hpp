@@ -20,64 +20,6 @@
 
 namespace simdb::collection {
 
-/// \brief Optional stdout tracing for minifier actions (grep for the literal token \c XXX).
-/// When enabled, each minify step prints one line:
-/// \code
-/// XXX time_point <t>, cid <id> -> <ACTION>
-/// \endcode
-/// Set \ref set_time_supplier from your \c Collection::timestampWith setup (see \c Collection.hpp)
-/// so \c time_point matches the simulation clock used for collection.
-namespace minifier_logging {
-
-inline std::atomic<bool> enabled{false};
-
-inline void set_enabled(bool on) noexcept
-{
-    enabled.store(on, std::memory_order_relaxed);
-}
-
-inline bool is_enabled() noexcept
-{
-    return enabled.load(std::memory_order_relaxed);
-}
-
-/// Supplier is read only while \ref is_enabled(); set or clear from configuration / \c Collection.
-inline std::shared_ptr<std::function<std::string()>> time_supplier;
-
-inline void set_time_supplier(std::function<std::string()> fn)
-{
-    if (fn)
-    {
-        time_supplier = std::make_shared<std::function<std::string()>>(std::move(fn));
-    }
-    else
-    {
-        time_supplier.reset();
-    }
-}
-
-inline void clear_time_supplier() noexcept
-{
-    time_supplier.reset();
-}
-
-inline void log_minifier_action(uint16_t cid, const char* action_name)
-{
-    if (!is_enabled())
-    {
-        return;
-    }
-    std::string time_str = "?";
-    if (const auto sp = time_supplier; sp && *sp)
-    {
-        time_str = (*sp)();
-    }
-    std::cout << "XXX time_point " << time_str << ", cid " << static_cast<unsigned>(cid) << " -> " << action_name
-              << '\n';
-}
-
-} // namespace minifier_logging
-
 template <typename ContainerT, bool Sparse>
 inline uint16_t getNumElements(const ContainerT& container)
 {
@@ -137,15 +79,13 @@ public:
         , heartbeat_(heartbeat)
     {}
 
-    void minifyAndAppend(StreamBuffer& buf, const ValueType& value, const uint16_t cid)
+    void minifyAndAppend(StreamBuffer& buf, const ValueType& value)
     {
         StreamBuffer my_buffer(cur_extracted_bytes_, true, false);
         dtype_hierarchy_->writeBuffer(my_buffer, value);
 
-        MinifierAction action;
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
-            action = MinifierAction::FULL;
             simdb::append_traced_enum(buf, MinifierAction::FULL, "action");
             ++action_counts_[actionIndex_(MinifierAction::FULL)];
             buf << cur_extracted_bytes_;
@@ -155,12 +95,10 @@ public:
         }
         else
         {
-            action = MinifierAction::CARRY;
             simdb::append_traced_enum(buf, MinifierAction::CARRY, "action");
             ++action_counts_[actionIndex_(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
-        minifier_logging::log_minifier_action(cid, actionName_(action));
     }
 
     std::vector<size_t> getActionCounts() const
@@ -181,18 +119,6 @@ private:
         FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),   // Value changed or we are at a heartbeat.
         CARRY       // Same value or not at a heartbeat.
     };
-
-    static const char* actionName_(const MinifierAction action) noexcept
-    {
-        switch (action)
-        {
-            case MinifierAction::FULL:
-                return "FULL";
-            case MinifierAction::CARRY:
-                return "CARRY";
-        }
-        return "?";
-    }
 
     static size_t actionIndex_(const MinifierAction action)
     {
@@ -233,7 +159,7 @@ public:
         , elem_path_(elem_path)
     {}
 
-    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container, const uint16_t cid)
+    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container)
     {
         const auto curr_size = writeBins_(container, curr_bins_);
         const auto action = (!has_history_ || shouldWriteFull_())
@@ -241,7 +167,6 @@ public:
             : getMinifierAction_(curr_bins_, curr_size, prev_bins_, prev_size_);
 
         writeAction_(buf, action, curr_size);
-        minifier_logging::log_minifier_action(cid, actionName_(action));
 
         if (prev_bins_.size() < curr_bins_.size())
         {
@@ -286,26 +211,6 @@ private:
         DEPART,     // One item left the front of the container.
         BOOKENDS    // One arrived and one departed.
     };
-
-    static const char* actionName_(const MinifierAction action) noexcept
-    {
-        switch (action)
-        {
-            case MinifierAction::FULL:
-                return "FULL";
-            case MinifierAction::CARRY:
-                return "CARRY";
-            case MinifierAction::SWAP:
-                return "SWAP";
-            case MinifierAction::ARRIVE:
-                return "ARRIVE";
-            case MinifierAction::DEPART:
-                return "DEPART";
-            case MinifierAction::BOOKENDS:
-                return "BOOKENDS";
-        }
-        return "?";
-    }
 
     static size_t actionIndex_(const MinifierAction action)
     {
@@ -527,7 +432,7 @@ public:
         curr_pairs_.reserve(expected_capacity);
     }
 
-    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container, const uint16_t cid)
+    void minifyAndAppend(StreamBuffer& buf, const ContainerType& container)
     {
         writePairs_(container);
 
@@ -537,7 +442,6 @@ public:
             : getMinifierAction_(exchange_idx);
 
         writeAction_(buf, action, exchange_idx);
-        minifier_logging::log_minifier_action(cid, actionName_(action));
 
         prev_bins_.clear();
         prev_bins_.reserve(curr_pairs_.size());
