@@ -20,7 +20,7 @@ class ArgosFrame(wx.Frame):
         self.simhier = SimHierarchy(self.db, self.dtype_inspector)
         self.widget_renderer = WidgetRenderer(self)
         self.widget_creator = WidgetCreator(self)
-        self.data_retriever = DataRetriever(self, self.db, self.simhier, self.dtype_inspector)
+        self.data_retriever = DataRetriever(self, db_path, self.simhier, self.dtype_inspector)
 
         self.frame_splitter = DirtySplitterWindow(self, self, style=wx.SP_LIVE_UPDATE)
         self.explorer = DataExplorer(self.frame_splitter, self)

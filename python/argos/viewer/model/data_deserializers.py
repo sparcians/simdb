@@ -188,6 +188,8 @@ class EnumDeserializer:
     def Deserialize(self, data_bytes):
         enum_val = self._val_deserializer.Deserialize(data_bytes)
         enum_val = int(enum_val)
+        if enum_val not in self._enum_map:
+            import pdb; pdb.set_trace()
         return self._enum_map[enum_val]
 
 # This class deserializes contiguous container types.

@@ -1,4 +1,4 @@
-import zlib, copy
+import zlib, copy, sqlite3
 from viewer.gui.view_settings import DirtyReasons
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.data_deserializers import SimpleDeserializer
@@ -6,14 +6,16 @@ from viewer.model.data_deserializers import StringDeserializer
 from viewer.model.data_deserializers import EnumDeserializer
 from viewer.model.data_deserializers import ContigContainerDeserializer
 from viewer.model.data_deserializers import SparseContainerDeserializer
+from viewer.model.collection_replayers import CollectionReplaySession
 
 class DataRetriever:
-    def __init__(self, frame, db, simhier, dtype_inspector):
+    def __init__(self, frame, db_path, simhier, dtype_inspector):
         self.frame = frame
-        self._db = db
+        self._db = sqlite3.connect(db_path)
+        self._replay_session = CollectionReplaySession(db_path, dtype_inspector)
         self.simhier = simhier
         self.dtype_inspector = dtype_inspector
-        self.cursor = db.cursor()
+        self.cursor = self._db.cursor()
         cursor = self.cursor
 
         cursor.execute('SELECT Heartbeat FROM CollectionGlobals')
@@ -171,7 +173,32 @@ class DataRetriever:
         return {id:0 for id in self.simhier.GetContainerIDs()}
 
     def Unpack(self, elem_path, time_range):
-        
+        if not type(time_range) in (list, tuple):
+            time_range = [time_range]
+
+        time_range = list(time_range)
+        for i,t in enumerate(time_range):
+            if isinstance(t, str):
+                t = int(t)
+                time_range[i] = t
+
+        if len(time_range) == 1:
+            time_range = [time_range, time_range]
+
+        cid = self.simhier.GetCollectionID(elem_path)
+        unpacked = {
+            'TimeVals': [],
+            'DataVals': []
+        }
+
+        import pdb; pdb.set_trace()
+        for time_point in self._time_vals:
+            if time_point >= time_range[0] and time_point <= time_range[1]:
+                data_at_this_time = self._replay_session.GetDataValueAtTime(cid, time_point)
+                unpacked['TimeVals'].append(time_point)
+                unpacked['DataVals'].append(data_at_this_time)
+
+        return unpacked
 
     def GetAllTimeVals(self):
         return copy.deepcopy(self._time_vals)
