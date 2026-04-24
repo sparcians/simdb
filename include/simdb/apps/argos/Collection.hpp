@@ -8,6 +8,7 @@
 #include "simdb/apps/argos/Minifiers.hpp"
 #include "simdb/apps/argos/DataTypeInspector.hpp"
 #include "simdb/apps/argos/DataTypeSerializer.hpp"
+#include "simdb/utils/CollectionByteTrace.hpp"
 #include "simdb/utils/Tree.hpp"
 #include "simdb/utils/TypeTraits.hpp"
 #include "simdb/Exceptions.hpp"
@@ -264,6 +265,14 @@ public:
         return dtype_inspector_.getTinyStrings();
     }
 
+    /// \brief Enable per-thread collection byte tracing to \p path for this collection's lifetime
+    /// (replaces any previous tracer). Tracing is active on the thread that calls this until the
+    /// \c Collection is destroyed or \ref enableByteTracer is called again.
+    void enableByteTracer(const std::string& path = "simdb_collection_bytes.sim") override
+    {
+        tracer_ = std::make_unique<simdb::utils::CollectionByteTraceSession>(path);
+    }
+
     /// \brief Run auto-collection on all collectables configured for it
     void performAutoCollection(const std::string& clk_name, bool send_to_pipeline = false)
     {
@@ -431,6 +440,7 @@ private:
     DataTypeInspector dtype_inspector_;
     std::shared_ptr<Timestamp<TimeT>> timestamp_;
     std::unique_ptr<PipelineStager<TimeT>> stager_;
+    std::unique_ptr<simdb::utils::CollectionByteTraceSession> tracer_;
 };
 
 } // namespace simdb::collection

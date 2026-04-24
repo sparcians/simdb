@@ -196,13 +196,13 @@ private:
 
         auto lifecycle = std::make_unique<CollectedData>(cid);
         auto& buf = lifecycle->getBuffer();
-        buf << action;
+        simdb::append_traced_enum(buf, action, "action");
 
         if (payload_tail)
         {
             const auto src = payload_tail->data() + kCidBytes;
             const auto src_bytes = payload_tail->size() - kCidBytes;
-            buf.append(src, src_bytes);
+            buf.append(src, src_bytes, "lifecycle payload tail");
         }
 
         collection.emplace_back(std::move(lifecycle));
@@ -323,7 +323,7 @@ private:
                 const auto src = last_sent_bytes.data() + sizeof(uint16_t);
                 const auto src_bytes = last_sent_bytes.size() - sizeof(uint16_t);
                 auto& buffer = injected_data->getBuffer();
-                buffer.append(src, src_bytes);
+                buffer.append(src, src_bytes, "heartbeat replay bytes");
                 to_send.collection_data.emplace_back(std::move(injected_data));
                 countdowns_to_refresh_[cid] = heartbeat_;
             }

@@ -2,10 +2,13 @@
 
 #pragma once
 
+#include "simdb/utils/CollectionByteTrace.hpp"
+
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -16,9 +19,11 @@ namespace simdb {
 class StreamBuffer
 {
 public:
-    /// Create with a reference to the final buffer.
-    StreamBuffer(std::vector<char>& out, bool clear_first = true) :
-        out_(out)
+    /// \param participate_in_byte_trace When false, this buffer never records to
+    ///        \ref simdb::utils::active_collection_byte_tracer (use for scratch
+    ///        buffers whose bytes are not part of the persisted collection layout).
+    StreamBuffer(std::vector<char>& out, bool clear_first = true, bool participate_in_byte_trace = true) :
+        out_(out), participate_in_byte_trace_(participate_in_byte_trace)
     {
         if (clear_first)
         {
@@ -26,8 +31,15 @@ public:
         }
     }
 
-    void append(const void* data, const size_t num_bytes)
+    void append(const void* data, const size_t num_bytes, const std::string_view trace_description = {})
     {
+        if (participate_in_byte_trace_)
+        {
+            if (auto* tracer = utils::active_collection_byte_tracer())
+            {
+                tracer->recordWrite(num_bytes, trace_description);
+            }
+        }
         auto bytes = static_cast<const char*>(data);
         out_.insert(out_.end(), bytes, bytes + num_bytes);
     }
@@ -40,7 +52,17 @@ public:
 
 private:
     std::vector<char>& out_;
+    bool participate_in_byte_trace_ = true;
 };
+
+/// Serialize an enum as its fixed-width underlying integer, with an optional byte-trace label.
+template <typename EnumT>
+inline void append_traced_enum(StreamBuffer& buf, const EnumT value, const char* trace_label)
+{
+    using U = std::underlying_type_t<EnumT>;
+    const U underlying = static_cast<U>(value);
+    buf.append(&underlying, sizeof(U), trace_label);
+}
 
 inline StreamBuffer& operator<<(StreamBuffer& buf, const std::string& val)
 {

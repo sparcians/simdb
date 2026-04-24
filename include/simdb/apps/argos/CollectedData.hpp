@@ -14,7 +14,7 @@ public:
     explicit CollectedData(uint16_t cid)
         : cid_(cid)
     {
-        buffer_ << cid_;
+        buffer_.append(&cid_, sizeof(cid_), "cid");
     }
 
     CollectedData(CollectedData&&) = default;

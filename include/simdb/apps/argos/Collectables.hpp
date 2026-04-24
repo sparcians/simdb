@@ -278,7 +278,7 @@ public:
             // Action byte marks this as a regular payload (not a lifecycle event).
             constexpr uint8_t kFirstMinifierActionValue =
                 static_cast<uint8_t>(LifecycleAction::AWAKENED) + 1;
-            collected.getBuffer() << kFirstMinifierActionValue;
+            collected.getBuffer().append(&kFirstMinifierActionValue, sizeof(kFirstMinifierActionValue), "action");
             dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
             minifier_logging::log_minifier_action(getID(), "FULL");
         }

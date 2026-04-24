@@ -6,6 +6,8 @@
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 
+#include <string>
+
 namespace simdb::collection {
 
 /// \class CollectionBase
@@ -22,6 +24,13 @@ public:
     virtual void sendCollectedDataToPipeline() = 0;
     virtual bool minifiersSawAllActions() const = 0;
     virtual void writeMetaOnPostTeardown(DatabaseManager* db_mgr) = 0;
+
+    /// Optional collection byte tracing (see \c simdb::utils::CollectionByteTraceSession).
+    /// Default: no-op. \c Collection overrides to install a per-instance trace session.
+    virtual void enableByteTracer(const std::string& path = "simdb_collection_bytes.sim")
+    {
+        (void)path;
+    }
 };
 
 } // namespace simdb::collection

@@ -139,14 +139,14 @@ public:
 
     void minifyAndAppend(StreamBuffer& buf, const ValueType& value, const uint16_t cid)
     {
-        StreamBuffer my_buffer(cur_extracted_bytes_);
+        StreamBuffer my_buffer(cur_extracted_bytes_, true, false);
         dtype_hierarchy_->writeBuffer(my_buffer, value);
 
         MinifierAction action;
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
             action = MinifierAction::FULL;
-            buf << MinifierAction::FULL;
+            simdb::append_traced_enum(buf, MinifierAction::FULL, "action");
             ++action_counts_[actionIndex_(MinifierAction::FULL)];
             buf << cur_extracted_bytes_;
             last_sent_bytes_ = cur_extracted_bytes_;
@@ -156,7 +156,7 @@ public:
         else
         {
             action = MinifierAction::CARRY;
-            buf << MinifierAction::CARRY;
+            simdb::append_traced_enum(buf, MinifierAction::CARRY, "action");
             ++action_counts_[actionIndex_(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
@@ -340,7 +340,7 @@ private:
 
     void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer)
     {
-        StreamBuffer buf(bin_buffer);
+        StreamBuffer buf(bin_buffer, true, false);
         dtype_hierarchy_->writeBuffer(buf, bin_value);
     }
 
@@ -462,7 +462,7 @@ private:
     void writeAction_(StreamBuffer& buf, const MinifierAction action, const uint16_t curr_size)
     {
         ++action_counts_[actionIndex_(action)];
-        buf << action;
+        simdb::append_traced_enum(buf, action, "action");
         switch (action)
         {
             case MinifierAction::CARRY:
@@ -634,7 +634,7 @@ private:
 
     void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer)
     {
-        StreamBuffer buf(bin_buffer);
+        StreamBuffer buf(bin_buffer, true, false);
         dtype_hierarchy_->writeBuffer(buf, bin_value);
     }
 
@@ -717,7 +717,7 @@ private:
     void writeAction_(StreamBuffer& buf, MinifierAction action, const uint16_t exchange_idx) const
     {
         ++action_counts_[actionIndex_(action)];
-        buf << action;
+        simdb::append_traced_enum(buf, action, "action");
         switch (action)
         {
             case MinifierAction::CARRY:
