@@ -278,7 +278,7 @@ private:
             {
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
-                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::QUIETD, false);
+                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::QUIETED, false);
             }
             else if (enabled_cids_.find(cid) != enabled_cids_.end())
             {

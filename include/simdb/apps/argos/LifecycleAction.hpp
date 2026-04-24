@@ -8,7 +8,7 @@ enum class LifecycleAction : uint8_t
 {
     DISABLED = 0,
     ENABLED,
-    QUIETD,
+    QUIETED,
     AWAKENED,
     __FIRST_MINIFIER_ACTION
 };
