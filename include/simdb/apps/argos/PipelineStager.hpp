@@ -11,6 +11,7 @@ namespace simdb::collection {
 
 using CollectionDataAtTimePoint = std::vector<std::unique_ptr<CollectedData>>;
 using EnabledChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
+using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 using CollectionTime = std::shared_ptr<TimePointBase>;
 
 struct QueueCollectionData
@@ -18,6 +19,7 @@ struct QueueCollectionData
     CollectionTime time_point;
     CollectionDataAtTimePoint collection_data;
     EnabledChangedAtTimePoint enabled_changes;
+    QuietChangedAtTimePoint quiet_changes;
 };
 
 class PipelineStagerBase
@@ -27,6 +29,7 @@ public:
     virtual void stage(CollectedData&& data) = 0;
     virtual void sendCollectedDataToPipeline() = 0;
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
+    virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
     virtual void forget(uint16_t cid) = 0;
 };
 
@@ -46,7 +49,8 @@ public:
     {
         auto cid = data.getCID();
         assert(cid != 0);
-        all_known_cids_.insert(cid);
+        enabled_cids_.insert(cid);
+        refreshable_cids_.insert(cid);
 
         auto current_time = timestamp_->snapshot();
         if (!last_stage_time_)
@@ -123,6 +127,36 @@ public:
         //last_sent_bytes_.erase(cid);
     }
 
+    void onQuietChanged(uint16_t cid, bool quiet) override
+    {
+        auto current_time = timestamp_->snapshot();
+        if (!last_stage_time_)
+        {
+            last_stage_time_ = current_time;
+        }
+        else if (!current_time->lessThan(last_stage_time_.get()))
+        {
+            last_stage_time_ = current_time;
+        }
+        else
+        {
+            throw DBException("Time must be monotonically increasing");
+        }
+
+        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(current_time.get(), true))
+        {
+            QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
+            changes.emplace_back(std::make_pair(cid, quiet));
+        }
+        else
+        {
+            QueueCollectionData entry;
+            entry.time_point = current_time;
+            entry.quiet_changes.emplace_back(std::make_pair(cid, quiet));
+            waiting_queue_.emplace(std::move(entry));
+        }
+    }
+
 private:
     void sendToPipeline_(QueueCollectionData& collection_at_time)
     {
@@ -178,23 +212,39 @@ private:
         {
             if (!enabled)
             {
-                // Remove this CID from our data structures so we don't
-                // end up sending any bytes down the pipeline until it
-                // is re-enabled.
-                all_known_cids_.erase(cid);
+                // Disabled CIDs cannot be collected or heartbeat-refreshed.
+                enabled_cids_.erase(cid);
+                refreshable_cids_.erase(cid);
+                countdowns_to_refresh_.erase(cid);
             }
             else
             {
-                // Add this CID back into our data structures so we can
-                // consider "refreshing" its bytes every heartbeat.
-                all_known_cids_.insert(cid);
-                countdowns_to_refresh_[cid] = 1; // Force last seen bytes
+                // Re-enabled CIDs are again eligible to refresh.
+                enabled_cids_.insert(cid);
+                refreshable_cids_.insert(cid);
+                countdowns_to_refresh_[cid] = 1;
+            }
+        }
+
+        // Apply quiet/awaken transitions after enabled changes so the
+        // final state at this time point is unambiguous.
+        for (const auto& [cid, quiet] : collection_at_time.quiet_changes)
+        {
+            if (quiet)
+            {
+                refreshable_cids_.erase(cid);
+                countdowns_to_refresh_.erase(cid);
+            }
+            else if (enabled_cids_.find(cid) != enabled_cids_.end())
+            {
+                refreshable_cids_.insert(cid);
+                countdowns_to_refresh_[cid] = 1;
             }
         }
 
         // Periodically dump "last seen bytes" for any CIDs not
-        // encountered at this time point (disabled or not collected)
-        auto missing_cids = all_known_cids_;
+        // encountered at this time point (enabled+awake but not collected)
+        auto missing_cids = refreshable_cids_;
         for (auto& data : to_send.collection_data)
         {
             auto cid = data->getCID();
@@ -242,7 +292,8 @@ private:
     std::queue<QueueCollectionData> waiting_queue_;
     CollectionTime last_stage_time_;
     CollectionTime last_sent_time_;
-    std::unordered_set<uint16_t> all_known_cids_;
+    std::unordered_set<uint16_t> enabled_cids_;
+    std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;
     std::unordered_map<uint16_t, std::vector<char>> last_sent_bytes_;
 };

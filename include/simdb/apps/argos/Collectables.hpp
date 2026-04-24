@@ -69,10 +69,46 @@ public:
         }
     }
 
+    /// Suppress heartbeat re-emission of previously seen bytes.
+    void quiet()
+    {
+        if (!stager_) [[unlikely]]
+        {
+            throw DBException("Pipeline was never opened!");
+        }
+
+        if (!quiet_)
+        {
+            quiet_ = true;
+            stager_->onQuietChanged(getID(), quiet_);
+        }
+    }
+
+    /// Re-enable heartbeat re-emission of previously seen bytes.
+    void awaken()
+    {
+        if (!stager_) [[unlikely]]
+        {
+            throw DBException("Pipeline was never opened!");
+        }
+
+        if (quiet_)
+        {
+            quiet_ = false;
+            stager_->onQuietChanged(getID(), quiet_);
+        }
+    }
+
     /// Check enabled
     bool enabled() const
     {
         return enabled_;
+    }
+
+    /// Check whether heartbeat re-emission is suppressed.
+    bool quieted() const
+    {
+        return quiet_;
     }
 
     /// Run auto-collection for this collectable
@@ -101,11 +137,6 @@ public:
             throw DBException("Pipeline not opened!");
         }
         stager_->forget(getID());
-    }
-
-    void autoEnableOnCollect(bool auto_enable = true)
-    {
-        auto_enable_on_collect_ = auto_enable;
     }
 
     /// Demangled element type for scalars, or element demangle + \c _contig_capacityN / \c _sparse_capacityN for queues.
@@ -151,11 +182,6 @@ protected:
         initial_value_ = std::make_unique<CollectedData>(std::move(initial));
     }
 
-    bool autoEnableOnCollect_() const
-    {
-        return auto_enable_on_collect_;
-    }
-
 private:
     /// Unique ID generator.
     static uint16_t& nextCID_()
@@ -187,15 +213,14 @@ private:
     /// \brief Enabled flag
     bool enabled_ = true;
 
+    /// \brief Suppress heartbeat re-emission while true.
+    bool quiet_ = false;
+
     /// \brief Main entry point into the pipeline
     PipelineStagerBase* stager_ = nullptr;
 
     /// \brief Captured initial bytes
     std::unique_ptr<CollectedData> initial_value_;
-
-    /// \brief Should we enable() when collect() is called while
-    /// we are disabled?
-    bool auto_enable_on_collect_ = false;
 
     /// \note Friendship needed to the enabled_ flag can be set
     friend class DomainCollection;
@@ -233,24 +258,26 @@ public:
     std::enable_if_t<!type_traits::is_any_pointer_v<T>, void>
     collect(const T& value)
     {
-        if (!enabled() && autoEnableOnCollect_())
+        if (!enabled())
         {
-            enable();
+            return;
         }
 
-        if (enabled())
+        if (quieted())
         {
-            CollectedData collected(getID());
-            if constexpr (detail::has_argos_collector_v<ValueType>)
-            {
-                minifier_.minifyAndAppend(collected.getBuffer(), value, getID());
-            }
-            else
-            {
-                dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
-            }
-            stage_(std::move(collected));
+            awaken();
         }
+
+        CollectedData collected(getID());
+        if constexpr (detail::has_argos_collector_v<ValueType>)
+        {
+            minifier_.minifyAndAppend(collected.getBuffer(), value, getID());
+        }
+        else
+        {
+            dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
+        }
+        stage_(std::move(collected));
     }
 
     /// \brief Pointer-version of collect()
@@ -392,13 +419,14 @@ public:
     std::enable_if_t<!type_traits::is_any_pointer_v<T>, void>
     collect(const T& container)
     {
-        if (!enabled() && autoEnableOnCollect_())
-        {
-            enable();
-        }
-        else if (!enabled())
+        if (!enabled())
         {
             return;
+        }
+
+        if (quieted())
+        {
+            awaken();
         }
 
         CollectedData collected(getID());
