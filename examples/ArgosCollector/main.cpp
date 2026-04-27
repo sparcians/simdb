@@ -300,11 +300,27 @@ void CompareByteTraceWithPython(
     EXPECT_EQUAL(rc, 0);
 }
 
+void CompareValuesWithPython(
+    simdb::DatabaseManager* db_mgr,
+    const std::string& test_name)
+{
+    const auto db_path = db_mgr->getDatabaseFilePath();
+
+    std::ostringstream cmd;
+    cmd << "python3 ./value_compare.py";
+    cmd << " --db-file " << std::quoted(db_path);
+    cmd << " --test-name " << std::quoted(test_name);
+
+    const auto rc = std::system(cmd.str().c_str());
+    EXPECT_EQUAL(rc, 0);
+}
+
 void PostTestValidate(
     const std::string& test_name,
     simdb::DatabaseManager* db_mgr,
     const simdb::collection::CollectionBase& collection,
-    bool compare_bytes = false)
+    bool compare_bytes = false,
+    bool compare_values = false)
 {
     DumpCollection(db_mgr);
     EXPECT_TRUE(collection.minifiersSawAllActions());
@@ -315,6 +331,11 @@ void PostTestValidate(
             db_mgr,
             test_name + ".trace",
             test_name + ".ui.trace");
+    }
+
+    if (compare_values)
+    {
+        CompareValuesWithPython(db_mgr, test_name);
     }
 }
 
@@ -407,7 +428,7 @@ void TestScalarCollection()
 
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
 }
 
 void TestEnabledLogic()
