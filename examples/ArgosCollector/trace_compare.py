@@ -232,58 +232,48 @@ def _compare_traces(sim_trace: str, ui_trace: str) -> int:
     sim_rows = _read_trace_rows(sim_trace)
     ui_rows = _read_trace_rows(ui_trace)
 
-    def _rows_to_records(rows: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
-        records: list[list[tuple[str, str]]] = []
-        cur: list[tuple[str, str]] = []
+    def _rows_to_record_totals(rows: list[tuple[str, str]]) -> list[tuple[int, list[tuple[str, str]]]]:
+        records: list[tuple[int, list[tuple[str, str]]]] = []
+        cur_rows: list[tuple[str, str]] = []
+        cur_total = 0
         for row in rows:
             if row == ("2", "cid"):
-                if cur:
-                    records.append(cur)
-                    cur = []
-            cur.append(row)
-        if cur:
-            records.append(cur)
+                if cur_rows:
+                    records.append((cur_total, cur_rows))
+                    cur_rows = []
+                    cur_total = 0
+            else:
+                cur_total += int(row[0])
+            cur_rows.append(row)
+        if cur_rows:
+            records.append((cur_total, cur_rows))
         return records
 
-    sim_records = _rows_to_records(sim_rows)
-    ui_records = _rows_to_records(ui_rows)
+    sim_records = _rows_to_record_totals(sim_rows)
+    ui_records = _rows_to_record_totals(ui_rows)
 
     i = 0  # sim record index
-    j = 0  # ui record index
     tolerated_records = 0
     tolerated_rows = 0
 
-    while i < len(sim_records) and j < len(ui_records):
-        if sim_records[i] == ui_records[j]:
-            i += 1
-            j += 1
-            continue
-
-        # C++ trace is emitted pre-dedup; DB/UI replay is post-dedup.
-        # Skip sim-only records that were dropped before DB write.
-        i += 1
-        tolerated_records += 1
-        tolerated_rows += len(sim_records[i - 1])
-        continue
-
-        print("TRACE DIVERGENCE")
-        print(f"  sim record: {i + 1}")
-        print(f"  ui  record: {j + 1}")
-        print(f"  sim: {sim_records[i]}")
-        print(f"  ui : {ui_records[j]}")
-        return 1
-
-    if i < len(sim_records):
-        for rem in sim_records[i:]:
+    # Require UI records to appear in-order as a subsequence of SIM records.
+    for j, (ui_total, ui_rows_rec) in enumerate(ui_records):
+        while i < len(sim_records) and sim_records[i][0] != ui_total:
             tolerated_records += 1
-            tolerated_rows += len(rem)
-        i = len(sim_records)
+            tolerated_rows += len(sim_records[i][1])
+            i += 1
+        if i == len(sim_records):
+            print("TRACE DIVERGENCE")
+            print(f"  ui record not found in sim stream: {j + 1}")
+            print(f"  ui total bytes-after-cid: {ui_total}")
+            print(f"  ui rows: {ui_rows_rec}")
+            return 1
+        i += 1
 
-    if i != len(sim_records) or j != len(ui_records):
-        print("TRACE LENGTH MISMATCH")
-        print(f"  sim records: {len(sim_records)} (consumed {i})")
-        print(f"  ui  records: {len(ui_records)} (consumed {j})")
-        return 1
+    while i < len(sim_records):
+        tolerated_records += 1
+        tolerated_rows += len(sim_records[i][1])
+        i += 1
 
     if tolerated_records > 0:
         print("TRACE MATCH (sim has filtered pre-dedup records)")

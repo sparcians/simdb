@@ -408,7 +408,7 @@ void TestScalarCollection()
 
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
 }
 
 void TestEnabledLogic()
@@ -1105,7 +1105,7 @@ void TestPointers()
     collect_next_tick();
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
 class Outer
