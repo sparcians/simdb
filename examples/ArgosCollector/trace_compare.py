@@ -231,39 +231,49 @@ def _compare_traces(sim_trace: str, ui_trace: str) -> int:
     sim_rows = _read_trace_rows(sim_trace)
     ui_rows = _read_trace_rows(ui_trace)
 
-    max_common = min(len(sim_rows), len(ui_rows))
-    for idx in range(max_common):
-        if sim_rows[idx] != ui_rows[idx]:
-            print("TRACE DIVERGENCE")
-            print(f"  row: {idx + 2}")
-            print(f"  sim: {sim_rows[idx][0]!r}\t{sim_rows[idx][1]!r}")
-            print(f"  ui : {ui_rows[idx][0]!r}\t{ui_rows[idx][1]!r}")
-            return 1
+    def _is_sim_only_pair(rows: list[tuple[str, str]], i: int) -> bool:
+        return i + 1 < len(rows) and rows[i] == ("2", "cid") and rows[i + 1] == ("1", "action")
 
-    if len(sim_rows) != len(ui_rows):
-        # C++ tracing currently occurs at StreamBuffer write time, which can include
-        # rows that are later filtered out before DB insert (e.g. unchanged payloads).
-        # Tolerate trailing "cid/action-only" records on the sim side.
-        if len(sim_rows) > len(ui_rows):
-            tail = sim_rows[len(ui_rows) :]
-            tail_ok = (
-                len(tail) % 2 == 0 and
-                all(tail[i] == ("2", "cid") and tail[i + 1] == ("1", "action")
-                    for i in range(0, len(tail), 2))
-            )
-            if tail_ok:
-                print("TRACE MATCH (sim has filtered trailing records)")
-                print(f"  rows compared: {len(ui_rows)}")
-                print(f"  tolerated sim-only rows: {len(tail)}")
-                return 0
+    i = 0  # sim index
+    j = 0  # ui index
+    tolerated = 0
+    while i < len(sim_rows) and j < len(ui_rows):
+        if sim_rows[i] == ui_rows[j]:
+            i += 1
+            j += 1
+            continue
 
-        print("TRACE LENGTH MISMATCH")
-        print(f"  sim rows: {len(sim_rows)}")
-        print(f"  ui  rows: {len(ui_rows)}")
+        # C++ trace is emitted pre-dedup; DB/UI replay is post-dedup.
+        # Skip any sim-only cid/action pairs that don't survive to DB rows.
+        if _is_sim_only_pair(sim_rows, i):
+            i += 2
+            tolerated += 2
+            continue
+
+        print("TRACE DIVERGENCE")
+        print(f"  sim row: {i + 2}")
+        print(f"  ui  row: {j + 2}")
+        print(f"  sim: {sim_rows[i][0]!r}\t{sim_rows[i][1]!r}")
+        print(f"  ui : {ui_rows[j][0]!r}\t{ui_rows[j][1]!r}")
         return 1
 
-    print("TRACE MATCH")
-    print(f"  rows compared: {len(sim_rows)}")
+    while i < len(sim_rows) and _is_sim_only_pair(sim_rows, i):
+        i += 2
+        tolerated += 2
+
+    if i != len(sim_rows) or j != len(ui_rows):
+        print("TRACE LENGTH MISMATCH")
+        print(f"  sim rows: {len(sim_rows)} (consumed {i})")
+        print(f"  ui  rows: {len(ui_rows)} (consumed {j})")
+        return 1
+
+    if tolerated > 0:
+        print("TRACE MATCH (sim has filtered cid/action-only rows)")
+        print(f"  rows compared: {len(ui_rows)}")
+        print(f"  tolerated sim-only rows: {tolerated}")
+    else:
+        print("TRACE MATCH")
+        print(f"  rows compared: {len(sim_rows)}")
     return 0
 
 

@@ -1205,7 +1205,7 @@ void TestMultiArgosCollectors()
     EXPECT_TRUE(d_collector->minifierSawAllActions());
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
 int main()
