@@ -106,23 +106,27 @@ def _consume_payload_and_count_tail(
     action: int,
     layout: _CidLayout,
     last_payload_tail_by_cid: dict[int, int],
-) -> int:
-    # We already consumed 1 action byte. Return payload tail bytes consumed.
+) -> list[int]:
+    # We already consumed 1 action byte. Return appended chunk sizes after action.
     if action in (0, 2):  # DISABLED / QUIETED
-        return 0
+        return []
 
     if action in (1, 3):  # ENABLED / AWAKENED (optional replay tail)
-        tail = last_payload_tail_by_cid.get(layout.cid, 0)
-        if tail > 0:
-            buf.Extract(tail)
-        return tail
+        # Producer appends prior bytes from offset sizeof(cid), i.e. previous
+        # [action + payload_tail] for this CID.
+        prior_tail = last_payload_tail_by_cid.get(layout.cid, 0)
+        replay_tail = 0 if prior_tail == 0 else (1 + prior_tail)
+        if replay_tail > 0:
+            buf.Extract(replay_tail)
+            return [replay_tail]
+        return []
 
     if layout.mode == "scalar":
         if action == 4:  # FULL
             buf.Extract(layout.value_num_bytes)
-            return layout.value_num_bytes
+            return [layout.value_num_bytes]
         if action == 5:  # CARRY
-            return 0
+            return []
         raise RuntimeError(f"CID {layout.cid}: unknown scalar action {action}")
 
     if layout.mode == "contig":
@@ -130,18 +134,18 @@ def _consume_payload_and_count_tail(
         if action == 4:  # FULL
             size = int(buf.Read("H"))
             buf.Extract(size * bin_n)
-            return 2 + size * bin_n
+            return [2] + [bin_n] * size
         if action == 5:  # CARRY
-            return 0
+            return []
         if action == 6:  # SWAP
             buf.Read("H")
             buf.Extract(bin_n)
-            return 2 + bin_n
+            return [2, bin_n]
         if action in (7, 9):  # ARRIVE / BOOKENDS
             buf.Extract(bin_n)
-            return bin_n
+            return [bin_n]
         if action == 8:  # DEPART
-            return 0
+            return []
         raise RuntimeError(f"CID {layout.cid}: unknown contig action {action}")
 
     if layout.mode == "sparse":
@@ -151,16 +155,19 @@ def _consume_payload_and_count_tail(
             for _ in range(size):
                 buf.Read("H")
                 buf.Extract(bin_n)
-            return 2 + size * (2 + bin_n)
+            chunks = [2]
+            for _ in range(size):
+                chunks.extend([2, bin_n])
+            return chunks
         if action == 5:  # CARRY
-            return 0
+            return []
         if action == 6:  # EXCHANGE
             buf.Read("H")
             buf.Extract(bin_n)
-            return 2 + bin_n
+            return [2, bin_n]
         if action == 7:  # REMOVE
             buf.Read("H")
-            return 2
+            return [2]
         raise RuntimeError(f"CID {layout.cid}: unknown sparse action {action}")
 
     raise RuntimeError(f"CID {layout.cid}: unknown layout mode {layout.mode!r}")
@@ -188,20 +195,20 @@ def _emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> Non
                 action = _decode_action(raw_blob, payload_start_idx)
 
                 blob_buf.Read("B")
-                trailing = _consume_payload_and_count_tail(
+                trailing_chunks = _consume_payload_and_count_tail(
                     blob_buf, action, layout, last_payload_tail_by_cid
                 )
 
                 if action >= 4:
-                    last_payload_tail_by_cid[cid] = trailing
+                    last_payload_tail_by_cid[cid] = sum(trailing_chunks)
 
                 if selected_cid is not None and cid != selected_cid:
                     continue
 
                 out.write("2\tcid\n")
                 out.write("1\taction\n")
-                if trailing > 0:
-                    out.write(f"{trailing}\tbytes\n")
+                for nbytes in trailing_chunks:
+                    out.write(f"{nbytes}\tbytes\n")
 
 
 def _read_trace_rows(path: str) -> list[tuple[str, str]]:

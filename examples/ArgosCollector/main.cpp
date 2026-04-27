@@ -964,7 +964,7 @@ void TestContainers()
     collect_next_tick();
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
 void TestPointers()
