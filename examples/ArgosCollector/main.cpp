@@ -20,7 +20,7 @@ TEST_INIT;
 #define TEST_METHOD_INIT simdb::collection::CollectableBase::resetCIDs()
 
 /// Helper to create test-specific byte traces for debugging.
-#define ENABLE_BYTE_TRACER collection.enableByteTracer(__FUNCTION__ + std::string(".trace"));
+#define ENABLE_BYTE_TRACER collection.enableByteTracer(__FUNCTION__ + std::string(".trace"), true);
 
 constexpr size_t RUN_TICKS = 1000;
 

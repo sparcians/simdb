@@ -43,31 +43,51 @@ inline void set_active_collection_byte_tracer(CollectionByteTracer* tracer) noex
 class CollectionByteTraceFileSink final : public CollectionByteTracer
 {
 public:
-    explicit CollectionByteTraceFileSink(const std::string& path) : out_(path, std::ios::binary | std::ios::trunc)
+    CollectionByteTraceFileSink(const std::string& path, bool reopen_mode)
+        : out_(path)
+        , path_(reopen_mode ? path : "")
     {
+        out_ << "Bytes\tDescription\n";
+        out_.flush();
     }
 
     bool good() const { return out_.good(); }
 
     void recordWrite(std::size_t num_bytes, std::string_view description) override
     {
-        out_ << num_bytes << '\t' << description << '\n';
+        out_ << num_bytes << '\t';
+        if (description.empty())
+        {
+            out_ << "bytes";
+        }
+        else
+        {
+            out_ << description;
+        }
+        out_ << '\n';
         out_.flush();
+
+        if (!path_.empty())
+        {
+            out_.close();
+            out_.open(path_, std::ios::app);
+        }
     }
 
 private:
     std::ofstream out_;
+    std::string path_;
 };
 
 /// Installs a file sink as the thread-local tracer for this scope.
 class CollectionByteTraceSession
 {
 public:
-    CollectionByteTraceSession(const std::string& path)
+    CollectionByteTraceSession(const std::string& path, bool reopen_mode)
         : prev_(g_collection_byte_tracer)
         , filepath_(path)
     {
-        sink_ = std::make_unique<CollectionByteTraceFileSink>(path);
+        sink_ = std::make_unique<CollectionByteTraceFileSink>(path, reopen_mode);
         g_collection_byte_tracer = sink_.get();
     }
 

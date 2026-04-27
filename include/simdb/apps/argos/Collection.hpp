@@ -262,10 +262,12 @@ public:
         return dtype_inspector_.getTinyStrings();
     }
 
+    using CollectionBase::enableByteTracer;
+
     /// \brief Enable per-thread collection byte tracing to \p path for this collection's lifetime
     /// (replaces any previous tracer). Tracing is active on the thread that calls this until the
     /// \c Collection is destroyed or \ref enableByteTracer is called again.
-    void enableByteTracer(const std::string& path = "simdb_collection_bytes.sim") override
+    void enableByteTracer(const std::string& path, bool reopen_mode) override
     {
         if (tracer_ && tracer_->getTraceFile() == path)
         {
@@ -278,7 +280,7 @@ public:
         }
         else
         {
-            tracer_ = std::make_unique<simdb::utils::CollectionByteTraceSession>(path);
+            tracer_ = std::make_unique<simdb::utils::CollectionByteTraceSession>(path, reopen_mode);
         }
     }
 

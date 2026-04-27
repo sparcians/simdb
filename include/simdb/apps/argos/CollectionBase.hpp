@@ -27,9 +27,20 @@ public:
 
     /// Optional collection byte tracing (see \c simdb::utils::CollectionByteTraceSession).
     /// Default: no-op. \c Collection overrides to install a per-instance trace session.
-    virtual void enableByteTracer(const std::string& path = "simdb_collection_bytes.sim")
+    virtual void enableByteTracer(const std::string& path, bool reopen_mode)
     {
         (void)path;
+        (void)reopen_mode;
+    }
+
+    void enableByteTracer(bool reopen_mode = false)
+    {
+        enableByteTracer("simdb_collection_bytes.sim", reopen_mode);
+    }
+
+    void enableByteTracer(const std::string& path)
+    {
+        enableByteTracer(path, false);
     }
 };
 
