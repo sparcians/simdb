@@ -408,7 +408,7 @@ void TestScalarCollection()
 
     app_mgrs.postSimLoopTeardown();
     fout.close();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
 void TestEnabledLogic()
