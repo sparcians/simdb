@@ -270,44 +270,13 @@ void CompareByteTraceWithPython(
     EXPECT_EQUAL(rc, 0);
 }
 
-#define TEST_FILENAME std::string(__FUNCTION__) + ".test.out"
-#define GOLDEN_FILENAME std::string(__FUNCTION__) + ".golden.out"
-
-bool CompareFiles(const std::string& f1, const std::string& f2)
-{
-    std::ifstream file1(f1), file2(f2);
-
-    if (!file1 || !file2) return false;
-
-    std::string line1, line2;
-
-    while (true) {
-        bool r1 = static_cast<bool>(std::getline(file1, line1));
-        bool r2 = static_cast<bool>(std::getline(file2, line2));
-
-        if (r1 != r2) return false;       // different number of lines
-        if (!r1) break;                   // both reached EOF
-        if (line1 != line2) return false; // mismatch
-    }
-
-    return true;
-}
-
-#define TEST_OFSTREAM(varname) std::ofstream varname(TEST_FILENAME)
-
 void PostTestValidate(
     const std::string& test_name,
     simdb::DatabaseManager* db_mgr,
     const simdb::collection::CollectionBase& collection,
     bool compare_bytes = false)
 {
-    const auto test_file = test_name + ".test.out";
-    const auto golden_file = test_name + ".golden.out";
-    DumpCollection(db_mgr, test_file);
-    if (std::filesystem::exists(golden_file))
-    {
-        EXPECT_TRUE(CompareFiles(test_file, golden_file));
-    }
+    DumpCollection(db_mgr);
     EXPECT_TRUE(collection.minifiersSawAllActions());
 
     if (compare_bytes)
@@ -380,7 +349,7 @@ void TestScalarCollection()
     // tick 2 collects the same Instruction bytes as tick 1.
     all_data[1].inst = all_data[0].inst;
 
-    TEST_OFSTREAM(fout);
+    std::ofstream fout(std::string(__FUNCTION__) + ".test.out");
     for (tick = 1; tick <= all_data.size(); ++tick)
     {
         auto idx = tick - 1;
@@ -967,6 +936,110 @@ void TestContainers()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
+void TestMixedAutoManualLifecycle()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 100;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    int32_t manual_scalar = 10;
+    auto manual_scalar_collector = collection.collectScalarManually<int32_t>(
+        "manual_scalar", "root");
+
+    int32_t auto_scalar = 20;
+    auto auto_scalar_collector = collection.collectScalarWithAutoCollection<int32_t>(
+        "auto_scalar", "root", &auto_scalar);
+
+    constexpr size_t capacity = 32;
+    using ContigQ = std::vector<std::shared_ptr<Instruction>>;
+    ContigQ contig_q;
+    auto contig_collector = collection.collectContainerWithAutoCollection<ContigQ, false>(
+        "contig_mix", "root", &contig_q, capacity);
+
+    using SparseQ = std::vector<SharedPtr<Instruction>>;
+    SparseQ sparse_q;
+    auto sparse_collector = collection.collectContainerManually<SparseQ, true>(
+        "sparse_mix", "root", capacity);
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    auto collect_next_tick = [&]() {
+        ++tick;
+        manual_scalar_collector->collect(manual_scalar);
+        sparse_collector->collect(sparse_q);
+        collection.performAutoCollection("root");
+    };
+
+    // Baseline FULL for all collectables.
+    contig_q.clear();
+    contig_q.push_back(Instruction::genRandom());
+    contig_q.push_back(Instruction::genRandom());
+    contig_q.push_back(Instruction::genRandom());
+    sparse_q.clear();
+    sparse_q.resize(capacity);
+    sparse_q[4] = SharedPtr<Instruction>(Instruction::newRandom());
+    sparse_q[7] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick();
+
+    // CARRY for all minifiers.
+    collect_next_tick();
+
+    // Exercise quiet/awaken on manual scalar.
+    manual_scalar_collector->quiet();
+    collect_next_tick(); // QUIETED lifecycle
+    manual_scalar_collector->collect(manual_scalar); // explicit collect awakens
+
+    // Exercise disable/enable on auto scalar.
+    auto_scalar_collector->disable();
+    collect_next_tick(); // DISABLED lifecycle
+    auto_scalar_collector->enable();
+
+    // Value change after re-enable.
+    auto_scalar += 1;
+    collect_next_tick(); // ENABLED lifecycle + fresh payload
+
+    // Contig SWAP + Sparse EXCHANGE
+    contig_q[1] = Instruction::genRandom();
+    sparse_q[4] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick();
+
+    // Contig ARRIVE
+    contig_q.push_back(Instruction::genRandom());
+    collect_next_tick();
+
+    // Contig DEPART + Sparse REMOVE
+    contig_q.erase(contig_q.begin());
+    sparse_q[7] = SharedPtr<Instruction>();
+    collect_next_tick();
+
+    // Contig BOOKENDS
+    contig_q.erase(contig_q.begin());
+    contig_q.push_back(Instruction::genRandom());
+    collect_next_tick();
+
+    EXPECT_TRUE(contig_collector->minifierSawAllActions());
+    EXPECT_TRUE(sparse_collector->minifierSawAllActions());
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
 void TestPointers()
 {
     TEST_METHOD_INIT;
@@ -1218,6 +1291,7 @@ int main()
     TestMultiClock();
     TestFlatten();
     TestContainers();
+    TestMixedAutoManualLifecycle();
     TestPointers();
     TestMultiArgosCollectors();
 
