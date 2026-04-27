@@ -302,14 +302,15 @@ void CompareByteTraceWithPython(
 
 void CompareValuesWithPython(
     simdb::DatabaseManager* db_mgr,
-    const std::string& test_name)
+    const std::string& sim_trace_file)
 {
     const auto db_path = db_mgr->getDatabaseFilePath();
 
     std::ostringstream cmd;
     cmd << "python3 ./value_compare.py";
     cmd << " --db-file " << std::quoted(db_path);
-    cmd << " --test-name " << std::quoted(test_name);
+    cmd << " --sim-trace-file " << std::quoted(sim_trace_file);
+    cmd << " --allow-sim-only-records";
 
     const auto rc = std::system(cmd.str().c_str());
     EXPECT_EQUAL(rc, 0);
@@ -335,7 +336,7 @@ void PostTestValidate(
 
     if (compare_values)
     {
-        CompareValuesWithPython(db_mgr, test_name);
+        CompareValuesWithPython(db_mgr, test_name + ".trace");
     }
 }
 

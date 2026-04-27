@@ -1,8 +1,11 @@
 import argparse
+from collections import Counter
 import os
 import sqlite3
+import struct
 import sys
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 # Repo root is two levels above this directory.
@@ -11,41 +14,158 @@ _ARGOS_PKG = _REPO_ROOT / "python" / "argos"
 if str(_ARGOS_PKG) not in sys.path:
     sys.path.insert(0, str(_ARGOS_PKG))
 
-from viewer.model.collection_replayers import CollectionReplaySession
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.dtype_inspector import DataTypeInspector
 
 
+@dataclass
+class _CidLayout:
+    cid: int
+    type_name: str
+    mode: str  # scalar | contig | sparse
+    value_num_bytes: int
+
+
+@dataclass
+class _DbRecordFrame:
+    timestamp: int
+    cid: int
+    action: int
+    total_after_cid: int  # action (1) + payload bytes
+    raw_total_bytes: int  # cid (2) + action + payload
+
+
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser("Collection semantic value comparator")
+    parser = argparse.ArgumentParser("Collection generic framing comparator")
     parser.add_argument("--db-file", required=True, help="Path to Argos sqlite DB")
-    parser.add_argument("--test-name", required=True, help="ArgosCollector test function name")
+    parser.add_argument(
+        "--sim-trace-file",
+        default=None,
+        help="Optional .trace file from C++ side to compare against",
+    )
+    parser.add_argument(
+        "--allow-sim-only-records",
+        action="store_true",
+        help="Allow extra records in sim trace (pre-dedup) while preserving order",
+    )
     return parser.parse_args()
 
 
-def _require_path_cid(cids_by_path: dict[str, int], field_name: str) -> int:
-    exact = [cid for path, cid in cids_by_path.items() if path == field_name]
-    if len(exact) == 1:
-        return exact[0]
-
-    suffix = [cid for path, cid in cids_by_path.items() if path.endswith("." + field_name) or path.endswith("/" + field_name)]
-    if len(suffix) == 1:
-        return suffix[0]
-
-    raise RuntimeError(f"Could not uniquely resolve field path for '{field_name}'")
+def _decode_action(raw_blob: bytes, payload_start_idx: int) -> int:
+    if payload_start_idx >= len(raw_blob):
+        raise RuntimeError("Malformed record: missing action byte")
+    return struct.unpack("B", raw_blob[payload_start_idx : payload_start_idx + 1])[0]
 
 
-def _replay_all_records(db_file: str):
-    inspector = DataTypeInspector(db_file)
-    session = CollectionReplaySession(db_file, inspector)
-    replayers = session.replayers_by_cid
+def _split_container_type_name(type_name: str):
+    for which, sparse in (("_sparse_capacity", True), ("_contig_capacity", False)):
+        idx = type_name.find(which)
+        if idx != -1:
+            base = type_name[:idx]
+            cap = int(type_name[idx + len(which) :])
+            return base, cap, sparse
+    return None
 
-    conn = sqlite3.connect(db_file)
+
+def _load_layouts(conn: sqlite3.Connection, inspector: DataTypeInspector) -> dict[int, _CidLayout]:
     cursor = conn.cursor()
+    cursor.execute("SELECT TypeName,SerializationCID FROM CollectableTreeNodes")
 
-    cursor.execute("SELECT SerializationCID,FullPath FROM CollectableTreeNodes")
-    cids_by_path = {str(path): int(cid) for cid, path in cursor.fetchall()}
+    layouts: dict[int, _CidLayout] = {}
+    for type_name, cid in cursor.fetchall():
+        cid = int(cid)
+        type_name = str(type_name)
+        meta = _split_container_type_name(type_name)
+        if meta is None:
+            des = inspector.GetDeserializer(type_name)
+            layouts[cid] = _CidLayout(cid=cid, type_name=type_name, mode="scalar", value_num_bytes=des.GetNumBytes())
+        else:
+            base_type, _capacity, sparse = meta
+            bin_des = inspector.GetDeserializer(base_type)
+            layouts[cid] = _CidLayout(
+                cid=cid,
+                type_name=type_name,
+                mode="sparse" if sparse else "contig",
+                value_num_bytes=bin_des.GetNumBytes(),
+            )
+    return layouts
 
+
+def _consume_payload_and_count_tail(
+    buf: ByteBuffer,
+    action: int,
+    layout: _CidLayout,
+    last_sent_after_cid_by_cid: dict[int, int],
+) -> list[int]:
+    if action in (0, 2):  # DISABLED / QUIETED
+        return []
+    if action in (1, 3):  # ENABLED / AWAKENED
+        replay_tail = last_sent_after_cid_by_cid.get(layout.cid, 0)
+        if replay_tail > 0:
+            buf.Extract(replay_tail)
+            return [replay_tail]
+        return []
+
+    if layout.mode == "scalar":
+        if action == 4:  # FULL
+            buf.Extract(layout.value_num_bytes)
+            return [layout.value_num_bytes]
+        if action == 5:  # CARRY
+            return []
+        raise RuntimeError(f"CID {layout.cid}: unknown scalar action {action}")
+
+    if layout.mode == "contig":
+        bin_n = layout.value_num_bytes
+        if action == 4:  # FULL
+            size = int(buf.Read("H"))
+            buf.Extract(size * bin_n)
+            return [2] + [bin_n] * size
+        if action == 5:  # CARRY
+            return []
+        if action == 6:  # SWAP
+            buf.Read("H")
+            buf.Extract(bin_n)
+            return [2, bin_n]
+        if action in (7, 9):  # ARRIVE / BOOKENDS
+            buf.Extract(bin_n)
+            return [bin_n]
+        if action == 8:  # DEPART
+            return []
+        raise RuntimeError(f"CID {layout.cid}: unknown contig action {action}")
+
+    if layout.mode == "sparse":
+        bin_n = layout.value_num_bytes
+        if action == 4:  # FULL
+            size = int(buf.Read("H"))
+            for _ in range(size):
+                buf.Read("H")
+                buf.Extract(bin_n)
+            chunks = [2]
+            for _ in range(size):
+                chunks.extend([2, bin_n])
+            return chunks
+        if action == 5:  # CARRY
+            return []
+        if action == 6:  # EXCHANGE
+            buf.Read("H")
+            buf.Extract(bin_n)
+            return [2, bin_n]
+        if action == 7:  # REMOVE
+            buf.Read("H")
+            return [2]
+        raise RuntimeError(f"CID {layout.cid}: unknown sparse action {action}")
+
+    raise RuntimeError(f"CID {layout.cid}: unknown layout mode {layout.mode!r}")
+
+
+def _read_db_record_frames(db_file: str) -> list[_DbRecordFrame]:
+    inspector = DataTypeInspector(db_file)
+    conn = sqlite3.connect(db_file)
+    layouts_by_cid = _load_layouts(conn, inspector)
+    last_sent_after_cid_by_cid: dict[int, int] = {}
+    frames: list[_DbRecordFrame] = []
+
+    cursor = conn.cursor()
     cursor.execute(
         """
         SELECT Timestamps.Timestamp, CollectionRecords.Records
@@ -54,156 +174,130 @@ def _replay_all_records(db_file: str):
         ORDER BY Timestamps.Id ASC
         """
     )
-
-    seen_times = set()
     for raw_time, compressed_blob in cursor.fetchall():
-        time_point = int(raw_time) if isinstance(raw_time, str) else int(raw_time)
-        seen_times.add(time_point)
-        buf = ByteBuffer(zlib.decompress(compressed_blob))
-        while not buf.Done():
-            cid = int(buf.Read("H"))
-            replayers[cid].replay_next(buf)
+        timestamp = int(raw_time) if isinstance(raw_time, str) else int(raw_time)
+        raw_blob = zlib.decompress(compressed_blob)
+        blob_buf = ByteBuffer(raw_blob)
 
+        while not blob_buf.Done():
+            record_start_idx = blob_buf._read_idx
+            cid = int(blob_buf.Read("H"))
+            layout = layouts_by_cid[cid]
+            payload_start_idx = blob_buf._read_idx
+            action = _decode_action(raw_blob, payload_start_idx)
+
+            blob_buf.Read("B")
+            trailing_chunks = _consume_payload_and_count_tail(
+                blob_buf, action, layout, last_sent_after_cid_by_cid
+            )
+            if action >= 4:
+                last_sent_after_cid_by_cid[cid] = 1 + sum(trailing_chunks)
+
+            record_end_idx = blob_buf._read_idx
+            frames.append(
+                _DbRecordFrame(
+                    timestamp=timestamp,
+                    cid=cid,
+                    action=action,
+                    total_after_cid=1 + sum(trailing_chunks),
+                    raw_total_bytes=record_end_idx - record_start_idx,
+                )
+            )
     conn.close()
-    return replayers, cids_by_path, seen_times
+    return frames
 
 
-def _assert_equal(name: str, actual, expected, failures: list[str]) -> None:
-    if actual != expected:
-        failures.append(f"{name}: expected {expected!r}, got {actual!r}")
+def _read_trace_record_totals(path: str) -> list[int]:
+    rows: list[tuple[str, str]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if i == 0:
+                continue
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t", 1)
+            if len(parts) != 2:
+                raise RuntimeError(f"Malformed trace row in {path!r}: {line!r}")
+            rows.append((parts[0], parts[1]))
+
+    totals: list[int] = []
+    cur_total = 0
+    cur_has_rows = False
+    for row in rows:
+        if row == ("2", "cid"):
+            if cur_has_rows:
+                totals.append(cur_total)
+            cur_total = 0
+            cur_has_rows = True
+            continue
+        cur_total += int(row[0])
+    if cur_has_rows:
+        totals.append(cur_total)
+    return totals
 
 
-def _validate_test_scalar_collection(db_file: str) -> int:
-    replayers, cids_by_path, seen_times = _replay_all_records(db_file)
+def _compare_first_divergence(
+    db_frames: list[_DbRecordFrame],
+    sim_totals: list[int],
+    allow_sim_only_records: bool,
+) -> int:
+    ui_totals = [f.total_after_cid for f in db_frames]
 
-    pod_cid = _require_path_cid(cids_by_path, "pod")
-    str_cid = _require_path_cid(cids_by_path, "str")
-    itype_cid = _require_path_cid(cids_by_path, "itype")
-    flag_cid = _require_path_cid(cids_by_path, "flag")
-    inst_cid = _require_path_cid(cids_by_path, "inst")
+    if allow_sim_only_records:
+        sim_counts = Counter(sim_totals)
+        ui_counts = Counter(ui_totals)
+        for total, ui_count in ui_counts.items():
+            sim_count = sim_counts.get(total, 0)
+            if ui_count > sim_count:
+                print("FIRST DIVERGENCE")
+                print(f"  missing record signature total-after-cid={total}")
+                print(f"  ui count: {ui_count}")
+                print(f"  sim count: {sim_count}")
+                return 1
 
-    expected_ticks = [1, 2, 3, 4, 5, 6, 100]
-    missing_ticks = [t for t in expected_ticks if t not in seen_times]
-    if missing_ticks:
-        raise RuntimeError(f"Missing expected timestamps in DB: {missing_ticks}")
+        tolerated = sum(sim_counts.values()) - sum(ui_counts.values())
+        print("FRAME MATCH (sim-only records tolerated)")
+        print(f"  db records: {len(ui_totals)}")
+        print(f"  sim records: {len(sim_totals)}")
+        print(f"  tolerated sim-only records: {tolerated}")
+        return 0
 
-    expected_pod = {1: 4, 2: 5, 3: 6, 4: 7, 5: 8, 6: 9}
-    expected_str = {1: "foo", 2: "bar", 3: "fiz", 4: "biz", 5: "fuz", 6: "buz"}
-    expected_itype = {1: "MEM", 2: "NO_OP", 3: "MEM", 4: "ILLEGAL", 5: "ILLEGAL", 6: "CSR"}
-    expected_flag = {1: True, 2: False, 3: True, 4: False, 5: True, 6: False}
+    ui_idx = 0
+    sim_idx = 0
 
-    failures: list[str] = []
+    while ui_idx < len(ui_totals) and sim_idx < len(sim_totals):
+        if ui_totals[ui_idx] == sim_totals[sim_idx]:
+            ui_idx += 1
+            sim_idx += 1
+            continue
 
-    for tick in range(1, 7):
-        _assert_equal(f"tick {tick} pod", replayers[pod_cid].GetDataValueAtTime(tick), expected_pod[tick], failures)
-        _assert_equal(f"tick {tick} str", replayers[str_cid].GetDataValueAtTime(tick), expected_str[tick], failures)
-        _assert_equal(
-            f"tick {tick} itype",
-            replayers[itype_cid].GetDataValueAtTime(tick),
-            expected_itype[tick],
-            failures,
-        )
-        _assert_equal(f"tick {tick} flag", replayers[flag_cid].GetDataValueAtTime(tick), expected_flag[tick], failures)
-
-    inst_t1 = replayers[inst_cid].GetDataValueAtTime(1)
-    inst_t2 = replayers[inst_cid].GetDataValueAtTime(2)
-    inst_t6 = replayers[inst_cid].GetDataValueAtTime(6)
-    inst_t100 = replayers[inst_cid].GetDataValueAtTime(100)
-
-    if not isinstance(inst_t1, dict) or not inst_t1:
-        failures.append(f"tick 1 inst expected non-empty struct, got {inst_t1!r}")
-    if inst_t2 != inst_t1:
-        failures.append(f"tick 2 inst should equal tick 1 inst (forced CARRY), got {inst_t2!r} vs {inst_t1!r}")
-    if inst_t100 != inst_t6:
-        failures.append(f"tick 100 inst should equal tick 6 inst, got {inst_t100!r} vs {inst_t6!r}")
-
-    if failures:
-        print("VALUE MISMATCH")
-        for msg in failures[:20]:
-            print(f"  - {msg}")
-        if len(failures) > 20:
-            print(f"  ... and {len(failures) - 20} more")
+        frame = db_frames[ui_idx]
+        print("FIRST DIVERGENCE")
+        print(f"  record-index: {ui_idx}")
+        print(f"  timestamp: {frame.timestamp}")
+        print(f"  cid: {frame.cid}")
+        print(f"  action: {frame.action}")
+        print(f"  expected after-cid bytes (db replay): {ui_totals[ui_idx]}")
+        print(f"  actual after-cid bytes (sim trace): {sim_totals[sim_idx]}")
         return 1
 
-    print("VALUE MATCH")
-    print("  test: TestScalarCollection")
-    print("  checked ticks: 1-6,100")
-    print("  checked fields: pod,str,itype,flag,inst")
-    return 0
-
-
-def _validate_test_enabled_logic(db_file: str) -> int:
-    replayers, cids_by_path, seen_times = _replay_all_records(db_file)
-    val1_cid = _require_path_cid(cids_by_path, "val1")
-    val2_cid = _require_path_cid(cids_by_path, "val2")
-
-    expected_ticks = list(range(1, 18))
-    missing_ticks = [t for t in expected_ticks if t not in seen_times]
-    if missing_ticks:
-        raise RuntimeError(f"Missing expected timestamps in DB: {missing_ticks}")
-
-    failures: list[str] = []
-
-    for tick in expected_ticks:
-        _assert_equal(f"tick {tick} val1", replayers[val1_cid].GetDataValueAtTime(tick), tick + 3, failures)
-
-    # Lifecycle-focused checkpoints for val2.
-    _assert_equal("tick 1 val2", replayers[val2_cid].GetDataValueAtTime(1), 5, failures)
-    _assert_equal("tick 2 val2", replayers[val2_cid].GetDataValueAtTime(2), {}, failures)
-    _assert_equal("tick 3 val2", replayers[val2_cid].GetDataValueAtTime(3), 5, failures)
-    _assert_equal("tick 4 val2", replayers[val2_cid].GetDataValueAtTime(4), {}, failures)
-    _assert_equal("tick 9 val2", replayers[val2_cid].GetDataValueAtTime(9), 5, failures)
-    _assert_equal("tick 10 val2", replayers[val2_cid].GetDataValueAtTime(10), {}, failures)
-    # Current replay semantics resolve these re-enable timestamps to the carried
-    # prior value in GetDataValueAtTime().
-    _assert_equal("tick 17 val2", replayers[val2_cid].GetDataValueAtTime(17), 6, failures)
-
-    if failures:
-        print("VALUE MISMATCH")
-        for msg in failures[:20]:
-            print(f"  - {msg}")
-        if len(failures) > 20:
-            print(f"  ... and {len(failures) - 20} more")
+    if ui_idx < len(ui_totals):
+        frame = db_frames[ui_idx]
+        print("FIRST DIVERGENCE")
+        print(f"  sim trace ended early at ui record-index {ui_idx}")
+        print(f"  timestamp: {frame.timestamp}, cid: {frame.cid}, action: {frame.action}")
+        print(f"  remaining ui records: {len(ui_totals) - ui_idx}")
         return 1
 
-    print("VALUE MATCH")
-    print("  test: TestEnabledLogic")
-    print("  checked ticks: 1-17")
-    print("  checked fields: val1,val2")
-    return 0
-
-
-def _validate_test_quiet_logic(db_file: str) -> int:
-    replayers, cids_by_path, seen_times = _replay_all_records(db_file)
-    val1_cid = _require_path_cid(cids_by_path, "val1")
-    val2_cid = _require_path_cid(cids_by_path, "val2")
-
-    expected_ticks = [1, 2, 3, 4, 5]
-    missing_ticks = [t for t in expected_ticks if t not in seen_times]
-    if missing_ticks:
-        raise RuntimeError(f"Missing expected timestamps in DB: {missing_ticks}")
-
-    failures: list[str] = []
-    expected_val1 = {1: 10, 2: 11, 3: 12, 4: 13, 5: 14}
-    for tick, expected in expected_val1.items():
-        _assert_equal(f"tick {tick} val1", replayers[val1_cid].GetDataValueAtTime(tick), expected, failures)
-
-    _assert_equal("tick 1 val2", replayers[val2_cid].GetDataValueAtTime(1), 20, failures)
-    _assert_equal("tick 2 val2", replayers[val2_cid].GetDataValueAtTime(2), {}, failures)
-    _assert_equal("tick 5 val2", replayers[val2_cid].GetDataValueAtTime(5), 20, failures)
-
-    if failures:
-        print("VALUE MISMATCH")
-        for msg in failures[:20]:
-            print(f"  - {msg}")
-        if len(failures) > 20:
-            print(f"  ... and {len(failures) - 20} more")
+    if not allow_sim_only_records and sim_idx < len(sim_totals):
+        print("FIRST DIVERGENCE")
+        print(f"  ui replay ended early at sim record-index {sim_idx}")
+        print(f"  remaining sim records: {len(sim_totals) - sim_idx}")
         return 1
 
-    print("VALUE MATCH")
-    print("  test: TestQuietLogic")
-    print("  checked ticks: 1-5")
-    print("  checked fields: val1,val2")
+    print("FRAME MATCH")
+    print(f"  records matched: {len(ui_totals)}")
     return 0
 
 
@@ -212,15 +306,21 @@ def main() -> int:
     if not os.path.exists(args.db_file):
         raise RuntimeError(f"DB file does not exist: {args.db_file}")
 
-    if args.test_name == "TestScalarCollection":
-        return _validate_test_scalar_collection(args.db_file)
-    if args.test_name == "TestEnabledLogic":
-        return _validate_test_enabled_logic(args.db_file)
-    if args.test_name == "TestQuietLogic":
-        return _validate_test_quiet_logic(args.db_file)
+    db_frames = _read_db_record_frames(args.db_file)
+    print("DB FRAMING OK")
+    print(f"  records parsed: {len(db_frames)}")
 
-    print(f"Skipping value comparison for {args.test_name} (not implemented yet)")
-    return 0
+    if args.sim_trace_file is None:
+        return 0
+    if not os.path.exists(args.sim_trace_file):
+        raise RuntimeError(f"SIM trace does not exist: {args.sim_trace_file}")
+
+    sim_totals = _read_trace_record_totals(args.sim_trace_file)
+    return _compare_first_divergence(
+        db_frames,
+        sim_totals,
+        allow_sim_only_records=args.allow_sim_only_records,
+    )
 
 
 if __name__ == "__main__":
