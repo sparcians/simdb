@@ -253,6 +253,23 @@ void DumpCollection(simdb::DatabaseManager* db_mgr, const std::string& dump_file
     EXPECT_EQUAL(rc, 0);
 }
 
+void CompareByteTraceWithPython(
+    simdb::DatabaseManager* db_mgr,
+    const std::string& sim_trace_file,
+    const std::string& ui_trace_file)
+{
+    const auto db_path = db_mgr->getDatabaseFilePath();
+
+    std::ostringstream cmd;
+    cmd << "python3 ./trace_compare.py";
+    cmd << " --db-file " << std::quoted(db_path);
+    cmd << " --sim-trace-file " << std::quoted(sim_trace_file);
+    cmd << " --ui-trace-file " << std::quoted(ui_trace_file);
+
+    const auto rc = std::system(cmd.str().c_str());
+    EXPECT_EQUAL(rc, 0);
+}
+
 #define TEST_FILENAME std::string(__FUNCTION__) + ".test.out"
 #define GOLDEN_FILENAME std::string(__FUNCTION__) + ".golden.out"
 
@@ -278,12 +295,32 @@ bool CompareFiles(const std::string& f1, const std::string& f2)
 
 #define TEST_OFSTREAM(varname) std::ofstream varname(TEST_FILENAME)
 
-#define POST_TEST_VALIDATE(db_mgr, collection)                     \
-    DumpCollection(db_mgr, TEST_FILENAME);                         \
-    if (std::filesystem::exists(GOLDEN_FILENAME)) {                \
-        EXPECT_TRUE(CompareFiles(TEST_FILENAME, GOLDEN_FILENAME)); \
-    }                                                              \
+void PostTestValidate(
+    const std::string& test_name,
+    simdb::DatabaseManager* db_mgr,
+    const simdb::collection::CollectionBase& collection,
+    bool compare_bytes = false)
+{
+    const auto test_file = test_name + ".test.out";
+    const auto golden_file = test_name + ".golden.out";
+    DumpCollection(db_mgr, test_file);
+    if (std::filesystem::exists(golden_file))
+    {
+        EXPECT_TRUE(CompareFiles(test_file, golden_file));
+    }
     EXPECT_TRUE(collection.minifiersSawAllActions());
+
+    if (compare_bytes)
+    {
+        CompareByteTraceWithPython(
+            db_mgr,
+            test_name + ".trace",
+            test_name + ".ui.trace");
+    }
+}
+
+#define POST_TEST_VALIDATE(db_mgr, collection, ...) \
+    PostTestValidate(__FUNCTION__, db_mgr, collection, ##__VA_ARGS__)
 
 void TestScalarCollection()
 {
@@ -810,7 +847,7 @@ void TestFlatten()
     collector->collect(unit);
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
 void TestContainers()
