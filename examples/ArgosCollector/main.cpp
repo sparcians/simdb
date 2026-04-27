@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -23,6 +25,34 @@ TEST_INIT;
 #define ENABLE_BYTE_TRACER collection.enableByteTracer(__FUNCTION__ + std::string(".trace"), true);
 
 constexpr size_t RUN_TICKS = 1000;
+
+namespace {
+
+std::mt19937_64& testRng()
+{
+    static std::mt19937_64 rng(std::random_device{}());
+    return rng;
+}
+
+template <typename IntT>
+IntT randomInt(const IntT min_inclusive, const IntT max_inclusive)
+{
+    std::uniform_int_distribution<IntT> dist(min_inclusive, max_inclusive);
+    return dist(testRng());
+}
+
+double randomDouble(const double min_inclusive, const double max_inclusive)
+{
+    std::uniform_real_distribution<double> dist(min_inclusive, max_inclusive);
+    return dist(testRng());
+}
+
+bool randomOneIn(const int denominator)
+{
+    return randomInt<int>(1, denominator) == 1;
+}
+
+} // namespace
 
 enum InstType
 {
@@ -133,15 +163,15 @@ public:
 
     static Instruction* newRandom()
     {
-        auto type = static_cast<InstType>(rand() % InstType::__N);
-        auto opcode = rand();
+        auto type = static_cast<InstType>(randomInt<int>(0, static_cast<int>(InstType::__N) - 1));
+        auto opcode = randomInt<uint64_t>(0, std::numeric_limits<uint32_t>::max());
 
         static const char* mnemonics[] = {
             "add", "addi", "li", "b", "jlr"
         };
-        auto mnemonic = mnemonics[rand() % 5];
-        auto csr = type == InstType::CSR ? rand() % 256 : 0;
-        auto last_inst = rand() % 1000 == 500;
+        auto mnemonic = mnemonics[randomInt<int>(0, 4)];
+        auto csr = type == InstType::CSR ? randomInt<uint32_t>(0, 255) : 0;
+        auto last_inst = randomOneIn(1000);
         return new Instruction(type, opcode, mnemonic, csr, last_inst);
     }
 
@@ -599,12 +629,12 @@ void TestMultiClock()
 
     for (tick = 1; tick <= 100; ++tick)
     {
-        root_pod->collect(rand());
+        root_pod->collect(randomInt<uint32_t>(0, std::numeric_limits<uint32_t>::max()));
         collection.sendCollectedDataToPipeline("root");
 
         if (tick % 2 == 0)
         {
-            clk2_pod->collect(rand());
+            clk2_pod->collect(randomInt<uint32_t>(0, std::numeric_limits<uint32_t>::max()));
             collection.sendCollectedDataToPipeline("clk2");
         }
     }
@@ -763,8 +793,8 @@ public:
 
     void randomize()
     {
-        foo_ = rand();
-        bar_ = rand() * M_PI;
+        foo_ = randomInt<uint64_t>(0, std::numeric_limits<uint32_t>::max());
+        bar_ = randomDouble(0.0, static_cast<double>(std::numeric_limits<int32_t>::max()) * M_PI);
         inst_.reset(Instruction::newRandom());
     }
 
@@ -844,7 +874,7 @@ void TestContainers()
 
     auto randomize = [&]()
     {
-        auto contig_count = rand() % (capacity + 1);
+        auto contig_count = randomInt<size_t>(0, capacity);
         contig_q.clear();
         while (contig_q.size() < contig_count)
         {
@@ -855,7 +885,7 @@ void TestContainers()
         sparse_q.resize(capacity);
         for (auto& item : sparse_q)
         {
-            if (rand() % 8 == 0)
+            if (randomOneIn(8))
             {
                 item = SharedPtr<Instruction>(Instruction::newRandom());
             }
@@ -1045,7 +1075,9 @@ void TestPointers()
     TEST_METHOD_INIT;
 
     uint64_t tick = 0;
-    size_t heartbeat = 3;
+    // Large heartbeat so periodic FULL does not mask contig/sparse delta actions (SWAP, REMOVE,
+    // etc.) in the deterministic tail; heartbeat 3 was forcing FULL on the same ticks as REMOVE.
+    constexpr size_t heartbeat = 100;
     simdb::collection::Collection<uint64_t> collection(heartbeat);
     ENABLE_BYTE_TRACER
     collection.timestampWith(&tick);
@@ -1075,10 +1107,10 @@ void TestPointers()
 
     auto randomize = [&]()
     {
-        *intval = rand();
+        *intval = randomInt<int>(0, std::numeric_limits<int>::max());
         inst->randomize();
 
-        auto contig_count = rand() % (capacity + 1);
+        auto contig_count = randomInt<size_t>(0, capacity);
         contig_q->clear();
         while (contig_q->size() < contig_count)
         {
@@ -1089,7 +1121,7 @@ void TestPointers()
         sparse_q->resize(capacity);
         for (auto& item : *sparse_q)
         {
-            if (rand() % 8 == 0)
+            if (randomOneIn(8))
             {
                 item = SharedPtr<Instruction>(Instruction::newRandom());
             }
@@ -1176,6 +1208,15 @@ void TestPointers()
     // Sparse REMOVE
     (*sparse_q)[9] = SharedPtr<Instruction>();
     collect_next_tick();
+
+    // Sparse minifier must observe REMOVE at least once; a scheduled FULL on the same collect as a
+    // multi-slot diff can skip REMOVE counting. Re-seed to a single occupied bin, then clear it.
+    std::fill(sparse_q->begin(), sparse_q->end(), SharedPtr<Instruction>());
+    (*sparse_q)[0] = SharedPtr<Instruction>(Instruction::newRandom());
+    collect_next_tick();
+    collect_next_tick(); // CARRY
+    (*sparse_q)[0] = SharedPtr<Instruction>();
+    collect_next_tick(); // REMOVE (single slot)
 
     app_mgrs.postSimLoopTeardown();
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
