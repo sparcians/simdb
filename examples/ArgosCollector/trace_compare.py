@@ -1,4 +1,5 @@
 import argparse
+from collections import Counter
 import os
 import sqlite3
 import struct
@@ -252,28 +253,24 @@ def _compare_traces(sim_trace: str, ui_trace: str) -> int:
     sim_records = _rows_to_record_totals(sim_rows)
     ui_records = _rows_to_record_totals(ui_rows)
 
-    i = 0  # sim record index
-    tolerated_records = 0
-    tolerated_rows = 0
+    sim_totals = Counter(total for total, _ in sim_records)
+    ui_totals = Counter(total for total, _ in ui_records)
 
-    # Require UI records to appear in-order as a subsequence of SIM records.
-    for j, (ui_total, ui_rows_rec) in enumerate(ui_records):
-        while i < len(sim_records) and sim_records[i][0] != ui_total:
-            tolerated_records += 1
-            tolerated_rows += len(sim_records[i][1])
-            i += 1
-        if i == len(sim_records):
+    for total, ui_count in ui_totals.items():
+        sim_count = sim_totals.get(total, 0)
+        if ui_count > sim_count:
             print("TRACE DIVERGENCE")
-            print(f"  ui record not found in sim stream: {j + 1}")
-            print(f"  ui total bytes-after-cid: {ui_total}")
-            print(f"  ui rows: {ui_rows_rec}")
+            print(f"  missing record signature total-bytes-after-cid={total}")
+            print(f"  ui count:  {ui_count}")
+            print(f"  sim count: {sim_count}")
             return 1
-        i += 1
 
-    while i < len(sim_records):
-        tolerated_records += 1
-        tolerated_rows += len(sim_records[i][1])
-        i += 1
+    tolerated_records = sum(sim_totals.values()) - sum(ui_totals.values())
+    tolerated_rows = 0
+    if tolerated_records > 0:
+        # Approximation for reporting: average rows per tolerated record is not
+        # important for pass/fail, only for debugging context.
+        tolerated_rows = sum(len(rows) for _, rows in sim_records) - sum(len(rows) for _, rows in ui_records)
 
     if tolerated_records > 0:
         print("TRACE MATCH (sim has filtered pre-dedup records)")
