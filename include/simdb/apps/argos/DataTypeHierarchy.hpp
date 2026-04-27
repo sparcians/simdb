@@ -294,11 +294,24 @@ public:
         return root_;
     }
 
-    void writeBuffer(StreamBuffer& buffer, const RootT& value) const
+    void writeBuffer(StreamBuffer& buffer, const RootT& value, ValidValue<size_t>* expected_num_bytes = nullptr) const
     {
         if (root_.write_erased)
         {
+            auto curr_size = buffer.size();
             root_.write_erased(buffer, &value);
+            if (expected_num_bytes)
+            {
+                auto these_bytes = buffer.size() - curr_size;
+                if (!expected_num_bytes->isValid())
+                {
+                    *expected_num_bytes = these_bytes;
+                }
+                else if (expected_num_bytes->getValue() != these_bytes)
+                {
+                    throw DBException("Byte mismatch");
+                }
+            }
         }
     }
 

@@ -182,6 +182,8 @@ protected:
         initial_value_ = std::make_unique<CollectedData>(std::move(initial));
     }
 
+    ValidValue<size_t> expected_num_bytes_;
+
 private:
     /// Unique ID generator.
     static uint16_t& nextCID_()
@@ -279,7 +281,7 @@ public:
             constexpr uint8_t kFirstMinifierActionValue =
                 static_cast<uint8_t>(LifecycleAction::AWAKENED) + 1;
             collected.getBuffer().append(&kFirstMinifierActionValue, sizeof(kFirstMinifierActionValue), "action");
-            dtype_hierarchy_->writeBuffer(collected.getBuffer(), value);
+            dtype_hierarchy_->writeBuffer(collected.getBuffer(), value, &expected_num_bytes_);
         }
         stage_(std::move(collected));
     }

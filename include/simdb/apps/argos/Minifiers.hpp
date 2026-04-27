@@ -82,7 +82,7 @@ public:
     void minifyAndAppend(StreamBuffer& buf, const ValueType& value)
     {
         StreamBuffer my_buffer(cur_extracted_bytes_, true, false);
-        dtype_hierarchy_->writeBuffer(my_buffer, value);
+        dtype_hierarchy_->writeBuffer(my_buffer, value, &expected_num_bytes_);
 
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
@@ -133,6 +133,7 @@ private:
     std::array<size_t, 2> action_counts_{};
     std::vector<char> last_sent_bytes_;
     std::vector<char> cur_extracted_bytes_;
+    ValidValue<size_t> expected_num_bytes_;
 
     /// Heartbeat is validated non-zero in \c Collection<TimeT> ctor. \c heartbeat_ == 1 ⇒ FULL every collect.
     bool shouldWriteFull_() const
@@ -246,7 +247,7 @@ private:
     void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer)
     {
         StreamBuffer buf(bin_buffer, true, false);
-        dtype_hierarchy_->writeBuffer(buf, bin_value);
+        dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_);
     }
 
     template <typename BinType>
@@ -411,6 +412,7 @@ private:
     std::vector<std::vector<char>> curr_bins_;
     const std::string elem_path_;
     bool warn_on_size_ = true;
+    ValidValue<size_t> expected_num_bytes_;
 };
 
 template <typename ContainerType>
@@ -539,7 +541,7 @@ private:
     void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer)
     {
         StreamBuffer buf(bin_buffer, true, false);
-        dtype_hierarchy_->writeBuffer(buf, bin_value);
+        dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_);
     }
 
     template <typename BinType>
@@ -669,6 +671,7 @@ private:
     mutable std::array<size_t, 4> action_counts_{};
     std::unordered_map<uint16_t, std::vector<char>> prev_bins_;
     std::vector<BinPair> curr_pairs_;
+    ValidValue<size_t> expected_num_bytes_;
 };
 
 } // namespace simdb::collection

@@ -44,6 +44,8 @@ public:
         out_.insert(out_.end(), bytes, bytes + num_bytes);
     }
 
+    size_t size() const { return out_.size(); }
+
     using bool_type = uint8_t;
 
     bool operator==(const StreamBuffer& other) const { return out_ == other.out_; }
