@@ -561,7 +561,7 @@ void TestEnabledLogic()
     collection.performAutoCollection("root");
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
 }
 
 void TestQuietLogic()
@@ -614,7 +614,7 @@ void TestQuietLogic()
     val2_collector->collect(21);
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, false, true);
 }
 
 void TestMultiClock()

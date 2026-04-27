@@ -132,6 +132,81 @@ def _validate_test_scalar_collection(db_file: str) -> int:
     return 0
 
 
+def _validate_test_enabled_logic(db_file: str) -> int:
+    replayers, cids_by_path, seen_times = _replay_all_records(db_file)
+    val1_cid = _require_path_cid(cids_by_path, "val1")
+    val2_cid = _require_path_cid(cids_by_path, "val2")
+
+    expected_ticks = list(range(1, 18))
+    missing_ticks = [t for t in expected_ticks if t not in seen_times]
+    if missing_ticks:
+        raise RuntimeError(f"Missing expected timestamps in DB: {missing_ticks}")
+
+    failures: list[str] = []
+
+    for tick in expected_ticks:
+        _assert_equal(f"tick {tick} val1", replayers[val1_cid].GetDataValueAtTime(tick), tick + 3, failures)
+
+    # Lifecycle-focused checkpoints for val2.
+    _assert_equal("tick 1 val2", replayers[val2_cid].GetDataValueAtTime(1), 5, failures)
+    _assert_equal("tick 2 val2", replayers[val2_cid].GetDataValueAtTime(2), {}, failures)
+    _assert_equal("tick 3 val2", replayers[val2_cid].GetDataValueAtTime(3), 5, failures)
+    _assert_equal("tick 4 val2", replayers[val2_cid].GetDataValueAtTime(4), {}, failures)
+    _assert_equal("tick 9 val2", replayers[val2_cid].GetDataValueAtTime(9), 5, failures)
+    _assert_equal("tick 10 val2", replayers[val2_cid].GetDataValueAtTime(10), {}, failures)
+    # Current replay semantics resolve these re-enable timestamps to the carried
+    # prior value in GetDataValueAtTime().
+    _assert_equal("tick 17 val2", replayers[val2_cid].GetDataValueAtTime(17), 6, failures)
+
+    if failures:
+        print("VALUE MISMATCH")
+        for msg in failures[:20]:
+            print(f"  - {msg}")
+        if len(failures) > 20:
+            print(f"  ... and {len(failures) - 20} more")
+        return 1
+
+    print("VALUE MATCH")
+    print("  test: TestEnabledLogic")
+    print("  checked ticks: 1-17")
+    print("  checked fields: val1,val2")
+    return 0
+
+
+def _validate_test_quiet_logic(db_file: str) -> int:
+    replayers, cids_by_path, seen_times = _replay_all_records(db_file)
+    val1_cid = _require_path_cid(cids_by_path, "val1")
+    val2_cid = _require_path_cid(cids_by_path, "val2")
+
+    expected_ticks = [1, 2, 3, 4, 5]
+    missing_ticks = [t for t in expected_ticks if t not in seen_times]
+    if missing_ticks:
+        raise RuntimeError(f"Missing expected timestamps in DB: {missing_ticks}")
+
+    failures: list[str] = []
+    expected_val1 = {1: 10, 2: 11, 3: 12, 4: 13, 5: 14}
+    for tick, expected in expected_val1.items():
+        _assert_equal(f"tick {tick} val1", replayers[val1_cid].GetDataValueAtTime(tick), expected, failures)
+
+    _assert_equal("tick 1 val2", replayers[val2_cid].GetDataValueAtTime(1), 20, failures)
+    _assert_equal("tick 2 val2", replayers[val2_cid].GetDataValueAtTime(2), {}, failures)
+    _assert_equal("tick 5 val2", replayers[val2_cid].GetDataValueAtTime(5), 20, failures)
+
+    if failures:
+        print("VALUE MISMATCH")
+        for msg in failures[:20]:
+            print(f"  - {msg}")
+        if len(failures) > 20:
+            print(f"  ... and {len(failures) - 20} more")
+        return 1
+
+    print("VALUE MATCH")
+    print("  test: TestQuietLogic")
+    print("  checked ticks: 1-5")
+    print("  checked fields: val1,val2")
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
     if not os.path.exists(args.db_file):
@@ -139,6 +214,10 @@ def main() -> int:
 
     if args.test_name == "TestScalarCollection":
         return _validate_test_scalar_collection(args.db_file)
+    if args.test_name == "TestEnabledLogic":
+        return _validate_test_enabled_logic(args.db_file)
+    if args.test_name == "TestQuietLogic":
+        return _validate_test_quiet_logic(args.db_file)
 
     print(f"Skipping value comparison for {args.test_name} (not implemented yet)")
     return 0
