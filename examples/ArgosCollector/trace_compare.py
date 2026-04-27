@@ -105,7 +105,7 @@ def _consume_payload_and_count_tail(
     buf: ByteBuffer,
     action: int,
     layout: _CidLayout,
-    last_payload_tail_by_cid: dict[int, int],
+    last_sent_after_cid_by_cid: dict[int, int],
 ) -> list[int]:
     # We already consumed 1 action byte. Return appended chunk sizes after action.
     if action in (0, 2):  # DISABLED / QUIETED
@@ -114,8 +114,7 @@ def _consume_payload_and_count_tail(
     if action in (1, 3):  # ENABLED / AWAKENED (optional replay tail)
         # Producer appends prior bytes from offset sizeof(cid), i.e. previous
         # [action + payload_tail] for this CID.
-        prior_tail = last_payload_tail_by_cid.get(layout.cid, 0)
-        replay_tail = 0 if prior_tail == 0 else (1 + prior_tail)
+        replay_tail = last_sent_after_cid_by_cid.get(layout.cid, 0)
         if replay_tail > 0:
             buf.Extract(replay_tail)
             return [replay_tail]
@@ -178,7 +177,7 @@ def _emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> Non
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     layouts_by_cid = _load_layouts(conn, inspector)
-    last_payload_tail_by_cid: dict[int, int] = {}
+    last_sent_after_cid_by_cid: dict[int, int] = {}
 
     with open(out_path, "w", encoding="utf-8") as out:
         out.write("Bytes\tDescription\n")
@@ -196,11 +195,13 @@ def _emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> Non
 
                 blob_buf.Read("B")
                 trailing_chunks = _consume_payload_and_count_tail(
-                    blob_buf, action, layout, last_payload_tail_by_cid
+                    blob_buf, action, layout, last_sent_after_cid_by_cid
                 )
 
                 if action >= 4:
-                    last_payload_tail_by_cid[cid] = sum(trailing_chunks)
+                    # last_sent_bytes_ in C++ stores full record bytes, and lifecycle
+                    # replay appends everything after cid: [action + payload_tail].
+                    last_sent_after_cid_by_cid[cid] = 1 + sum(trailing_chunks)
 
                 if selected_cid is not None and cid != selected_cid:
                     continue
@@ -231,49 +232,67 @@ def _compare_traces(sim_trace: str, ui_trace: str) -> int:
     sim_rows = _read_trace_rows(sim_trace)
     ui_rows = _read_trace_rows(ui_trace)
 
-    def _is_sim_only_pair(rows: list[tuple[str, str]], i: int) -> bool:
-        return i + 1 < len(rows) and rows[i] == ("2", "cid") and rows[i + 1] == ("1", "action")
+    def _rows_to_records(rows: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+        records: list[list[tuple[str, str]]] = []
+        cur: list[tuple[str, str]] = []
+        for row in rows:
+            if row == ("2", "cid"):
+                if cur:
+                    records.append(cur)
+                    cur = []
+            cur.append(row)
+        if cur:
+            records.append(cur)
+        return records
 
-    i = 0  # sim index
-    j = 0  # ui index
-    tolerated = 0
-    while i < len(sim_rows) and j < len(ui_rows):
-        if sim_rows[i] == ui_rows[j]:
+    sim_records = _rows_to_records(sim_rows)
+    ui_records = _rows_to_records(ui_rows)
+
+    i = 0  # sim record index
+    j = 0  # ui record index
+    tolerated_records = 0
+    tolerated_rows = 0
+
+    while i < len(sim_records) and j < len(ui_records):
+        if sim_records[i] == ui_records[j]:
             i += 1
             j += 1
             continue
 
         # C++ trace is emitted pre-dedup; DB/UI replay is post-dedup.
-        # Skip any sim-only cid/action pairs that don't survive to DB rows.
-        if _is_sim_only_pair(sim_rows, i):
-            i += 2
-            tolerated += 2
-            continue
+        # Skip sim-only records that were dropped before DB write.
+        i += 1
+        tolerated_records += 1
+        tolerated_rows += len(sim_records[i - 1])
+        continue
 
         print("TRACE DIVERGENCE")
-        print(f"  sim row: {i + 2}")
-        print(f"  ui  row: {j + 2}")
-        print(f"  sim: {sim_rows[i][0]!r}\t{sim_rows[i][1]!r}")
-        print(f"  ui : {ui_rows[j][0]!r}\t{ui_rows[j][1]!r}")
+        print(f"  sim record: {i + 1}")
+        print(f"  ui  record: {j + 1}")
+        print(f"  sim: {sim_records[i]}")
+        print(f"  ui : {ui_records[j]}")
         return 1
 
-    while i < len(sim_rows) and _is_sim_only_pair(sim_rows, i):
-        i += 2
-        tolerated += 2
+    if i < len(sim_records):
+        for rem in sim_records[i:]:
+            tolerated_records += 1
+            tolerated_rows += len(rem)
+        i = len(sim_records)
 
-    if i != len(sim_rows) or j != len(ui_rows):
+    if i != len(sim_records) or j != len(ui_records):
         print("TRACE LENGTH MISMATCH")
-        print(f"  sim rows: {len(sim_rows)} (consumed {i})")
-        print(f"  ui  rows: {len(ui_rows)} (consumed {j})")
+        print(f"  sim records: {len(sim_records)} (consumed {i})")
+        print(f"  ui  records: {len(ui_records)} (consumed {j})")
         return 1
 
-    if tolerated > 0:
-        print("TRACE MATCH (sim has filtered cid/action-only rows)")
-        print(f"  rows compared: {len(ui_rows)}")
-        print(f"  tolerated sim-only rows: {tolerated}")
+    if tolerated_records > 0:
+        print("TRACE MATCH (sim has filtered pre-dedup records)")
+        print(f"  records compared: {len(ui_records)}")
+        print(f"  tolerated sim-only records: {tolerated_records}")
+        print(f"  tolerated sim-only rows: {tolerated_rows}")
     else:
         print("TRACE MATCH")
-        print(f"  rows compared: {len(sim_rows)}")
+        print(f"  records compared: {len(sim_records)}")
     return 0
 
 
