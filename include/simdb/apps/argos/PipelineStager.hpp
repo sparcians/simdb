@@ -194,6 +194,8 @@ private:
             payload_tail = &it->second;
         }
 
+        auto* tracer = simdb::utils::active_collection_byte_tracer();
+        simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
         auto lifecycle = std::make_unique<CollectedData>(cid);
         auto& buf = lifecycle->getBuffer();
         simdb::append_traced_enum(buf, action, "action");
@@ -318,6 +320,8 @@ private:
                 // to the underlying buffer. Our last_sent_bytes_ also has the
                 // cid at the head of the bytes. That's why we are using the
                 // StreamBuffer::append() api below with a uint16_t offset.
+                auto* tracer = simdb::utils::active_collection_byte_tracer();
+                simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
                 auto injected_data = std::make_unique<CollectedData>(cid);
                 const auto& last_sent_bytes = last_sent_bytes_.at(cid);
                 const auto src = last_sent_bytes.data() + sizeof(uint16_t);
