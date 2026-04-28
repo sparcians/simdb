@@ -1,7 +1,6 @@
 import argparse
 from collections import Counter
 import os
-import re
 import sqlite3
 import struct
 import sys
@@ -17,6 +16,8 @@ if str(_ARGOS_PKG) not in sys.path:
 
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.dtype_inspector import DataTypeInspector
+
+from trace_format import read_trace_rows
 
 
 @dataclass
@@ -257,34 +258,10 @@ def _read_db_record_frames(db_file: str, max_records: int | None = None) -> list
 
 
 def _read_trace_record_totals(path: str) -> list[int]:
-    rows: list[tuple[str, str]] = []
-    legacy_row_re = re.compile(r"^\s*(\d+)\t(.+)$")
-    structured_row_re = re.compile(r"^\s*(\d+)\s+bytes?,\s*([^,]+)(?:,\s*value\s+.*)?$")
-    with open(path, "r", encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if i == 0:
-                continue
-            line = line.strip()
-            if not line:
-                continue
-
-            if line == "record" or line.endswith(":"):
-                continue
-
-            m = legacy_row_re.match(line)
-            if m:
-                rows.append((m.group(1), m.group(2)))
-                continue
-
-            m = structured_row_re.match(line)
-            if m:
-                desc = m.group(2).strip()
-                if desc not in {"cid", "action", "bytes", "heartbeat replay bytes", "lifecycle payload tail"}:
-                    continue
-                rows.append((m.group(1), desc))
-                continue
-
-            raise RuntimeError(f"Malformed trace row in {path!r}: {line!r}")
+    rows = read_trace_rows(
+        path,
+        allowed_descriptions={"cid", "action", "bytes", "heartbeat replay bytes", "lifecycle payload tail"},
+    )
 
     totals: list[int] = []
     cur_total = 0
