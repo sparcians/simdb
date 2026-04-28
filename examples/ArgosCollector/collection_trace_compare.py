@@ -66,10 +66,12 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
                 if selected_cid is not None and cid != selected_cid:
                     continue
 
-                out.write("2\tcid\n")
-                out.write("1\taction\n")
+                out.write("record\n")
+                out.write("  2 bytes, cid\n")
+                out.write("  1 byte, action\n")
                 for nbytes in trailing_chunks:
-                    out.write(f"{nbytes}\tbytes\n")
+                    unit = "byte" if nbytes == 1 else "bytes"
+                    out.write(f"  {nbytes} {unit}, bytes\n")
 
 
 def _read_filtered_trace_rows(path: str) -> list[tuple[str, str]]:
