@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -28,6 +29,7 @@ public:
     virtual std::string getStructTypeName() const = 0;
     virtual std::vector<const ArgosFieldBase*> getStructFields() const = 0;
     virtual void writeBufferErased(StreamBuffer&, const void*) const = 0;
+    virtual std::string getValueStringErased(const void*) const = 0;
     virtual const void* getStructPtrErased(const void*) const = 0;
     virtual void setTinyStrings(TinyStrings<>*) {}
 
@@ -208,6 +210,31 @@ public:
         }
     }
 
+    std::string getValueStringErased(const void* owner_void) const override
+    {
+        const auto* owner = static_cast<const OwnerT*>(owner_void);
+        std::ostringstream oss;
+        if constexpr (std::is_same_v<value_t, std::string>)
+        {
+            oss << std::invoke(Getter, owner);
+        }
+        else if constexpr (std::is_pointer_v<value_t> &&
+                           std::is_same_v<std::remove_cv_t<std::remove_pointer_t<value_t>>, char>)
+        {
+            const char* cstr = std::invoke(Getter, owner);
+            oss << (cstr ? cstr : "");
+        }
+        else if constexpr (std::is_same_v<value_t, bool>)
+        {
+            oss << (std::invoke(Getter, owner) ? "true" : "false");
+        }
+        else
+        {
+            oss << std::invoke(Getter, owner);
+        }
+        return oss.str();
+    }
+
     const void* getStructPtrErased(const void*) const override { return nullptr; }
     void setTinyStrings(TinyStrings<>* tiny_strings) override { tiny_strings_ = tiny_strings; }
 
@@ -253,6 +280,23 @@ public:
         const auto* owner = static_cast<const OwnerT*>(owner_void);
         const int_t raw = static_cast<int_t>(std::invoke(Getter, owner));
         buffer.append(raw);
+    }
+
+    std::string getValueStringErased(const void* owner_void) const override
+    {
+        const auto* owner = static_cast<const OwnerT*>(owner_void);
+        const enum_t value = static_cast<enum_t>(std::invoke(Getter, owner));
+        const auto members = EnumDescriptor<enum_t>::members();
+        for (const auto& member : members)
+        {
+            if (member.value == static_cast<int64_t>(value))
+            {
+                return member.name;
+            }
+        }
+        std::ostringstream oss;
+        oss << static_cast<int64_t>(value);
+        return oss.str();
     }
 
     const void* getStructPtrErased(const void*) const override { return nullptr; }
@@ -305,6 +349,7 @@ public:
     }
 
     void writeBufferErased(StreamBuffer&, const void*) const override {}
+    std::string getValueStringErased(const void*) const override { return "<struct>"; }
 
     const void* getStructPtrErased(const void* owner_void) const override
     {

@@ -270,6 +270,8 @@ public:
             awaken();
         }
 
+        auto* tracer = simdb::utils::active_collection_byte_tracer();
+        simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
         CollectedData collected(getID());
         if constexpr (detail::has_argos_collector_v<ValueType>)
         {
@@ -435,6 +437,8 @@ public:
             awaken();
         }
 
+        auto* tracer = simdb::utils::active_collection_byte_tracer();
+        simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
         CollectedData collected(getID());
         auto num_elements = getNumElements<T, Sparse>(container);
         max_size_collected_ = std::max(max_size_collected_, num_elements);

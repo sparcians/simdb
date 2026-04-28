@@ -18,8 +18,10 @@
 
 namespace simdb::collection {
 
+class FieldTraceSink;
+
 using WriteErased =
-    simdb::utils::MoveOnlyFunction<void(StreamBuffer&, const void*)>;
+    simdb::utils::MoveOnlyFunction<void(StreamBuffer&, const void*, FieldTraceSink*)>;
 
 class FieldTraceSink
 {
@@ -315,8 +317,7 @@ public:
         if (root_.write_erased)
         {
             auto curr_size = buffer.size();
-            root_.write_erased(buffer, &value);
-            (void)field_trace_sink;
+            root_.write_erased(buffer, &value, field_trace_sink);
             if (expected_num_bytes)
             {
                 auto these_bytes = buffer.size() - curr_size;
@@ -376,7 +377,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         using enum_int_t = std::underlying_type_t<value_t>;
         node.enum_meta->backing_kind = detail::getBackingKind<enum_int_t>();
         node.enum_meta->members = EnumDescriptor<value_t>::members();
-        node.write_erased = [](StreamBuffer& buffer, const void* value_void) {
+        node.write_erased = [](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
             const auto* value = static_cast<const value_t*>(value_void);
             const auto raw = static_cast<enum_int_t>(*value);
             buffer.append(raw);
@@ -436,14 +437,22 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     auto nested_writer = self(*child, field->getStructFields(), self);
                     active_struct_stack.pop_back();
 
-                    child->write_erased = [field, nested_writer = std::move(nested_writer)](
-                        StreamBuffer& buffer, const void* parent_void) {
+                    child->write_erased = [field, nested_writer = std::move(nested_writer), child_field_name = child->field_name](
+                        StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
                         const auto nested_ptr = field->getStructPtrErased(parent_void);
                         if (nested_ptr == nullptr)
                         {
                             return;
                         }
-                        nested_writer(buffer, nested_ptr);
+                        if (field_trace_sink)
+                        {
+                            field_trace_sink->beginStructFields(child_field_name, field->requiredBytes());
+                        }
+                        nested_writer(buffer, nested_ptr, field_trace_sink);
+                        if (field_trace_sink)
+                        {
+                            field_trace_sink->endStructFields();
+                        }
                     };
                 }
                 else if (field->isEnumField())
@@ -453,8 +462,14 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->enum_meta->backing_kind = field->getEnumBackingKind();
                     child->enum_meta->members = field->getEnumMembers();
 
-                    child->write_erased = [field](StreamBuffer& buffer, const void* parent_void) {
+                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                        auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
+                        if (field_trace_sink)
+                        {
+                            const auto num_bytes = buffer.size() - before;
+                            field_trace_sink->recordFieldBytes(num_bytes, child_field_name, field->getValueStringErased(parent_void));
+                        }
                     };
                 }
                 else
@@ -462,20 +477,26 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->kind = NodeKind::Pod;
                     child->pod_type = std::make_unique<PodTypeKind>(field->getPodTypeKind());
 
-                    child->write_erased = [field](StreamBuffer& buffer, const void* parent_void) {
+                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                        auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
+                        if (field_trace_sink)
+                        {
+                            const auto num_bytes = buffer.size() - before;
+                            field_trace_sink->recordFieldBytes(num_bytes, child_field_name, field->getValueStringErased(parent_void));
+                        }
                     };
                 }
 
                 parent.children.emplace_back(std::move(child));
             }
 
-            return [&parent](StreamBuffer& buffer, const void* owner_void) {
+            return [&parent](StreamBuffer& buffer, const void* owner_void, FieldTraceSink* field_trace_sink) {
                 for (const auto& ch : parent.children)
                 {
                     if (ch->write_erased)
                     {
-                        ch->write_erased(buffer, owner_void);
+                        ch->write_erased(buffer, owner_void, field_trace_sink);
                     }
                 }
             };
@@ -496,7 +517,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         node.pod_type = std::make_unique<PodTypeKind>(detail::getPodTypeKind<value_t>());
         if constexpr (std::is_same_v<value_t, std::string>)
         {
-            node.write_erased = [&node](StreamBuffer& buffer, const void* value_void) {
+            node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
                 if (node.tiny_strings == nullptr)
                 {
                     throw DBException("TinyStrings not set before string collection");
@@ -510,7 +531,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         {
             if constexpr (std::is_same_v<value_t, bool>)
             {
-                node.write_erased = [](StreamBuffer& buffer, const void* value_void) {
+                node.write_erased = [](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
                     const auto* value = static_cast<const value_t*>(value_void);
                     const uint8_t v = (*value) ? 1u : 0u;
                     buffer.append(v);
@@ -518,7 +539,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
             }
             else
             {
-                node.write_erased = [](StreamBuffer& buffer, const void* value_void) {
+                node.write_erased = [](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
                     const auto value = *static_cast<const value_t*>(value_void);
                     buffer.append(value);
                 };

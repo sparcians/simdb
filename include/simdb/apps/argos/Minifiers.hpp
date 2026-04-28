@@ -81,13 +81,69 @@ public:
 
     void minifyAndAppend(StreamBuffer& buf, const ValueType& value)
     {
+        struct FieldEvent
+        {
+            std::size_t bytes = 0;
+            std::string field_name;
+            std::string value_repr;
+        };
+        class PendingFieldTraceSink final : public FieldTraceSink
+        {
+        public:
+            void beginStructFields(std::string_view label, std::size_t total_bytes) override
+            {
+                label_ = std::string(label);
+                total_bytes_ = total_bytes;
+            }
+            void endStructFields() override {}
+            void recordFieldBytes(
+                std::size_t num_bytes,
+                std::string_view field_name,
+                std::string_view value_repr) override
+            {
+                events_.push_back(FieldEvent{
+                    num_bytes,
+                    std::string(field_name),
+                    std::string(value_repr)
+                });
+            }
+
+            const std::string& label() const { return label_; }
+            std::size_t totalBytes() const { return total_bytes_; }
+            const std::vector<FieldEvent>& events() const { return events_; }
+
+        private:
+            std::string label_ = "struct fields";
+            std::size_t total_bytes_ = 0;
+            std::vector<FieldEvent> events_;
+        };
+
+        auto* tracer = simdb::utils::active_collection_byte_tracer();
+        PendingFieldTraceSink field_sink;
+        FieldTraceSink* field_trace_sink = nullptr;
+        if constexpr (detail::has_argos_collector_v<ValueType>)
+        {
+            field_trace_sink = tracer ? &field_sink : nullptr;
+        }
+
         StreamBuffer my_buffer(cur_extracted_bytes_, true, false);
-        dtype_hierarchy_->writeBuffer(my_buffer, value, &expected_num_bytes_);
+        dtype_hierarchy_->writeBuffer(my_buffer, value, &expected_num_bytes_, field_trace_sink);
 
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
-            simdb::append_traced_enum(buf, MinifierAction::FULL, "action");
+            const auto raw_action = static_cast<uint8_t>(MinifierAction::FULL);
+            const auto action_repr = std::to_string(raw_action) + " (" + actionName_(MinifierAction::FULL) + ")";
+            buf.appendValue(raw_action, "action", action_repr);
             ++action_counts_[actionIndex_(MinifierAction::FULL)];
+            if (tracer && field_trace_sink)
+            {
+                const auto group_label = std::string("struct ") + dtype_hierarchy_->getRoot().type_name + " fields";
+                simdb::utils::ScopedCollectionTraceGroup fields_group(tracer, group_label, field_sink.totalBytes());
+                for (const auto& ev : field_sink.events())
+                {
+                    tracer->recordValueWrite(ev.bytes, ev.field_name, ev.value_repr);
+                }
+            }
             buf.append(cur_extracted_bytes_);
             last_sent_bytes_ = cur_extracted_bytes_;
             cycles_since_last_full_ = 0;
@@ -95,7 +151,9 @@ public:
         }
         else
         {
-            simdb::append_traced_enum(buf, MinifierAction::CARRY, "action");
+            const auto raw_action = static_cast<uint8_t>(MinifierAction::CARRY);
+            const auto action_repr = std::to_string(raw_action) + " (" + actionName_(MinifierAction::CARRY) + ")";
+            buf.appendValue(raw_action, "action", action_repr);
             ++action_counts_[actionIndex_(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
@@ -124,6 +182,18 @@ private:
     {
         constexpr auto base = static_cast<size_t>(MinifierAction::FULL);
         return static_cast<size_t>(action) - base;
+    }
+
+    static const char* actionName_(const MinifierAction action) noexcept
+    {
+        switch (action)
+        {
+            case MinifierAction::FULL:
+                return "FULL";
+            case MinifierAction::CARRY:
+                return "CARRY";
+        }
+        return "?";
     }
 
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
