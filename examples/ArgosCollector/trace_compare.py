@@ -1,6 +1,7 @@
 import argparse
 from collections import Counter
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -215,6 +216,8 @@ def _emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> Non
 
 def _read_trace_rows(path: str) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
+    legacy_row_re = re.compile(r"^\s*(\d+)\t(.+)$")
+    structured_row_re = re.compile(r"^\s*(\d+)\s+bytes?,\s*([^,]+)(?:,\s*value\s+.*)?$")
     with open(path, "r", encoding="utf-8") as f:
         for i, line in enumerate(f):
             if i == 0:
@@ -222,10 +225,26 @@ def _read_trace_rows(path: str) -> list[tuple[str, str]]:
             line = line.strip()
             if not line:
                 continue
-            parts = line.split("\t", 1)
-            if len(parts) != 2:
-                raise RuntimeError(f"Malformed trace row in {path!r}: {line!r}")
-            rows.append((parts[0], parts[1]))
+
+            if line == "record" or line.endswith(":"):
+                continue
+
+            m = legacy_row_re.match(line)
+            if m:
+                rows.append((m.group(1), m.group(2)))
+                continue
+
+            m = structured_row_re.match(line)
+            if m:
+                desc = m.group(2).strip()
+                # Field metadata lines are informational and do not correspond
+                # to appended payload bytes in the stream.
+                if desc not in {"cid", "action", "bytes", "heartbeat replay bytes", "lifecycle payload tail"}:
+                    continue
+                rows.append((m.group(1), desc))
+                continue
+
+            raise RuntimeError(f"Malformed trace row in {path!r}: {line!r}")
     return rows
 
 
