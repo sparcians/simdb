@@ -50,6 +50,23 @@ public:
         out_.insert(out_.end(), bytes, bytes + num_bytes);
     }
 
+    void appendValue(
+        const void* data,
+        const size_t num_bytes,
+        const std::string_view trace_description,
+        const std::string_view value_repr)
+    {
+        if (participate_in_byte_trace_)
+        {
+            if (auto* tracer = utils::active_collection_byte_tracer())
+            {
+                tracer->recordValueWrite(num_bytes, trace_description, value_repr);
+            }
+        }
+        auto bytes = static_cast<const char*>(data);
+        out_.insert(out_.end(), bytes, bytes + num_bytes);
+    }
+
     void append(const std::string& val, const std::string_view trace_description = {})
     {
         append(val.data(), val.size(), trace_description);
@@ -119,6 +136,18 @@ public:
         static_assert(std::is_trivial_v<ValueType> && std::is_standard_layout_v<ValueType>,
                       "StreamBuffer::append requires memcpy-able data");
         append(&val, sizeof(T), trace_description);
+    }
+
+    template <typename T, typename ValueType = std::remove_cv_t<std::remove_reference_t<T>>,
+              std::enable_if_t<!std::is_enum_v<ValueType> && !std::is_same_v<ValueType, bool>, int> = 0>
+    void appendValue(
+        const T& val,
+        const std::string_view trace_description,
+        const std::string_view value_repr)
+    {
+        static_assert(std::is_trivial_v<ValueType> && std::is_standard_layout_v<ValueType>,
+                      "StreamBuffer::appendValue requires memcpy-able data");
+        appendValue(&val, sizeof(T), trace_description, value_repr);
     }
 
     template <typename T, typename ValueType = std::remove_cv_t<std::remove_reference_t<T>>,

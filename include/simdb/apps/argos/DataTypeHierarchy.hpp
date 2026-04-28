@@ -21,6 +21,18 @@ namespace simdb::collection {
 using WriteErased =
     simdb::utils::MoveOnlyFunction<void(StreamBuffer&, const void*)>;
 
+class FieldTraceSink
+{
+public:
+    virtual ~FieldTraceSink() = default;
+    virtual void beginStructFields(std::string_view, std::size_t) {}
+    virtual void endStructFields() {}
+    virtual void recordFieldBytes(
+        std::size_t,
+        std::string_view,
+        std::string_view) {}
+};
+
 enum class NodeKind
 {
     Pod,
@@ -294,12 +306,17 @@ public:
         return root_;
     }
 
-    void writeBuffer(StreamBuffer& buffer, const RootT& value, ValidValue<size_t>* expected_num_bytes = nullptr) const
+    void writeBuffer(
+        StreamBuffer& buffer,
+        const RootT& value,
+        ValidValue<size_t>* expected_num_bytes = nullptr,
+        FieldTraceSink* field_trace_sink = nullptr) const
     {
         if (root_.write_erased)
         {
             auto curr_size = buffer.size();
             root_.write_erased(buffer, &value);
+            (void)field_trace_sink;
             if (expected_num_bytes)
             {
                 auto these_bytes = buffer.size() - curr_size;
@@ -317,11 +334,15 @@ public:
 
     template <typename T>
     std::enable_if_t<type_traits::is_any_pointer_v<T>, void>
-    writeBuffer(StreamBuffer& buffer, const T& value) const
+    writeBuffer(
+        StreamBuffer& buffer,
+        const T& value,
+        ValidValue<size_t>* expected_num_bytes = nullptr,
+        FieldTraceSink* field_trace_sink = nullptr) const
     {
         if (value)
         {
-            writeBuffer(buffer, *value);
+            writeBuffer(buffer, *value, expected_num_bytes, field_trace_sink);
         }
     }
 

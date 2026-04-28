@@ -24,6 +24,20 @@ public:
     /// \param num_bytes Number of bytes appended immediately after this call returns.
     /// \param description Human-readable label (e.g. "cid", "minifier action").
     virtual void recordWrite(std::size_t num_bytes, std::string_view description) = 0;
+
+    /// Optional structured trace hooks (default no-op) for richer hierarchical logs.
+    virtual void beginRecord() {}
+    virtual void endRecord() {}
+    virtual void beginGroup(std::string_view, std::size_t = 0) {}
+    virtual void endGroup() {}
+    virtual void recordValueWrite(
+        std::size_t num_bytes,
+        std::string_view description,
+        std::string_view value_repr)
+    {
+        (void)value_repr;
+        recordWrite(num_bytes, description);
+    }
 };
 
 /// When non-null, \c StreamBuffer::append forwards each write here before mutating the buffer.
@@ -55,18 +69,79 @@ public:
 
     void recordWrite(std::size_t num_bytes, std::string_view description) override
     {
-        out_ << num_bytes << '\t';
-        if (description.empty())
+        recordValueWrite(num_bytes, description, {});
+    }
+
+    void beginRecord() override
+    {
+        out_ << "record\n";
+        indent_ = 1;
+        flush_();
+    }
+
+    void endRecord() override
+    {
+        indent_ = 0;
+        flush_();
+    }
+
+    void beginGroup(std::string_view label, std::size_t total_bytes = 0) override
+    {
+        writeIndent_();
+        if (total_bytes > 0)
         {
-            out_ << "bytes";
+            out_ << total_bytes << " bytes, ";
         }
-        else
+        if (!label.empty())
         {
-            out_ << description;
+            out_ << label;
+        }
+        if (label.empty() || label.back() != ':')
+        {
+            out_ << ':';
         }
         out_ << '\n';
-        out_.flush();
+        ++indent_;
+        flush_();
+    }
 
+    void endGroup() override
+    {
+        if (indent_ > 0)
+        {
+            --indent_;
+        }
+        flush_();
+    }
+
+    void recordValueWrite(
+        std::size_t num_bytes,
+        std::string_view description,
+        std::string_view value_repr) override
+    {
+        writeIndent_();
+        out_ << num_bytes << ' ' << (num_bytes == 1 ? "byte" : "bytes") << ", ";
+        out_ << (description.empty() ? std::string_view{"bytes"} : description);
+        if (!value_repr.empty())
+        {
+            out_ << ", value " << value_repr;
+        }
+        out_ << '\n';
+        flush_();
+    }
+
+private:
+    void writeIndent_()
+    {
+        for (std::size_t i = 0; i < indent_; ++i)
+        {
+            out_ << "  ";
+        }
+    }
+
+    void flush_()
+    {
+        out_.flush();
         if (!path_.empty())
         {
             out_.close();
@@ -74,9 +149,57 @@ public:
         }
     }
 
-private:
     std::ofstream out_;
     std::string path_;
+    std::size_t indent_ = 0;
+};
+
+class ScopedCollectionTraceRecord
+{
+public:
+    explicit ScopedCollectionTraceRecord(CollectionByteTracer* tracer)
+        : tracer_(tracer)
+    {
+        if (tracer_)
+        {
+            tracer_->beginRecord();
+        }
+    }
+
+    ~ScopedCollectionTraceRecord()
+    {
+        if (tracer_)
+        {
+            tracer_->endRecord();
+        }
+    }
+
+private:
+    CollectionByteTracer* tracer_ = nullptr;
+};
+
+class ScopedCollectionTraceGroup
+{
+public:
+    ScopedCollectionTraceGroup(CollectionByteTracer* tracer, std::string_view label, std::size_t total_bytes = 0)
+        : tracer_(tracer)
+    {
+        if (tracer_)
+        {
+            tracer_->beginGroup(label, total_bytes);
+        }
+    }
+
+    ~ScopedCollectionTraceGroup()
+    {
+        if (tracer_)
+        {
+            tracer_->endGroup();
+        }
+    }
+
+private:
+    CollectionByteTracer* tracer_ = nullptr;
 };
 
 /// Installs a file sink as the thread-local tracer for this scope.
