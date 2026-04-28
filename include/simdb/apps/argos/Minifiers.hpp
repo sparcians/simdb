@@ -88,7 +88,7 @@ public:
         {
             simdb::append_traced_enum(buf, MinifierAction::FULL, "action");
             ++action_counts_[actionIndex_(MinifierAction::FULL)];
-            buf << cur_extracted_bytes_;
+            buf.append(cur_extracted_bytes_);
             last_sent_bytes_ = cur_extracted_bytes_;
             cycles_since_last_full_ = 0;
             has_history_ = true;
@@ -379,24 +379,24 @@ private:
             {
                 const auto changed_idx = static_cast<uint16_t>(
                     findSwapIndex_(curr_bins_, curr_size, prev_bins_));
-                buf << changed_idx;
-                buf << curr_bins_[changed_idx];
+                buf.append(changed_idx);
+                buf.append(curr_bins_[changed_idx]);
                 return;
             }
 
             case MinifierAction::ARRIVE:
-                buf << curr_bins_[curr_size - 1];
+                buf.append(curr_bins_[curr_size - 1]);
                 return;
 
             case MinifierAction::BOOKENDS:
-                buf << curr_bins_[curr_size - 1];
+                buf.append(curr_bins_[curr_size - 1]);
                 return;
 
             case MinifierAction::FULL:
-                buf << curr_size;
+                buf.append(curr_size);
                 for (size_t i = 0; i < curr_size; ++i)
                 {
-                    buf << curr_bins_[i];
+                    buf.append(curr_bins_[i]);
                 }
                 return;
         }
@@ -630,28 +630,28 @@ private:
                 return;
             case MinifierAction::EXCHANGE:
             {
-                buf << exchange_idx;
+                buf.append(exchange_idx);
                 for (const auto& [idx, bytes] : curr_pairs_)
                 {
                     if (idx == exchange_idx)
                     {
-                        buf << bytes;
+                        buf.append(bytes);
                         return;
                     }
                 }
                 return;
             }
             case MinifierAction::REMOVE:
-                buf << exchange_idx;
+                buf.append(exchange_idx);
                 return;
             case MinifierAction::FULL:
             {
                 const auto size = static_cast<uint16_t>(curr_pairs_.size());
-                buf << size;
+                buf.append(size);
                 for (const auto& [idx, bytes] : curr_pairs_)
                 {
-                    buf << idx;
-                    buf << bytes;
+                    buf.append(idx);
+                    buf.append(bytes);
                 }
                 return;
             }

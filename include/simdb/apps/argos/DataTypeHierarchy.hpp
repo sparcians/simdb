@@ -358,7 +358,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         node.write_erased = [](StreamBuffer& buffer, const void* value_void) {
             const auto* value = static_cast<const value_t*>(value_void);
             const auto raw = static_cast<enum_int_t>(*value);
-            buffer << raw;
+            buffer.append(raw);
         };
     }
     else if constexpr (detail::has_argos_collector_v<value_t>)
@@ -482,7 +482,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                 }
                 const auto* s = static_cast<const value_t*>(value_void);
                 const uint32_t id = node.tiny_strings->getStringID(*s);
-                buffer << id;
+                buffer.append(id);
             };
         }
         else
@@ -492,14 +492,14 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                 node.write_erased = [](StreamBuffer& buffer, const void* value_void) {
                     const auto* value = static_cast<const value_t*>(value_void);
                     const uint8_t v = (*value) ? 1u : 0u;
-                    buffer << v;
+                    buffer.append(v);
                 };
             }
             else
             {
                 node.write_erased = [](StreamBuffer& buffer, const void* value_void) {
                     const auto value = *static_cast<const value_t*>(value_void);
-                    buffer << value;
+                    buffer.append(value);
                 };
             }
         }

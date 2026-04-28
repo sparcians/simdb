@@ -183,7 +183,7 @@ public:
                 throw DBException("TinyStrings not set before string collection");
             }
             const uint32_t id = tiny_strings_->getStringID(std::invoke(Getter, owner));
-            buffer << id;
+            buffer.append(id);
         }
         else if constexpr (std::is_pointer_v<value_t> &&
                            std::is_same_v<std::remove_cv_t<std::remove_pointer_t<value_t>>, char>)
@@ -194,17 +194,17 @@ public:
             }
             const char* cstr = std::invoke(Getter, owner);
             const uint32_t id = tiny_strings_->getStringID(cstr ? std::string{cstr} : std::string{});
-            buffer << id;
+            buffer.append(id);
         }
         else if constexpr (std::is_same_v<value_t, bool>)
         {
             const uint8_t v = std::invoke(Getter, owner) ? 1u : 0u;
-            buffer << v;
+            buffer.append(v);
         }
         else
         {
             value_t v = static_cast<value_t>(std::invoke(Getter, owner));
-            buffer << v;
+            buffer.append(v);
         }
     }
 
@@ -252,7 +252,7 @@ public:
     {
         const auto* owner = static_cast<const OwnerT*>(owner_void);
         const int_t raw = static_cast<int_t>(std::invoke(Getter, owner));
-        buffer << raw;
+        buffer.append(raw);
     }
 
     const void* getStructPtrErased(const void*) const override { return nullptr; }

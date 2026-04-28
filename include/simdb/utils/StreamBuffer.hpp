@@ -14,8 +14,14 @@
 
 namespace simdb {
 
+template <typename T>
+constexpr bool is_stream_array_value_type_v =
+    (std::is_scalar_v<T> && std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T> && !std::is_enum_v<T> &&
+     !std::is_same_v<T, bool>) ||
+     std::is_enum_v<T> || std::is_same_v<T, bool>;
+
 /// \class StreamBuffer
-/// \brief Utility class which wraps a char buffer with ostream operators.
+/// \brief Utility class which wraps a char buffer with typed append operators.
 class StreamBuffer
 {
 public:
@@ -44,6 +50,86 @@ public:
         out_.insert(out_.end(), bytes, bytes + num_bytes);
     }
 
+    void append(const std::string& val, const std::string_view trace_description = {})
+    {
+        append(val.data(), val.size(), trace_description);
+    }
+
+    void append(const char* val, const std::string_view trace_description = {})
+    {
+        if (val != nullptr)
+        {
+            append(val, std::strlen(val), trace_description);
+        }
+    }
+
+    void append(const bool val, const std::string_view trace_description = {})
+    {
+        using bool_type = typename StreamBuffer::bool_type;
+        const bool_type byte = val ? bool_type{1} : bool_type{0};
+        append(&byte, sizeof(byte), trace_description);
+    }
+
+    template <typename T, typename Alloc>
+    void append(const std::vector<T, Alloc>& val, const std::string_view trace_description = {})
+    {
+        if constexpr (std::is_trivial_v<T> && std::is_standard_layout_v<T>)
+        {
+            append(val.data(), val.size() * sizeof(T), trace_description);
+        }
+        else
+        {
+            for (const auto& v : val)
+            {
+                append(v, trace_description);
+            }
+        }
+    }
+
+    template <typename T, size_t N>
+    void append(const T (&val)[N], const std::string_view trace_description = {})
+    {
+        using ValueType = std::remove_cv_t<T>;
+        static_assert(is_stream_array_value_type_v<ValueType>,
+                      "StreamBuffer::append(array) requires scalar POD, scalar enum, or scalar bool value types");
+
+        for (const auto& elem : val)
+        {
+            append(elem, trace_description);
+        }
+    }
+
+    template <typename T, size_t N>
+    void append(const std::array<T, N>& val, const std::string_view trace_description = {})
+    {
+        using ValueType = std::remove_cv_t<T>;
+        static_assert(is_stream_array_value_type_v<ValueType>,
+                      "StreamBuffer::append(std::array) requires scalar POD, scalar enum, or scalar bool value types");
+
+        for (const auto& elem : val)
+        {
+            append(elem, trace_description);
+        }
+    }
+
+    template <typename T, typename ValueType = std::remove_cv_t<std::remove_reference_t<T>>,
+              std::enable_if_t<!std::is_enum_v<ValueType> && !std::is_same_v<ValueType, bool>, int> = 0>
+    void append(const T& val, const std::string_view trace_description = {})
+    {
+        static_assert(std::is_trivial_v<ValueType> && std::is_standard_layout_v<ValueType>,
+                      "StreamBuffer::append requires memcpy-able data");
+        append(&val, sizeof(T), trace_description);
+    }
+
+    template <typename T, typename ValueType = std::remove_cv_t<std::remove_reference_t<T>>,
+              std::enable_if_t<std::is_enum_v<ValueType>, int> = 0>
+    void append(const T& val, const std::string_view trace_description = {})
+    {
+        using Underlying = std::underlying_type_t<ValueType>;
+        const auto underlying = static_cast<Underlying>(val);
+        append(underlying, trace_description);
+    }
+
     size_t size() const { return out_.size(); }
 
     using bool_type = uint8_t;
@@ -63,99 +149,7 @@ inline void append_traced_enum(StreamBuffer& buf, const EnumT value, const char*
 {
     using U = std::underlying_type_t<EnumT>;
     const U underlying = static_cast<U>(value);
-    buf.append(&underlying, sizeof(U), trace_label);
-}
-
-inline StreamBuffer& operator<<(StreamBuffer& buf, const std::string& val)
-{
-    buf.append(val.data(), val.size());
-    return buf;
-}
-
-inline StreamBuffer& operator<<(StreamBuffer& buf, const char* val)
-{
-    if (val != nullptr)
-    {
-        buf.append(val, std::strlen(val));
-    }
-    return buf;
-}
-
-inline StreamBuffer& operator<<(StreamBuffer& buf, const bool val)
-{
-    using bool_type = typename StreamBuffer::bool_type;
-    const bool_type byte = val ? bool_type{1} : bool_type{0};
-    buf.append(&byte, sizeof(byte));
-    return buf;
-}
-
-template <typename T, typename Alloc>
-inline StreamBuffer& operator<<(StreamBuffer& buf, const std::vector<T, Alloc>& val)
-{
-    if constexpr (std::is_trivial_v<T> && std::is_standard_layout_v<T>)
-    {
-        buf.append(val.data(), val.size() * sizeof(T));
-    }
-    else
-    {
-        for (const auto& v : val)
-        {
-            buf << v;
-        }
-    }
-    return buf;
-}
-
-template <typename T>
-constexpr bool is_stream_array_value_type_v =
-    (std::is_scalar_v<T> && std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T> && !std::is_enum_v<T> &&
-     !std::is_same_v<T, bool>) ||
-    std::is_enum_v<T> || std::is_same_v<T, bool>;
-
-template <typename T, size_t N> StreamBuffer& operator<<(StreamBuffer& buf, const T (&val)[N])
-{
-    using ValueType = std::remove_cv_t<T>;
-    static_assert(is_stream_array_value_type_v<ValueType>,
-                  "StreamBuffer array operator<< requires scalar POD, scalar enum, or scalar bool value types");
-
-    for (const auto& elem : val)
-    {
-        buf << elem;
-    }
-    return buf;
-}
-
-template <typename T, size_t N> StreamBuffer& operator<<(StreamBuffer& buf, const std::array<T, N>& val)
-{
-    using ValueType = std::remove_cv_t<T>;
-    static_assert(is_stream_array_value_type_v<ValueType>,
-                  "StreamBuffer std::array operator<< requires scalar POD, scalar enum, or scalar bool value types");
-
-    for (const auto& elem : val)
-    {
-        buf << elem;
-    }
-    return buf;
-}
-
-template <typename T, typename ValueType = std::remove_cv_t<std::remove_reference_t<T>>,
-          std::enable_if_t<!std::is_enum_v<ValueType> && !std::is_same_v<ValueType, bool>, int> = 0>
-StreamBuffer& operator<<(StreamBuffer& buf, const T& val)
-{
-    static_assert(std::is_trivial_v<ValueType> && std::is_standard_layout_v<ValueType>,
-                  "StreamBuffer::operator<< requires memcpy-able data");
-    buf.append(&val, sizeof(T));
-    return buf;
-}
-
-template <typename T, typename ValueType = std::remove_cv_t<std::remove_reference_t<T>>,
-          std::enable_if_t<std::is_enum_v<ValueType>, int> = 0>
-StreamBuffer& operator<<(StreamBuffer& buf, const T& val)
-{
-    using Underlying = std::underlying_type_t<ValueType>;
-    const auto underlying = static_cast<Underlying>(val);
-    buf << underlying;
-    return buf;
+    buf.append(underlying, trace_label);
 }
 
 } // namespace simdb
