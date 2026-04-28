@@ -48,6 +48,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow extra records in sim trace (pre-dedup) while preserving order",
     )
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        default=None,
+        help="Stop after parsing this many records (across all timestamps); for large-DB smoke tests",
+    )
     return parser.parse_args()
 
 
@@ -158,30 +164,59 @@ def _consume_payload_and_count_tail(
     raise RuntimeError(f"CID {layout.cid}: unknown layout mode {layout.mode!r}")
 
 
-def _read_db_record_frames(db_file: str) -> list[_DbRecordFrame]:
+def _hex_window(blob: bytes, center_idx: int, radius: int = 32) -> str:
+    lo = max(0, center_idx - radius)
+    hi = min(len(blob), center_idx + radius)
+    return blob[lo:hi].hex()
+
+
+def _read_db_record_frames(db_file: str, max_records: int | None = None) -> list[_DbRecordFrame]:
     inspector = DataTypeInspector(db_file)
     conn = sqlite3.connect(db_file)
     layouts_by_cid = _load_layouts(conn, inspector)
     last_sent_after_cid_by_cid: dict[int, int] = {}
     frames: list[_DbRecordFrame] = []
+    total_decompressed_blob_bytes = 0
+    record_cap = max_records
 
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT Timestamps.Timestamp, CollectionRecords.Records
+        SELECT Timestamps.Id, Timestamps.Timestamp, CollectionRecords.Records
         FROM CollectionRecords
         JOIN Timestamps ON Timestamps.Id = CollectionRecords.TimestampID
         ORDER BY Timestamps.Id ASC
         """
     )
-    for raw_time, compressed_blob in cursor.fetchall():
+    for timestamp_id, raw_time, compressed_blob in cursor.fetchall():
         timestamp = int(raw_time) if isinstance(raw_time, str) else int(raw_time)
         raw_blob = zlib.decompress(compressed_blob)
+        total_decompressed_blob_bytes += len(raw_blob)
         blob_buf = ByteBuffer(raw_blob)
 
         while not blob_buf.Done():
+            if record_cap is not None and len(frames) >= record_cap:
+                conn.close()
+                print("DB scan stats (partial)")
+                print(f"  decompressed CollectionRecords payload bytes: {total_decompressed_blob_bytes}")
+                return frames
+
             record_start_idx = blob_buf._read_idx
             cid = int(blob_buf.Read("H"))
+            if cid not in layouts_by_cid:
+                prev = frames[-1] if frames else None
+                raise RuntimeError(
+                    "FRAMING STOP: unknown CID (likely prior record consumed wrong byte count)\n"
+                    f"  TimestampID: {timestamp_id}\n"
+                    f"  Timestamp: {timestamp}\n"
+                    f"  blob offset at cid read: {record_start_idx}\n"
+                    f"  decompressed blob length: {len(raw_blob)}\n"
+                    f"  read uint16 as cid: {cid}\n"
+                    f"  previous record: {prev}\n"
+                    f"  hex context: {_hex_window(raw_blob, record_start_idx)}\n"
+                    f"  hint: compare DataTypeNodes wire sizes to the producer; dump.py hits the same failure."
+                )
+
             layout = layouts_by_cid[cid]
             payload_start_idx = blob_buf._read_idx
             action = _decode_action(raw_blob, payload_start_idx)
@@ -203,7 +238,20 @@ def _read_db_record_frames(db_file: str) -> list[_DbRecordFrame]:
                     raw_total_bytes=record_end_idx - record_start_idx,
                 )
             )
+
+        if blob_buf._read_idx != len(raw_blob):
+            raise RuntimeError(
+                "FRAMING STOP: trailing bytes after last record in blob\n"
+                f"  TimestampID: {timestamp_id}\n"
+                f"  Timestamp: {timestamp}\n"
+                f"  read_idx: {blob_buf._read_idx}, blob_len: {len(raw_blob)}\n"
+                f"  trailing byte count: {len(raw_blob) - blob_buf._read_idx}\n"
+                f"  tail hex: {raw_blob[blob_buf._read_idx : blob_buf._read_idx + 48].hex()}"
+            )
+
     conn.close()
+    print("DB scan stats")
+    print(f"  decompressed CollectionRecords payload bytes: {total_decompressed_blob_bytes}")
     return frames
 
 
@@ -306,8 +354,17 @@ def main() -> int:
     if not os.path.exists(args.db_file):
         raise RuntimeError(f"DB file does not exist: {args.db_file}")
 
-    db_frames = _read_db_record_frames(args.db_file)
-    print("DB FRAMING OK")
+    try:
+        db_frames = _read_db_record_frames(args.db_file, max_records=args.max_records)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    capped = args.max_records is not None and len(db_frames) >= args.max_records
+    if capped:
+        print("DB FRAMING OK (partial, --max-records cap hit)")
+    else:
+        print("DB FRAMING OK")
     print(f"  records parsed: {len(db_frames)}")
 
     if args.sim_trace_file is None:
