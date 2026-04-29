@@ -282,7 +282,7 @@ public:
             // Action byte marks this as a regular payload (not a lifecycle event).
             constexpr uint8_t kFirstMinifierActionValue =
                 static_cast<uint8_t>(LifecycleAction::AWAKENED) + 1;
-            collected.getBuffer().append(&kFirstMinifierActionValue, sizeof(kFirstMinifierActionValue), "action");
+            collected.getBuffer().appendValue(kFirstMinifierActionValue, "action", "FULL");
             dtype_hierarchy_->writeBuffer(collected.getBuffer(), value, &expected_num_bytes_);
         }
         stage_(std::move(collected));

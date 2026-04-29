@@ -4,6 +4,8 @@
 
 #include "simdb/utils/StreamBuffer.hpp"
 
+#include <string>
+
 namespace simdb::collection {
 
 /// \class CollectedData
@@ -14,7 +16,7 @@ public:
     explicit CollectedData(uint16_t cid)
         : cid_(cid)
     {
-        buffer_.append(&cid_, sizeof(cid_), "cid");
+        buffer_.appendValue(cid_, "cid", std::to_string(static_cast<unsigned>(cid_)));
     }
 
     CollectedData(CollectedData&&) = default;

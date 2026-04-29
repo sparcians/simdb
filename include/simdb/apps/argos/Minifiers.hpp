@@ -132,8 +132,7 @@ public:
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
             const auto raw_action = static_cast<uint8_t>(MinifierAction::FULL);
-            const auto action_repr = std::to_string(raw_action) + " (" + actionName_(MinifierAction::FULL) + ")";
-            buf.appendValue(raw_action, "action", action_repr);
+            buf.appendValue(raw_action, "action", actionName_(MinifierAction::FULL));
             ++action_counts_[actionIndex_(MinifierAction::FULL)];
             if (tracer && field_trace_sink)
             {
@@ -152,8 +151,7 @@ public:
         else
         {
             const auto raw_action = static_cast<uint8_t>(MinifierAction::CARRY);
-            const auto action_repr = std::to_string(raw_action) + " (" + actionName_(MinifierAction::CARRY) + ")";
-            buf.appendValue(raw_action, "action", action_repr);
+            buf.appendValue(raw_action, "action", actionName_(MinifierAction::CARRY));
             ++action_counts_[actionIndex_(MinifierAction::CARRY)];
             ++cycles_since_last_full_;
         }
@@ -435,10 +433,31 @@ private:
         return 0;
     }
 
+    static const char* actionName_(const MinifierAction action) noexcept
+    {
+        switch (action)
+        {
+            case MinifierAction::FULL:
+                return "FULL";
+            case MinifierAction::CARRY:
+                return "CARRY";
+            case MinifierAction::SWAP:
+                return "SWAP";
+            case MinifierAction::ARRIVE:
+                return "ARRIVE";
+            case MinifierAction::DEPART:
+                return "DEPART";
+            case MinifierAction::BOOKENDS:
+                return "BOOKENDS";
+        }
+        return "?";
+    }
+
     void writeAction_(StreamBuffer& buf, const MinifierAction action, const uint16_t curr_size)
     {
         ++action_counts_[actionIndex_(action)];
-        simdb::append_traced_enum(buf, action, "action");
+        const auto raw_action = static_cast<uint8_t>(action);
+        buf.appendValue(raw_action, "action", actionName_(action));
         switch (action)
         {
             case MinifierAction::CARRY:
@@ -693,7 +712,8 @@ private:
     void writeAction_(StreamBuffer& buf, MinifierAction action, const uint16_t exchange_idx) const
     {
         ++action_counts_[actionIndex_(action)];
-        simdb::append_traced_enum(buf, action, "action");
+        const auto raw_action = static_cast<uint8_t>(action);
+        buf.appendValue(raw_action, "action", actionName_(action));
         switch (action)
         {
             case MinifierAction::CARRY:

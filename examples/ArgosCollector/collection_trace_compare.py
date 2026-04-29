@@ -32,6 +32,19 @@ _ALLOWED_TRACE_DESCRIPTIONS = {
 }
 
 
+def _action_trace_value(action: int, mode: str) -> str:
+    """Match C++ naming for lifecycle + minifier action bytes."""
+    if action < 4:
+        return ("DISABLED", "ENABLED", "QUIETED", "AWAKENED")[action]
+    if mode == "scalar":
+        return {4: "FULL", 5: "CARRY"}.get(action, str(action))
+    if mode == "contig":
+        return {4: "FULL", 5: "CARRY", 6: "SWAP", 7: "ARRIVE", 8: "DEPART", 9: "BOOKENDS"}.get(action, str(action))
+    if mode == "sparse":
+        return {4: "FULL", 5: "CARRY", 6: "EXCHANGE", 7: "REMOVE"}.get(action, str(action))
+    return str(action)
+
+
 def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None:
     inspector = DataTypeInspector(db_file)
     conn = sqlite3.connect(db_file)
@@ -67,8 +80,9 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
                     continue
 
                 out.write("record\n")
-                out.write("  2 bytes, cid\n")
-                out.write("  1 byte, action\n")
+                out.write(f"  2 bytes, cid, value {cid}\n")
+                action_label = _action_trace_value(action, layout.mode)
+                out.write(f"  1 byte, action, value {action_label}\n")
                 for nbytes in trailing_chunks:
                     unit = "byte" if nbytes == 1 else "bytes"
                     out.write(f"  {nbytes} {unit}, bytes\n")

@@ -198,7 +198,8 @@ private:
         simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
         auto lifecycle = std::make_unique<CollectedData>(cid);
         auto& buf = lifecycle->getBuffer();
-        simdb::append_traced_enum(buf, action, "action");
+        const auto raw_action = static_cast<uint8_t>(action);
+        buf.appendValue(raw_action, "action", lifecycle_action_trace_value(action));
 
         if (payload_tail)
         {
