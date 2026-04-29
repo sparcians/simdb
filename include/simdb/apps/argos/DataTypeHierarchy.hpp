@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <utility>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -29,10 +31,11 @@ public:
     virtual ~FieldTraceSink() = default;
     virtual void beginStructFields(std::string_view, std::size_t) {}
     virtual void endStructFields() {}
+    /// \param trace_label Type-oriented label for byte trace (e.g. \c "unsigned int", \c "string id").
     virtual void recordFieldBytes(
         std::size_t,
-        std::string_view,
-        std::string_view) {}
+        std::string_view /*trace_label*/,
+        std::string_view /*value_repr*/) {}
 };
 
 enum class NodeKind
@@ -108,6 +111,20 @@ struct EnumMeta
     EnumBackingKind backing_kind = EnumBackingKind::i32;
     std::vector<EnumMember> members;
 };
+
+inline std::string enum_raw_display_string(const std::vector<EnumMember>& members, const int64_t raw)
+{
+    for (const auto& member : members)
+    {
+        if (member.value == raw)
+        {
+            return member.name;
+        }
+    }
+    std::ostringstream oss;
+    oss << raw;
+    return oss.str();
+}
 
 struct DataTypeNode
 {
@@ -377,10 +394,12 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         using enum_int_t = std::underlying_type_t<value_t>;
         node.enum_meta->backing_kind = detail::getBackingKind<enum_int_t>();
         node.enum_meta->members = EnumDescriptor<value_t>::members();
-        node.write_erased = [](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+        node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
             const auto* value = static_cast<const value_t*>(value_void);
             const auto raw = static_cast<enum_int_t>(*value);
-            buffer.append(raw);
+            const int64_t raw_i64 = static_cast<int64_t>(raw);
+            const std::string val_str = enum_raw_display_string(node.enum_meta->members, raw_i64);
+            buffer.appendValue(raw, node.type_name, val_str);
         };
     }
     else if constexpr (detail::has_argos_collector_v<value_t>)
@@ -462,13 +481,16 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->enum_meta->backing_kind = field->getEnumBackingKind();
                     child->enum_meta->members = field->getEnumMembers();
 
-                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                    child->write_erased = [field](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
                         auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
                         if (field_trace_sink)
                         {
                             const auto num_bytes = buffer.size() - before;
-                            field_trace_sink->recordFieldBytes(num_bytes, child_field_name, field->getValueStringErased(parent_void));
+                            field_trace_sink->recordFieldBytes(
+                                num_bytes,
+                                field->getTypeName(),
+                                field->getValueStringErased(parent_void));
                         }
                     };
                 }
@@ -477,13 +499,26 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->kind = NodeKind::Pod;
                     child->pod_type = std::make_unique<PodTypeKind>(field->getPodTypeKind());
 
-                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                    child->write_erased = [field](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
                         auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
                         if (field_trace_sink)
                         {
                             const auto num_bytes = buffer.size() - before;
-                            field_trace_sink->recordFieldBytes(num_bytes, child_field_name, field->getValueStringErased(parent_void));
+                            const bool is_string_pod =
+                                !field->isEnumField() && !field->isStructField() && field->getPodTypeKind() == PodTypeKind::str;
+                            const std::string trace_label = is_string_pod ? std::string{"string id"} : field->getTypeName();
+                            std::string trace_value = field->getValueStringErased(parent_void);
+                            if (is_string_pod && num_bytes >= sizeof(uint32_t))
+                            {
+                                uint32_t id = 0;
+                                const auto& bytes = buffer.byte_storage();
+                                std::memcpy(&id, bytes.data() + before, sizeof id);
+                                std::ostringstream oss;
+                                oss << id << ", string value " << field->getValueStringErased(parent_void);
+                                trace_value = oss.str();
+                            }
+                            field_trace_sink->recordFieldBytes(num_bytes, trace_label, trace_value);
                         }
                     };
                 }
@@ -524,24 +559,28 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                 }
                 const auto* s = static_cast<const value_t*>(value_void);
                 const uint32_t id = node.tiny_strings->getStringID(*s);
-                buffer.append(id);
+                std::ostringstream oss;
+                oss << id << ", string value " << *s;
+                buffer.appendValue(id, "string id", oss.str());
             };
         }
         else
         {
             if constexpr (std::is_same_v<value_t, bool>)
             {
-                node.write_erased = [](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+                node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
                     const auto* value = static_cast<const value_t*>(value_void);
                     const uint8_t v = (*value) ? 1u : 0u;
-                    buffer.append(v);
+                    buffer.appendValue(v, node.type_name, (*value) ? "true" : "false");
                 };
             }
             else
             {
-                node.write_erased = [](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+                node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
                     const auto value = *static_cast<const value_t*>(value_void);
-                    buffer.append(value);
+                    std::ostringstream oss;
+                    oss << value;
+                    buffer.appendValue(value, node.type_name, oss.str());
                 };
             }
         }

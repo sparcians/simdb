@@ -23,15 +23,6 @@ from trace_db_common import (
 )
 from trace_format import read_trace_rows
 
-_ALLOWED_TRACE_DESCRIPTIONS = {
-    "cid",
-    "action",
-    "bytes",
-    "heartbeat replay bytes",
-    "lifecycle payload tail",
-}
-
-
 def _action_trace_value(action: int, mode: str) -> str:
     """Match C++ naming for lifecycle + minifier action bytes."""
     if action < 4:
@@ -89,7 +80,8 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
 
 
 def _read_filtered_trace_rows(path: str) -> list[tuple[str, str]]:
-    return read_trace_rows(path, allowed_descriptions=_ALLOWED_TRACE_DESCRIPTIONS)
+    # Include every structured byte line; trace labels are type names (e.g. "unsigned int") not a fixed set.
+    return read_trace_rows(path, allowed_descriptions=None)
 
 
 def _rows_to_record_totals(rows: list[tuple[str, str]]) -> list[tuple[int, list[tuple[str, str]]]]:

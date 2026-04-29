@@ -50,6 +50,13 @@ public:
         out_.insert(out_.end(), bytes, bytes + num_bytes);
     }
 
+    /// Append raw bytes without notifying the byte tracer (caller already logged them).
+    void append_without_byte_trace(const void* data, const size_t num_bytes)
+    {
+        auto bytes = static_cast<const char*>(data);
+        out_.insert(out_.end(), bytes, bytes + num_bytes);
+    }
+
     void appendValue(
         const void* data,
         const size_t num_bytes,
@@ -160,6 +167,9 @@ public:
     }
 
     size_t size() const { return out_.size(); }
+
+    /// Read-only view of bytes written so far (e.g. for post-append trace introspection).
+    const std::vector<char>& byte_storage() const { return out_; }
 
     using bool_type = uint8_t;
 

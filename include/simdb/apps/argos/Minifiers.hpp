@@ -84,7 +84,7 @@ public:
         struct FieldEvent
         {
             std::size_t bytes = 0;
-            std::string field_name;
+            std::string trace_label;
             std::string value_repr;
         };
         class PendingFieldTraceSink final : public FieldTraceSink
@@ -98,12 +98,12 @@ public:
             void endStructFields() override {}
             void recordFieldBytes(
                 std::size_t num_bytes,
-                std::string_view field_name,
+                std::string_view trace_label,
                 std::string_view value_repr) override
             {
                 events_.push_back(FieldEvent{
                     num_bytes,
-                    std::string(field_name),
+                    std::string(trace_label),
                     std::string(value_repr)
                 });
             }
@@ -140,10 +140,21 @@ public:
                 simdb::utils::ScopedCollectionTraceGroup fields_group(tracer, group_label, field_sink.totalBytes());
                 for (const auto& ev : field_sink.events())
                 {
-                    tracer->recordValueWrite(ev.bytes, ev.field_name, ev.value_repr);
+                    tracer->recordValueWrite(ev.bytes, ev.trace_label, ev.value_repr);
+                }
+                if (!field_sink.events().empty())
+                {
+                    buf.append_without_byte_trace(cur_extracted_bytes_.data(), cur_extracted_bytes_.size());
+                }
+                else
+                {
+                    buf.append(cur_extracted_bytes_);
                 }
             }
-            buf.append(cur_extracted_bytes_);
+            else
+            {
+                buf.append(cur_extracted_bytes_);
+            }
             last_sent_bytes_ = cur_extracted_bytes_;
             cycles_since_last_full_ = 0;
             has_history_ = true;
