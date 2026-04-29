@@ -1,9 +1,9 @@
 // <CollectionByteTrace.hpp> -*- C++ -*-
 //
 // Optional instrumentation: log each logical byte range as it is appended to
-// collection StreamBuffers (e.g. simdb_collection_bytes.sim). Disabled by
-// default (null thread-local tracer); when enabled, the hot path is one null
-// pointer check plus a virtual call on the active sink.
+// collection StreamBuffers (e.g. simdb_collection.trace). Disabled by default
+// (null thread-local tracer); when enabled, the hot path is one null pointer
+// check plus a virtual call on the active sink.
 
 #pragma once
 

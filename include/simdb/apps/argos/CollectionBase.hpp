@@ -35,7 +35,7 @@ public:
 
     void enableByteTracer(bool reopen_mode = false)
     {
-        enableByteTracer("simdb_collection_bytes.sim", reopen_mode);
+        enableByteTracer("simdb_collection.trace", reopen_mode);
     }
 
     void enableByteTracer(const std::string& path)
