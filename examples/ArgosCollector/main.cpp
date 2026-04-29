@@ -401,18 +401,9 @@ void TestScalarCollection()
     // tick 2 collects the same Instruction bytes as tick 1.
     all_data[1].inst = all_data[0].inst;
 
-    std::ofstream fout(std::string(__FUNCTION__) + ".test.out");
     for (tick = 1; tick <= all_data.size(); ++tick)
     {
         auto idx = tick - 1;
-
-        fout << "Collecting scalar values at tick " << tick << "\n";
-        fout << "... pod: "   << all_data[idx].pod   << "\n";
-        fout << "... str: "   << all_data[idx].str   << "\n";
-        fout << "... itype: " << all_data[idx].itype << "\n";
-        fout << "... flag: "  << all_data[idx].flag  << "\n";
-        fout << "... inst: "  << *all_data[idx].inst << "\n";
-
         pod_collector->collect(all_data[idx].pod);
         str_collector->collect(all_data[idx].str);
         enum_collector->collect(all_data[idx].itype);
@@ -428,7 +419,6 @@ void TestScalarCollection()
     inst_collector->collect(all_data.back().inst);
 
     app_mgrs.postSimLoopTeardown();
-    fout.close();
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
 }
 
