@@ -41,7 +41,7 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     layouts_by_cid = load_layouts(conn, inspector)
-    last_sent_after_cid_by_cid: dict[int, int] = {}
+    last_full_payload_bytes_by_cid: dict[int, int] = {}
 
     with open(out_path, "w", encoding="utf-8") as out:
         out.write("Bytes\tDescription\n")
@@ -59,13 +59,12 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
 
                 blob_buf.Read("B")
                 trailing_chunks = consume_payload_and_count_tail(
-                    blob_buf, action, layout, last_sent_after_cid_by_cid
+                    blob_buf, action, layout, last_full_payload_bytes_by_cid
                 )
 
-                if action >= 4:
-                    # last_sent_bytes_ in C++ stores full record bytes, and lifecycle
-                    # replay appends everything after cid: [action + payload_tail].
-                    last_sent_after_cid_by_cid[cid] = 1 + sum(trailing_chunks)
+                if action == 4:
+                    # Lifecycle re-entry appends only FULL payload bytes (no prior action).
+                    last_full_payload_bytes_by_cid[cid] = sum(trailing_chunks)
 
                 if selected_cid is not None and cid != selected_cid:
                     continue
@@ -156,7 +155,7 @@ def read_db_record_frames(db_file: str, max_records: int | None = None) -> list[
     inspector = DataTypeInspector(db_file)
     conn = sqlite3.connect(db_file)
     layouts_by_cid = load_layouts(conn, inspector)
-    last_sent_after_cid_by_cid: dict[int, int] = {}
+    last_full_payload_bytes_by_cid: dict[int, int] = {}
     frames: list[DbRecordFrame] = []
     total_decompressed_blob_bytes = 0
     record_cap = max_records
@@ -205,10 +204,10 @@ def read_db_record_frames(db_file: str, max_records: int | None = None) -> list[
 
             blob_buf.Read("B")
             trailing_chunks = consume_payload_and_count_tail(
-                blob_buf, action, layout, last_sent_after_cid_by_cid
+                blob_buf, action, layout, last_full_payload_bytes_by_cid
             )
-            if action >= 4:
-                last_sent_after_cid_by_cid[cid] = 1 + sum(trailing_chunks)
+            if action == 4:
+                last_full_payload_bytes_by_cid[cid] = sum(trailing_chunks)
 
             record_end_idx = blob_buf._read_idx
             frames.append(

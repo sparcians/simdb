@@ -608,6 +608,50 @@ void TestQuietLogic()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, false, true);
 }
 
+void TestManualScalarDisableEnableLongGap()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 10;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    auto collector = collection.collectScalarManually<unsigned int>("value", "root");
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    tick = 1;
+    collector->collect(4);
+
+    tick = 2;
+    collector->collect(5);
+
+    tick = 3;
+    collector->disable();
+
+    tick = 50;
+    collector->enable();
+
+    tick = 51;
+    collector->collect(6);
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
 void TestMultiClock()
 {
     TEST_METHOD_INIT;
@@ -1341,6 +1385,7 @@ int main()
     TestScalarCollection();
     TestEnabledLogic();
     TestQuietLogic();
+    TestManualScalarDisableEnableLongGap();
     TestMultiClock();
     TestFlatten();
     TestContainers();

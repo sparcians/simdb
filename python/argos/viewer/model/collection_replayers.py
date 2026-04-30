@@ -97,8 +97,11 @@ class ScalarMinifiedReplayer(CollectableReplayerBase):
             return {}
 
         if action in (_ENABLED, _AWAKENED):
-            # Producer appends this CID's prior action+payload tail.
-            return self.replay_next(buf)
+            # Lifecycle re-entry carries a FULL payload body directly.
+            nbytes = self._deserializer.GetNumBytes()
+            raw = buf.Extract(nbytes)
+            self._last = self._deserializer.Deserialize(raw)
+            return self._last
 
         if action == self._FULL:
             nbytes = self._deserializer.GetNumBytes()
@@ -142,7 +145,11 @@ class StructMinifiedReplayer(CollectableReplayerBase):
             self._last = {}
             return {}
         if action in (_ENABLED, _AWAKENED):
-            return self.replay_next(buf)
+            # Lifecycle re-entry carries a FULL payload body directly.
+            nbytes = self._deserializer.GetNumBytes()
+            raw = buf.Extract(nbytes)
+            self._last = self._deserializer.Deserialize(raw)
+            return self._last
         if action == self._FULL:
             nbytes = self._deserializer.GetNumBytes()
             raw = buf.Extract(nbytes)
@@ -185,7 +192,12 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
             self._items = []
             return list(self._items)
         if action in (_ENABLED, _AWAKENED):
-            return self.replay_next(buf)
+            # Lifecycle re-entry carries a FULL payload body directly.
+            size = int(buf.Read("H"))
+            if size > self._capacity:
+                raise RuntimeError(f"CID {self.cid}: contig size {size} > capacity {self._capacity}")
+            self._items = [self._bin.Deserialize(buf) for _ in range(size)]
+            return list(self._items)
         if action == self._FULL:
             size = int(buf.Read("H"))
             if size > self._capacity:
@@ -250,7 +262,16 @@ class SparseContainerMinifiedReplayer(CollectableReplayerBase):
             self._cells = [None] * self._capacity
             return list(self._cells)
         if action in (_ENABLED, _AWAKENED):
-            return self.replay_next(buf)
+            # Lifecycle re-entry carries a FULL payload body directly.
+            n = int(buf.Read("H"))
+            self._cells = [None] * self._capacity
+            for _ in range(n):
+                idx = int(buf.Read("H"))
+                if idx < self._capacity:
+                    self._cells[idx] = self._bin.Deserialize(buf)
+                else:
+                    _ = self._bin.Deserialize(buf)
+            return list(self._cells)
         if action == self._FULL:
             n = int(buf.Read("H"))
             self._cells = [None] * self._capacity

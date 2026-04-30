@@ -162,6 +162,7 @@ public:
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
     static constexpr auto kActionBytes = sizeof(uint8_t);
+    static constexpr auto kFirstMinifierAction = static_cast<uint8_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
 
     static bool isLifecycleAction_(const std::vector<char>& data)
     {
@@ -181,17 +182,17 @@ private:
         LifecycleAction action,
         bool append_last_payload)
     {
-        const std::vector<char>* payload_tail = nullptr;
+        const std::vector<char>* full_payload = nullptr;
         if (append_last_payload)
         {
-            auto it = last_sent_bytes_.find(cid);
-            if (it == last_sent_bytes_.end() || it->second.size() <= kCidBytes)
+            auto it = last_full_payload_bytes_.find(cid);
+            if (it == last_full_payload_bytes_.end())
             {
                 // We cannot emit ENABLED/AWAKENED without an attached
                 // payload tail, otherwise downstream replay will desync.
                 return;
             }
-            payload_tail = &it->second;
+            full_payload = &it->second;
         }
 
         auto* tracer = simdb::utils::active_collection_byte_tracer();
@@ -201,11 +202,11 @@ private:
         const auto raw_action = static_cast<uint8_t>(action);
         buf.appendValue(raw_action, "action", lifecycle_action_trace_value(action));
 
-        if (payload_tail)
+        if (full_payload && !full_payload->empty())
         {
-            const auto src = payload_tail->data() + kCidBytes;
-            const auto src_bytes = payload_tail->size() - kCidBytes;
-            buf.append(src, src_bytes, "lifecycle payload tail");
+            // ENABLED/AWAKENED append only the full payload bytes. The lifecycle
+            // action itself is already encoded in this record's action byte.
+            buf.append(full_payload->data(), full_payload->size(), "lifecycle payload tail");
         }
 
         collection.emplace_back(std::move(lifecycle));
@@ -303,7 +304,20 @@ private:
             auto cid = data->getCID();
             missing_cids.erase(cid);
             countdowns_to_refresh_[cid] = heartbeat_;
-            last_sent_bytes_[cid] = data->getData();
+            const auto& data_bytes = data->getData();
+            last_sent_bytes_[cid] = data_bytes;
+
+            if (data_bytes.size() >= kCidBytes + kActionBytes)
+            {
+                uint8_t action = 0;
+                std::memcpy(&action, data_bytes.data() + kCidBytes, kActionBytes);
+                if (action == kFirstMinifierAction)
+                {
+                    // Persist only FULL payload bytes for lifecycle re-entry.
+                    const auto payload_begin = data_bytes.begin() + static_cast<std::ptrdiff_t>(kCidBytes + kActionBytes);
+                    last_full_payload_bytes_[cid] = std::vector<char>(payload_begin, data_bytes.end());
+                }
+            }
         }
 
         for (auto cid : missing_cids)
@@ -351,6 +365,7 @@ private:
     std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;
     std::unordered_map<uint16_t, std::vector<char>> last_sent_bytes_;
+    std::unordered_map<uint16_t, std::vector<char>> last_full_payload_bytes_;
 };
 
 } // namespace simdb::collection

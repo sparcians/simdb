@@ -68,15 +68,15 @@ def consume_payload_and_count_tail(
     buf: ByteBuffer,
     action: int,
     layout: CidLayout,
-    last_sent_after_cid_by_cid: dict[int, int],
+    last_full_payload_bytes_by_cid: dict[int, int],
 ) -> list[int]:
     if action in (0, 2):  # DISABLED / QUIETED
         return []
     if action in (1, 3):  # ENABLED / AWAKENED
-        replay_tail = last_sent_after_cid_by_cid.get(layout.cid, 0)
-        if replay_tail > 0:
-            buf.Extract(replay_tail)
-            return [replay_tail]
+        full_payload_bytes = last_full_payload_bytes_by_cid.get(layout.cid, 0)
+        if full_payload_bytes > 0:
+            buf.Extract(full_payload_bytes)
+            return [full_payload_bytes]
         return []
 
     if layout.mode == "scalar":
