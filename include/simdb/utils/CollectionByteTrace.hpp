@@ -9,9 +9,13 @@
 
 #include <cstddef>
 #include <fstream>
+#include <limits>
+#include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace simdb::utils {
 
@@ -41,6 +45,8 @@ public:
         (void)value_repr;
         recordWrite(num_bytes, description);
     }
+    virtual void flushThrough(std::string_view) {}
+    virtual void flushAllPending() {}
 };
 
 /// When non-null, \c StreamBuffer::append forwards each write here before mutating the buffer.
@@ -77,15 +83,19 @@ public:
 
     void beginRecord(const std::string& time_string) override
     {
-        out_ << "record at time " << time_string << "\n";
+        current_time_key_ = parseTimeKey_(time_string);
+        current_record_.str({});
+        current_record_.clear();
+        current_record_ << "record at time " << time_string << "\n";
         indent_ = 1;
-        flush_();
     }
 
     void endRecord() override
     {
         indent_ = 0;
-        flush_();
+        pending_records_[current_time_key_].emplace_back(current_record_.str());
+        current_record_.str({});
+        current_record_.clear();
     }
 
     void beginGroup(std::string_view label, std::size_t total_bytes = 0) override
@@ -93,19 +103,18 @@ public:
         writeIndent_();
         if (total_bytes > 0)
         {
-            out_ << total_bytes << " bytes, ";
+            current_record_ << total_bytes << " bytes, ";
         }
         if (!label.empty())
         {
-            out_ << label;
+            current_record_ << label;
         }
         if (label.empty() || label.back() != ':')
         {
-            out_ << ':';
+            current_record_ << ':';
         }
-        out_ << '\n';
+        current_record_ << '\n';
         ++indent_;
-        flush_();
     }
 
     void endGroup() override
@@ -114,7 +123,6 @@ public:
         {
             --indent_;
         }
-        flush_();
     }
 
     void recordValueWrite(
@@ -123,14 +131,33 @@ public:
         std::string_view value_repr) override
     {
         writeIndent_();
-        out_ << num_bytes << ' ' << (num_bytes == 1 ? "byte" : "bytes") << ", ";
-        out_ << (description.empty() ? std::string_view{"bytes"} : description);
+        current_record_ << num_bytes << ' ' << (num_bytes == 1 ? "byte" : "bytes") << ", ";
+        current_record_ << (description.empty() ? std::string_view{"bytes"} : description);
         if (!value_repr.empty())
         {
-            out_ << ", value " << value_repr;
+            current_record_ << ", value " << value_repr;
         }
-        out_ << '\n';
+        current_record_ << '\n';
+    }
+
+    void flushThrough(std::string_view time_string) override
+    {
+        const auto max_key = parseTimeKey_(time_string);
+        auto it = pending_records_.begin();
+        while (it != pending_records_.end() && it->first <= max_key)
+        {
+            for (const auto& record_text : it->second)
+            {
+                out_ << record_text;
+            }
+            it = pending_records_.erase(it);
+        }
         flush_();
+    }
+
+    void flushAllPending() override
+    {
+        flushThrough(std::to_string(std::numeric_limits<uint64_t>::max()));
     }
 
 private:
@@ -138,7 +165,20 @@ private:
     {
         for (std::size_t i = 0; i < indent_; ++i)
         {
-            out_ << "  ";
+            current_record_ << "  ";
+        }
+    }
+
+    static uint64_t parseTimeKey_(std::string_view time_string)
+    {
+        try
+        {
+            return static_cast<uint64_t>(std::stoull(std::string(time_string)));
+        }
+        catch (...)
+        {
+            // Fallback for non-integer time labels in debug traces.
+            return std::numeric_limits<uint64_t>::max();
         }
     }
 
@@ -155,6 +195,9 @@ private:
     std::ofstream out_;
     std::string path_;
     std::size_t indent_ = 0;
+    std::ostringstream current_record_;
+    uint64_t current_time_key_ = 0;
+    std::map<uint64_t, std::vector<std::string>> pending_records_;
 };
 
 class ScopedCollectionTraceRecord
@@ -222,6 +265,10 @@ public:
 
     ~CollectionByteTraceSession()
     {
+        if (sink_)
+        {
+            sink_->flushAllPending();
+        }
         g_collection_byte_tracer = prev_;
     }
 

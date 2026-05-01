@@ -357,6 +357,10 @@ private:
         // Send everything to the pipeline
         if (!to_send.collection_data.empty())
         {
+            if (auto* tracer = simdb::utils::active_collection_byte_tracer())
+            {
+                tracer->flushThrough(to_send.time_point->getTimeAsString());
+            }
             pipeline_head_->emplace(std::move(to_send));
         }
     }
