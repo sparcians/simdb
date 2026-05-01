@@ -275,7 +275,7 @@ private:
                 // Re-enabled CIDs are again eligible to refresh.
                 enabled_cids_.insert(cid);
                 refreshable_cids_.insert(cid);
-                countdowns_to_refresh_[cid] = 1;
+                countdowns_to_refresh_[cid] = heartbeat_;
                 queueLifecycleAction_(to_send, cid, LifecycleAction::ENABLED, true);
             }
         }
@@ -293,7 +293,7 @@ private:
             else if (enabled_cids_.find(cid) != enabled_cids_.end())
             {
                 refreshable_cids_.insert(cid);
-                countdowns_to_refresh_[cid] = 1;
+                countdowns_to_refresh_[cid] = heartbeat_;
                 queueLifecycleAction_(to_send, cid, LifecycleAction::AWAKENED, true);
             }
         }
