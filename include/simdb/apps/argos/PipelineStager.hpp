@@ -301,6 +301,19 @@ private:
         // Periodically dump "last seen bytes" for any CIDs not
         // encountered at this time point (enabled+awake but not collected)
         auto missing_cids = refreshable_cids_;
+        for (const auto& data : collection_at_time.collection_data)
+        {
+            if (!data)
+            {
+                continue;
+            }
+            if (isLifecycleAction_(data->getData()))
+            {
+                continue;
+            }
+            missing_cids.erase(data->getCID());
+        }
+
         for (auto& data : to_send.collection_data)
         {
             if (isLifecycleAction_(data->getData()))
@@ -308,7 +321,6 @@ private:
                 continue;
             }
             auto cid = data->getCID();
-            missing_cids.erase(cid);
             countdowns_to_refresh_[cid] = heartbeat_;
             const auto& data_bytes = data->getData();
             last_sent_bytes_[cid] = data_bytes;
@@ -328,6 +340,19 @@ private:
 
         for (auto cid : missing_cids)
         {
+            if (std::any_of(
+                    to_send.collection_data.begin(),
+                    to_send.collection_data.end(),
+                    [cid](const std::unique_ptr<CollectedData>& data) {
+                        return data && data->getCID() == cid;
+                    }))
+            {
+                // This CID already emitted a record at this time point (e.g.
+                // fresh FULL data or lifecycle replay payload). Avoid emitting
+                // a duplicate heartbeat replay record for the same tick.
+                continue;
+            }
+
             auto it = countdowns_to_refresh_.find(cid);
             if (it == countdowns_to_refresh_.end())
             {

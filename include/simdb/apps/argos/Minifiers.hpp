@@ -294,6 +294,44 @@ public:
     }
 
 private:
+    struct FieldEvent
+    {
+        std::size_t bytes = 0;
+        std::string field_name;
+        std::string dtype_name;
+        std::string value_repr;
+    };
+
+    class PendingFieldTraceSink final : public FieldTraceSink
+    {
+    public:
+        void beginStructFields(std::string_view, std::size_t total_bytes) override
+        {
+            total_bytes_ = total_bytes;
+        }
+        void endStructFields() override {}
+        void recordFieldBytes(
+            std::size_t num_bytes,
+            std::string_view field_name,
+            std::string_view dtype_name,
+            std::string_view value_repr) override
+        {
+            events_.push_back(FieldEvent{
+                num_bytes,
+                std::string(field_name),
+                std::string(dtype_name),
+                std::string(value_repr)
+            });
+        }
+
+        std::size_t totalBytes() const { return total_bytes_; }
+        const std::vector<FieldEvent>& events() const { return events_; }
+
+    private:
+        std::size_t total_bytes_ = 0;
+        std::vector<FieldEvent> events_;
+    };
+
     enum class MinifierAction : uint8_t
     {
         FULL = static_cast<uint16_t>(LifecycleAction::__FIRST_MINIFIER_ACTION),   // Value changed or we are at a heartbeat.
@@ -330,23 +368,69 @@ private:
         size_t bin_idx = 0;
         while (bin_idx < num_elements)
         {
-            writeBin_(*it++, bins[bin_idx++]);
+            writeBin_(*it++, bins[bin_idx], bin_idx);
+            ++bin_idx;
         }
         return num_elements;
     }
 
-    void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer)
+    void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer, const size_t bin_idx)
     {
         StreamBuffer buf(bin_buffer, true, false);
+        auto* tracer = simdb::utils::active_collection_byte_tracer();
+        if constexpr (detail::has_argos_collector_v<ValueType>)
+        {
+            if (tracer)
+            {
+                PendingFieldTraceSink field_sink;
+                dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_, &field_sink);
+                if (curr_bin_field_events_.size() <= bin_idx)
+                {
+                    curr_bin_field_events_.resize(bin_idx + 1);
+                }
+                curr_bin_field_events_[bin_idx] = field_sink.events();
+                return;
+            }
+        }
+
         dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_);
     }
 
     template <typename BinType>
     std::enable_if_t<type_traits::is_any_pointer_v<BinType>, void>
-    writeBin_(const BinType& ptr, std::vector<char>& bin_buffer)
+    writeBin_(const BinType& ptr, std::vector<char>& bin_buffer, const size_t bin_idx)
     {
         assert(ptr != nullptr);
-        writeBin_(*ptr, bin_buffer);
+        writeBin_(*ptr, bin_buffer, bin_idx);
+    }
+
+    void appendBinWithTrace_(StreamBuffer& buf, const size_t bin_idx)
+    {
+        auto* tracer = simdb::utils::active_collection_byte_tracer();
+        const auto& bytes = curr_bins_[bin_idx];
+        if (!tracer || bin_idx >= curr_bin_field_events_.size() || curr_bin_field_events_[bin_idx].empty())
+        {
+            buf.append(bytes);
+            return;
+        }
+
+        std::ostringstream group_label;
+        group_label << "struct " << dtype_hierarchy_->getRoot().type_name << " fields (bin idx " << bin_idx << ")";
+        simdb::utils::ScopedCollectionTraceGroup fields_group(tracer, group_label.str(), bytes.size());
+        for (const auto& ev : curr_bin_field_events_[bin_idx])
+        {
+            std::string desc;
+            if (ev.dtype_name == "string")
+            {
+                desc = "field: " + ev.field_name + ", dtype: string, " + ev.value_repr;
+            }
+            else
+            {
+                desc = "field: " + ev.field_name + ", dtype: " + ev.dtype_name + ", value: " + ev.value_repr;
+            }
+            tracer->recordWrite(ev.bytes, desc);
+        }
+        buf.append_without_byte_trace(bytes.data(), bytes.size());
     }
 
     static MinifierAction getMinifierAction_(
@@ -491,24 +575,24 @@ private:
             {
                 const auto changed_idx = static_cast<uint16_t>(
                     findSwapIndex_(curr_bins_, curr_size, prev_bins_));
-                buf.append(changed_idx);
-                buf.append(curr_bins_[changed_idx]);
+                buf.appendValue(changed_idx, "idx", std::to_string(changed_idx));
+                appendBinWithTrace_(buf, changed_idx);
                 return;
             }
 
             case MinifierAction::ARRIVE:
-                buf.append(curr_bins_[curr_size - 1]);
+                appendBinWithTrace_(buf, curr_size - 1);
                 return;
 
             case MinifierAction::BOOKENDS:
-                buf.append(curr_bins_[curr_size - 1]);
+                appendBinWithTrace_(buf, curr_size - 1);
                 return;
 
             case MinifierAction::FULL:
-                buf.append(curr_size);
+                buf.appendValue(curr_size, "size", std::to_string(curr_size));
                 for (size_t i = 0; i < curr_size; ++i)
                 {
-                    buf.append(curr_bins_[i]);
+                    appendBinWithTrace_(buf, i);
                 }
                 return;
         }
@@ -522,6 +606,7 @@ private:
     uint16_t prev_size_ = 0;
     std::vector<std::vector<char>> prev_bins_;
     std::vector<std::vector<char>> curr_bins_;
+    std::vector<std::vector<FieldEvent>> curr_bin_field_events_;
     const std::string elem_path_;
     bool warn_on_size_ = true;
     ValidValue<size_t> expected_num_bytes_;
