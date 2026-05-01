@@ -33,6 +33,7 @@ public:
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
     virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
     virtual void forget(uint16_t cid) = 0;
+    virtual std::string getTimeAsString() const = 0;
 };
 
 template <typename TimeT>
@@ -159,6 +160,11 @@ public:
         }
     }
 
+    std::string getTimeAsString() const override
+    {
+        return timestamp_->getTimeAsString();
+    }
+
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
     static constexpr auto kActionBytes = sizeof(uint8_t);
@@ -177,7 +183,7 @@ private:
     }
 
     void queueLifecycleAction_(
-        CollectionDataAtTimePoint& collection,
+        QueueCollectionData& collection_data,
         uint16_t cid,
         LifecycleAction action,
         bool append_last_payload)
@@ -196,7 +202,7 @@ private:
         }
 
         auto* tracer = simdb::utils::active_collection_byte_tracer();
-        simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
+        simdb::utils::ScopedCollectionTraceRecord record_scope(tracer, collection_data.time_point->getTimeAsString());
         auto lifecycle = std::make_unique<CollectedData>(cid);
         auto& buf = lifecycle->getBuffer();
         const auto raw_action = static_cast<uint8_t>(action);
@@ -209,7 +215,7 @@ private:
             buf.append(full_payload->data(), full_payload->size(), "lifecycle payload tail");
         }
 
-        collection.emplace_back(std::move(lifecycle));
+        collection_data.collection_data.emplace_back(std::move(lifecycle));
     }
 
     void sendToPipeline_(QueueCollectionData& collection_at_time)
@@ -262,7 +268,7 @@ private:
                 enabled_cids_.erase(cid);
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
-                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::DISABLED, false);
+                queueLifecycleAction_(to_send, cid, LifecycleAction::DISABLED, false);
             }
             else
             {
@@ -270,7 +276,7 @@ private:
                 enabled_cids_.insert(cid);
                 refreshable_cids_.insert(cid);
                 countdowns_to_refresh_[cid] = 1;
-                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::ENABLED, true);
+                queueLifecycleAction_(to_send, cid, LifecycleAction::ENABLED, true);
             }
         }
 
@@ -282,13 +288,13 @@ private:
             {
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
-                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::QUIETED, false);
+                queueLifecycleAction_(to_send, cid, LifecycleAction::QUIETED, false);
             }
             else if (enabled_cids_.find(cid) != enabled_cids_.end())
             {
                 refreshable_cids_.insert(cid);
                 countdowns_to_refresh_[cid] = 1;
-                queueLifecycleAction_(to_send.collection_data, cid, LifecycleAction::AWAKENED, true);
+                queueLifecycleAction_(to_send, cid, LifecycleAction::AWAKENED, true);
             }
         }
 
@@ -336,7 +342,7 @@ private:
                 // cid at the head of the bytes. That's why we are using the
                 // StreamBuffer::append() api below with a uint16_t offset.
                 auto* tracer = simdb::utils::active_collection_byte_tracer();
-                simdb::utils::ScopedCollectionTraceRecord record_scope(tracer);
+                simdb::utils::ScopedCollectionTraceRecord record_scope(tracer, to_send.time_point->getTimeAsString());
                 auto injected_data = std::make_unique<CollectedData>(cid);
                 const auto& last_sent_bytes = last_sent_bytes_.at(cid);
                 const auto src = last_sent_bytes.data() + sizeof(uint16_t);

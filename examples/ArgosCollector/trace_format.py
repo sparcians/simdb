@@ -21,7 +21,7 @@ def read_trace_rows(path: str, allowed_descriptions: set[str] | None = None) -> 
                 continue
 
             # Structured trace headers.
-            if line == "record" or line.endswith(":"):
+            if line == "record" or line.find("record at time") != -1 or line.endswith(":"):
                 continue
 
             m = _LEGACY_ROW_RE.match(line)

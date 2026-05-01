@@ -26,7 +26,10 @@ public:
     virtual void recordWrite(std::size_t num_bytes, std::string_view description) = 0;
 
     /// Optional structured trace hooks (default no-op) for richer hierarchical logs.
-    virtual void beginRecord() {}
+    virtual void beginRecord(const std::string& time_string)
+    {
+        (void)time_string;
+    }
     virtual void endRecord() {}
     virtual void beginGroup(std::string_view, std::size_t = 0) {}
     virtual void endGroup() {}
@@ -72,9 +75,9 @@ public:
         recordValueWrite(num_bytes, description, {});
     }
 
-    void beginRecord() override
+    void beginRecord(const std::string& time_string) override
     {
-        out_ << "record\n";
+        out_ << "record at time " << time_string << "\n";
         indent_ = 1;
         flush_();
     }
@@ -157,12 +160,12 @@ private:
 class ScopedCollectionTraceRecord
 {
 public:
-    explicit ScopedCollectionTraceRecord(CollectionByteTracer* tracer)
+    explicit ScopedCollectionTraceRecord(CollectionByteTracer* tracer, const std::string& time_string)
         : tracer_(tracer)
     {
         if (tracer_)
         {
-            tracer_->beginRecord();
+            tracer_->beginRecord(time_string);
         }
     }
 

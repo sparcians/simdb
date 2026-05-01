@@ -46,10 +46,16 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
     with open(out_path, "w", encoding="utf-8") as out:
         out.write("Bytes\tDescription\n")
 
+        cursor.execute("SELECT Id,Timestamp FROM Timestamps")
+        times_by_id = {}
+        for _id, _timestamp in cursor.fetchall():
+            times_by_id[_id] = _timestamp
+
         cursor.execute("SELECT TimestampID,Records FROM CollectionRecords ORDER BY TimestampID ASC")
         for _timestamp_id, compressed_blob in cursor.fetchall():
             raw_blob = zlib.decompress(compressed_blob)
             blob_buf = ByteBuffer(raw_blob)
+            time_str = times_by_id[_timestamp_id]
 
             while not blob_buf.Done():
                 cid = int(blob_buf.Read("H"))
@@ -69,7 +75,7 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
                 if selected_cid is not None and cid != selected_cid:
                     continue
 
-                out.write("record\n")
+                out.write(f"record at time {time_str}\n")
                 out.write(f"  2 bytes, cid, value {cid}\n")
                 action_label = _action_trace_value(action, layout.mode)
                 out.write(f"  1 byte, action, value {action_label}\n")

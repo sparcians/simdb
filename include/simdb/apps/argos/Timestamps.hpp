@@ -25,6 +25,7 @@ public:
     /// Create an entry in the Timestamps table and return the rowid
     virtual int createTimestampInDatabase(DatabaseManager* db_mgr) const = 0;
 
+    /// Stringify the current time value
     virtual std::string getTimeAsString() const = 0;
 };
 
@@ -107,6 +108,7 @@ public:
         return db_mgr->INSERT(SQL_TABLE("Timestamps"), SQL_VALUES(time_))->getId();
     }
 
+    /// Stringify the current time value
     std::string getTimeAsString() const override final
     {
         return std::to_string(time_);
@@ -161,7 +163,7 @@ public:
     }
 
     /// Store the current type-specific time value
-    std::shared_ptr<TimePointBase> snapshot()
+    std::shared_ptr<TimePointBase> snapshot() const
     {
         TimeT time = 0;
         if (backpointer_)
@@ -179,11 +181,16 @@ public:
         return std::make_shared<TimePoint<TimeT>>(time);
     }
 
+    std::string getTimeAsString() const
+    {
+        return snapshot()->getTimeAsString();
+    }
+
 private:
     const TimeT* backpointer_ = nullptr;
     TimeT (*cfuncpointer_)() = nullptr;
     std::function<TimeT()> stdfunction_ = nullptr;
-    ValidValue<TimeT> time_;
+    mutable ValidValue<TimeT> time_;
 };
 
 } // namespace simdb::collection

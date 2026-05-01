@@ -608,50 +608,6 @@ void TestQuietLogic()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, false, true);
 }
 
-void TestManualScalarDisableEnableLongGap()
-{
-    TEST_METHOD_INIT;
-
-    uint64_t tick = 0;
-    constexpr size_t heartbeat = 10;
-    simdb::collection::Collection<uint64_t> collection(heartbeat);
-    ENABLE_BYTE_TRACER
-    collection.timestampWith(&tick);
-    collection.addCollection("root", 1);
-
-    auto collector = collection.collectScalarManually<unsigned int>("value", "root");
-
-    simdb::AppManagers app_mgrs;
-    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
-
-    auto& app_mgr = app_mgrs.createAppManager("test.db");
-    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
-    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
-    app_mgrs.createEnabledApps();
-    app_mgrs.createSchemas();
-    app_mgrs.postInit(0, nullptr);
-    app_mgrs.initializePipelines();
-    app_mgrs.openPipelines();
-
-    tick = 1;
-    collector->collect(4);
-
-    tick = 2;
-    collector->collect(5);
-
-    tick = 3;
-    collector->disable();
-
-    tick = 50;
-    collector->enable();
-
-    tick = 51;
-    collector->collect(6);
-
-    app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
-}
-
 void TestMultiClock()
 {
     TEST_METHOD_INIT;
@@ -1378,6 +1334,368 @@ void TestMultiArgosCollectors()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
+void GenTraceForScalarInts()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 10;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    // This collectable is what we focus on in the trace
+    auto collector = collection.collectScalarManually<unsigned int>("value", "root");
+
+    // This collectable is used to ensure non-trivial gaps in collected data
+    auto always_zero = collection.collectScalarManually<unsigned int>("zero", "root");
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    tick = 1;
+    collector->collect(4);
+    always_zero->collect(0);
+
+    tick = 2;
+    collector->collect(5);
+    always_zero->collect(0);
+
+    tick = 3;
+    collector->disable(); // TODO XXX: This never shows up in trace when "always_zero->collect(0) each time"
+    constexpr auto enabled_tick = 50;
+    while (tick < enabled_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = enabled_tick;
+    collector->enable();
+    always_zero->collect(0);
+
+    tick = 51;
+    collector->collect(6);
+    always_zero->collect(0);
+
+    tick = 52;
+    collector->collect(7);
+    always_zero->collect(0);
+
+    tick = 53;
+    collector->quiet(); // TODO XXX: This never shows up in trace when "always_zero->collect(0) each time"
+    constexpr auto awakened_tick = 99;
+    while (tick < awakened_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = awakened_tick;
+    collector->awaken();
+    always_zero->collect(0);
+
+    tick = 100;
+    collector->collect(8);
+    always_zero->collect(0);
+
+    EXPECT_TRUE(collector->minifierSawAllActions());
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
+void GenTraceForScalarStructs()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 10;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    // Focus collectable: scalar struct via shared_ptr
+    auto collector = collection.collectScalarManually<std::shared_ptr<Instruction>>("value", "root");
+
+    // Helper collectable to keep the DB active across long gaps
+    auto always_zero = collection.collectScalarManually<unsigned int>("zero", "root");
+
+    auto mk_inst = [](InstType type, uint64_t opcode, const std::string& mnemonic, uint32_t csr, bool last) {
+        return std::make_shared<Instruction>(type, opcode, mnemonic, csr, last);
+    };
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    tick = 1;
+    auto base = mk_inst(InstType::NO_OP, 0x101, "addi", 0, false);
+    collector->collect(base);
+    always_zero->collect(0);
+
+    tick = 2;
+    collector->collect(base); // CARRY
+    always_zero->collect(0);
+
+    tick = 3;
+    collector->disable();
+    constexpr auto enabled_tick = 50;
+    while (tick < enabled_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = enabled_tick;
+    collector->enable();
+    always_zero->collect(0);
+
+    tick = 51;
+    collector->collect(mk_inst(InstType::CSR, 0x303, "csrrw", 12, false));
+    always_zero->collect(0);
+
+    tick = 52;
+    collector->collect(mk_inst(InstType::ILLEGAL, 0x404, "bad", 0, true));
+    always_zero->collect(0);
+
+    tick = 53;
+    collector->quiet();
+    constexpr auto awakened_tick = 99;
+    while (tick < awakened_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = awakened_tick;
+    collector->awaken();
+    always_zero->collect(0);
+
+    tick = 100;
+    collector->collect(mk_inst(InstType::MEM, 0x505, "st", 0, false));
+    always_zero->collect(0);
+
+    EXPECT_TRUE(collector->minifierSawAllActions());
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
+void GenTraceForContigContainers()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 10;
+    constexpr size_t capacity = 8;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    using ContigQ = std::vector<std::shared_ptr<Instruction>>;
+    auto collector = collection.collectContainerManually<ContigQ, false>("value", "root", capacity);
+    auto always_zero = collection.collectScalarManually<unsigned int>("zero", "root");
+
+    auto mk_inst = [](InstType type, uint64_t opcode, const std::string& mnemonic) {
+        return std::make_shared<Instruction>(type, opcode, mnemonic, 0, false);
+    };
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    ContigQ q;
+
+    tick = 1;
+    q = {mk_inst(InstType::NO_OP, 0x10, "addi"), mk_inst(InstType::MEM, 0x20, "ld")};
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 2;
+    // Keep identical to force CARRY.
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 3;
+    collector->disable();
+    constexpr auto enabled_tick = 50;
+    while (tick < enabled_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = enabled_tick;
+    collector->enable();
+    always_zero->collect(0);
+
+    tick = 51;
+    q[1] = mk_inst(InstType::CSR, 0x21, "csrrs"); // SWAP
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 52;
+    q.push_back(mk_inst(InstType::MEM, 0x30, "st")); // ARRIVE
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 53;
+    q.erase(q.begin()); // DEPART-style
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 54;
+    q.erase(q.begin()); // BOOKENDS = depart front + arrive back
+    q.push_back(mk_inst(InstType::NO_OP, 0x31, "addi"));
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 55;
+    collector->quiet();
+    constexpr auto awakened_tick = 99;
+    while (tick < awakened_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = awakened_tick;
+    collector->awaken();
+    always_zero->collect(0);
+
+    tick = 100;
+    q = {mk_inst(InstType::ILLEGAL, 0x99, "bad"), mk_inst(InstType::NO_OP, 0x77, "addi")};
+    collector->collect(q);
+    always_zero->collect(0);
+
+    EXPECT_TRUE(collector->minifierSawAllActions());
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
+void GenTraceForSparseContainers()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 10;
+    constexpr size_t capacity = 8;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    using SparseQ = std::vector<SharedPtr<Instruction>>;
+    auto collector = collection.collectContainerManually<SparseQ, true>("value", "root", capacity);
+    auto always_zero = collection.collectScalarManually<unsigned int>("zero", "root");
+
+    auto mk_inst = [](InstType type, uint64_t opcode, const std::string& mnemonic) {
+        return SharedPtr<Instruction>(new Instruction(type, opcode, mnemonic, 0, false));
+    };
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    SparseQ q(capacity);
+
+    tick = 1;
+    q[1] = mk_inst(InstType::NO_OP, 0x11, "addi");
+    q[5] = mk_inst(InstType::MEM, 0x55, "ld");
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 2;
+    // Keep identical to force CARRY.
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 3;
+    collector->disable();
+    constexpr auto enabled_tick = 50;
+    while (tick < enabled_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = enabled_tick;
+    collector->enable();
+    always_zero->collect(0);
+
+    tick = 51;
+    q[5] = mk_inst(InstType::CSR, 0x56, "csrrw"); // EXCHANGE
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 52;
+    q[5] = SharedPtr<Instruction>(); // REMOVE
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 53;
+    q[2] = mk_inst(InstType::ILLEGAL, 0x66, "bad"); // EXCHANGE (insert)
+    collector->collect(q);
+    always_zero->collect(0);
+
+    tick = 54;
+    collector->quiet();
+    constexpr auto awakened_tick = 99;
+    while (tick < awakened_tick)
+    {
+        always_zero->collect(0);
+        ++tick;
+    }
+
+    tick = awakened_tick;
+    collector->awaken();
+    always_zero->collect(0);
+
+    tick = 100;
+    q[1] = mk_inst(InstType::MEM, 0x88, "st");
+    collector->collect(q);
+    always_zero->collect(0);
+
+    EXPECT_TRUE(collector->minifierSawAllActions());
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
 int main()
 {
     system("rm -f *.test.out");
@@ -1385,13 +1703,18 @@ int main()
     TestScalarCollection();
     TestEnabledLogic();
     TestQuietLogic();
-    TestManualScalarDisableEnableLongGap();
     TestMultiClock();
     TestFlatten();
     TestContainers();
     TestMixedAutoManualLifecycle();
     TestPointers();
     TestMultiArgosCollectors();
+
+    // TODO cnyce: these tests are redundant
+    GenTraceForScalarInts();
+    GenTraceForScalarStructs();
+    GenTraceForContigContainers();
+    GenTraceForSparseContainers();
 
     // TODO cnyce: initial value/bytes
     // TODO cnyce: default disabled
