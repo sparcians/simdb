@@ -84,7 +84,8 @@ public:
         struct FieldEvent
         {
             std::size_t bytes = 0;
-            std::string trace_label;
+            std::string field_name;
+            std::string dtype_name;
             std::string value_repr;
         };
         class PendingFieldTraceSink final : public FieldTraceSink
@@ -98,12 +99,14 @@ public:
             void endStructFields() override {}
             void recordFieldBytes(
                 std::size_t num_bytes,
-                std::string_view trace_label,
+                std::string_view field_name,
+                std::string_view dtype_name,
                 std::string_view value_repr) override
             {
                 events_.push_back(FieldEvent{
                     num_bytes,
-                    std::string(trace_label),
+                    std::string(field_name),
+                    std::string(dtype_name),
                     std::string(value_repr)
                 });
             }
@@ -140,7 +143,16 @@ public:
                 simdb::utils::ScopedCollectionTraceGroup fields_group(tracer, group_label, field_sink.totalBytes());
                 for (const auto& ev : field_sink.events())
                 {
-                    tracer->recordValueWrite(ev.bytes, ev.trace_label, ev.value_repr);
+                    std::string desc;
+                    if (ev.dtype_name == "string")
+                    {
+                        desc = "field: " + ev.field_name + ", dtype: string, " + ev.value_repr;
+                    }
+                    else
+                    {
+                        desc = "field: " + ev.field_name + ", dtype: " + ev.dtype_name + ", value: " + ev.value_repr;
+                    }
+                    tracer->recordWrite(ev.bytes, desc);
                 }
                 if (!field_sink.events().empty())
                 {

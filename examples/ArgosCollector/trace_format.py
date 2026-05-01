@@ -2,7 +2,7 @@ import re
 
 
 _LEGACY_ROW_RE = re.compile(r"^\s*(\d+)\t(.+)$")
-_STRUCTURED_ROW_RE = re.compile(r"^\s*(\d+)\s+bytes?,\s*([^,]+)(?:,\s*value\s+.*)?$")
+_STRUCTURED_ROW_RE = re.compile(r"^\s*(\d+)\s+bytes?,\s*(.+)$")
 
 
 def read_trace_rows(path: str, allowed_descriptions: set[str] | None = None) -> list[tuple[str, str]]:
@@ -32,6 +32,10 @@ def read_trace_rows(path: str, allowed_descriptions: set[str] | None = None) -> 
             m = _STRUCTURED_ROW_RE.match(line)
             if m:
                 desc = m.group(2).strip()
+                # Normalize classic rows like "cid, value 1" / "action, value FULL"
+                # to stable descriptors ("cid"/"action") used by the comparators.
+                if ", value " in desc:
+                    desc = desc.split(", value ", 1)[0].strip()
                 if allowed_descriptions is not None and desc not in allowed_descriptions:
                     continue
                 rows.append((m.group(1), desc))

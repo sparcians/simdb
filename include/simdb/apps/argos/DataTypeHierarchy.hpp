@@ -31,10 +31,12 @@ public:
     virtual ~FieldTraceSink() = default;
     virtual void beginStructFields(std::string_view, std::size_t) {}
     virtual void endStructFields() {}
-    /// \param trace_label Type-oriented label for byte trace (e.g. \c "unsigned int", \c "string id").
+    /// \param field_name Field identifier (e.g. \c "uid").
+    /// \param dtype_name Demangled/symbolic type (e.g. \c "unsigned int", \c "InstType", \c "string").
     virtual void recordFieldBytes(
         std::size_t,
-        std::string_view /*trace_label*/,
+        std::string_view /*field_name*/,
+        std::string_view /*dtype_name*/,
         std::string_view /*value_repr*/) {}
 };
 
@@ -481,7 +483,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->enum_meta->backing_kind = field->getEnumBackingKind();
                     child->enum_meta->members = field->getEnumMembers();
 
-                    child->write_erased = [field](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
                         auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
                         if (field_trace_sink)
@@ -489,6 +491,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                             const auto num_bytes = buffer.size() - before;
                             field_trace_sink->recordFieldBytes(
                                 num_bytes,
+                                child_field_name,
                                 field->getTypeName(),
                                 field->getValueStringErased(parent_void));
                         }
@@ -499,7 +502,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->kind = NodeKind::Pod;
                     child->pod_type = std::make_unique<PodTypeKind>(field->getPodTypeKind());
 
-                    child->write_erased = [field](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
                         auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
                         if (field_trace_sink)
@@ -507,7 +510,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                             const auto num_bytes = buffer.size() - before;
                             const bool is_string_pod =
                                 !field->isEnumField() && !field->isStructField() && field->getPodTypeKind() == PodTypeKind::str;
-                            const std::string trace_label = is_string_pod ? std::string{"string id"} : field->getTypeName();
+                            const std::string dtype_name = is_string_pod ? std::string{"string"} : field->getTypeName();
                             std::string trace_value = field->getValueStringErased(parent_void);
                             if (is_string_pod && num_bytes >= sizeof(uint32_t))
                             {
@@ -515,10 +518,10 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                                 const auto& bytes = buffer.byte_storage();
                                 std::memcpy(&id, bytes.data() + before, sizeof id);
                                 std::ostringstream oss;
-                                oss << id << ", string value " << field->getValueStringErased(parent_void);
+                                oss << "string id: " << id << ", string value: " << field->getValueStringErased(parent_void);
                                 trace_value = oss.str();
                             }
-                            field_trace_sink->recordFieldBytes(num_bytes, trace_label, trace_value);
+                            field_trace_sink->recordFieldBytes(num_bytes, child_field_name, dtype_name, trace_value);
                         }
                     };
                 }
