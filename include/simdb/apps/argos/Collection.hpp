@@ -13,7 +13,9 @@
 #include "simdb/utils/TypeTraits.hpp"
 #include "simdb/Exceptions.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -281,6 +283,7 @@ public:
         else
         {
             tracer_ = std::make_unique<simdb::utils::CollectionByteTraceSession>(path, reopen_mode);
+            byte_trace_path_for_meta_ = path;
         }
     }
 
@@ -335,6 +338,73 @@ private:
         if (!collections_.empty())
         {
             throw DBException("timestampWith() cannot be called after addCollection()");
+        }
+    }
+
+    /// Write \c \<trace_path>.meta alongside the trace: per-CID paths, types, container info, manual vs auto API.
+    void writeCollectionTraceMeta_(const std::string& trace_path) const
+    {
+        struct CollectableMetaRow
+        {
+            uint16_t cid = 0;
+            std::string clock;
+            std::string path;
+            const CollectableBase* collectable = nullptr;
+        };
+
+        std::vector<CollectableMetaRow> rows;
+        for (const auto& [clk_name, collection] : collections_)
+        {
+            if (!collection)
+            {
+                continue;
+            }
+            for (const auto& collectable_path : collection->getCollectablePaths())
+            {
+                auto* coll_base = collection->getCollectable(collectable_path);
+                rows.push_back({coll_base->getID(), clk_name, collectable_path, coll_base});
+            }
+        }
+
+        std::sort(
+            rows.begin(),
+            rows.end(),
+            [](const CollectableMetaRow& a, const CollectableMetaRow& b) { return a.cid < b.cid; });
+
+        const std::string meta_path = trace_path + ".meta";
+        std::ofstream meta(meta_path, std::ios::out | std::ios::trunc);
+        if (!meta.good())
+        {
+            std::cout << "WARNING: Could not write collection trace metadata file '" << meta_path << "'" << std::endl;
+            return;
+        }
+
+        meta << "# SimDB collection byte trace metadata (CID index for matching .trace to collectables)\n";
+        meta << "trace_file: " << trace_path << "\n";
+        meta << "heartbeat: " << heartbeat_ << "\n\n";
+
+        for (const auto& r : rows)
+        {
+            const auto* c = r.collectable;
+            meta << "--- CID: " << static_cast<unsigned>(r.cid) << " ---\n";
+            meta << "full_path: " << r.path << "\n";
+            meta << "clock: " << r.clock << "\n";
+            meta << "collection_registration: "
+                 << (c->traceRegisteredAsAutoCollectApi() ? "auto-collect-api" : "manual-collect-api") << "\n";
+            if (c->traceIsContainer())
+            {
+                meta << "kind: " << (c->traceIsSparseContainer() ? "sparse-container" : "contiguous-container")
+                     << "\n";
+                meta << "expected_capacity: " << c->traceExpectedCapacity() << "\n";
+            }
+            else
+            {
+                meta << "kind: scalar\n";
+            }
+            const auto root_bytes = c->traceSerializationRootTypeBytes();
+            meta << "serialization_root_type: " << c->traceSerializationRootType() << " (" << root_bytes
+                 << (root_bytes == 1 ? " byte)\n" : " bytes)\n");
+            meta << '\n';
         }
     }
 
@@ -397,6 +467,11 @@ private:
 
         // Write data types and their hierarchies (structs / nested structs)
         DataTypeSerializer::serialize(&dtype_inspector_, db_mgr);
+
+        if (!byte_trace_path_for_meta_.empty())
+        {
+            writeCollectionTraceMeta_(byte_trace_path_for_meta_);
+        }
     }
 
     /// \brief Tell the PipelineStager to flush all pending collected
@@ -440,6 +515,8 @@ private:
     std::shared_ptr<Timestamp<TimeT>> timestamp_;
     std::unique_ptr<PipelineStager<TimeT>> stager_;
     std::unique_ptr<simdb::utils::CollectionByteTraceSession> tracer_;
+    /// When byte tracing is enabled, write \<path>.meta in \ref writeMetaOnPostInit (paths exist by then).
+    std::string byte_trace_path_for_meta_;
 };
 
 } // namespace simdb::collection

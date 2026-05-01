@@ -18,6 +18,33 @@ namespace simdb::collection {
 
 class DomainCollection;
 
+namespace detail {
+
+inline size_t traceNodeFixedBytes(const DataTypeNode& node)
+{
+    switch (node.kind)
+    {
+    case NodeKind::Pod:
+        assert(node.pod_type != nullptr);
+        return podKindToBytes(*node.pod_type);
+    case NodeKind::Enum:
+        assert(node.enum_meta != nullptr);
+        return enumBackingKindToBytes(node.enum_meta->backing_kind);
+    case NodeKind::Struct:
+    {
+        size_t total = 0;
+        for (const auto& child : node.children)
+        {
+            total += traceNodeFixedBytes(*child);
+        }
+        return total;
+    }
+    }
+    throw DBException("Unknown data node kind");
+}
+
+} // namespace detail
+
 /// Base class for all collectables.
 class CollectableBase
 {
@@ -142,6 +169,23 @@ public:
     /// Demangled element type for scalars, or element demangle + \c _contig_capacityN / \c _sparse_capacityN for queues.
     virtual std::string collectableTypeNameForDb() const = 0;
 
+    /// Serialized value root (\ref DataTypeHierarchy root \c type_name) for tooling / trace metadata.
+    virtual std::string traceSerializationRootType() const { return collectableTypeNameForDb(); }
+    /// Fixed wire bytes for one serialized value payload (excluding CID/action/container framing).
+    virtual size_t traceSerializationRootTypeBytes() const { return 0; }
+
+    /// True for queue/array-style collectables (contiguous or sparse), false for scalars.
+    virtual bool traceIsContainer() const { return false; }
+
+    /// Meaningful only when \ref traceIsContainer is true (\c Sparse template parameter).
+    virtual bool traceIsSparseContainer() const { return false; }
+
+    /// Declared queue capacity (\c expected_capacity ctor arg); 0 when not a container collectable.
+    virtual uint32_t traceExpectedCapacity() const { return 0; }
+
+    /// \c collect*WithAutoCollection factories vs manual \c collect*Manually registration.
+    virtual bool traceRegisteredAsAutoCollectApi() const { return false; }
+
     /// \brief Return true if this collectable exercised all minifier actions relevant to its type.
     virtual bool minifierSawAllActions() const = 0;
 
@@ -260,6 +304,12 @@ public:
         }
     }
 
+    std::string traceSerializationRootType() const override { return dtype_hierarchy_->getRoot().type_name; }
+    size_t traceSerializationRootTypeBytes() const override
+    {
+        return detail::traceNodeFixedBytes(dtype_hierarchy_->getRoot());
+    }
+
     /// \brief On-demand collection, also called by auto-collecting subclass
     template <typename T = ScalarT>
     std::enable_if_t<!type_traits::is_any_pointer_v<T>, void>
@@ -357,6 +407,8 @@ public:
         , scalar_(scalar)
     {}
 
+    bool traceRegisteredAsAutoCollectApi() const override { return true; }
+
     /// Run auto-collection for this collectable
     void autoCollect() override
     {
@@ -410,8 +462,9 @@ public:
                        std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
         : ContainerCollectorBase(collection, heartbeat)
         , expected_capacity_(expected_capacity)
+        , dtype_hierarchy_(std::move(dtype_hierarchy))
         , minifier_(
-            std::move(dtype_hierarchy),
+            dtype_hierarchy_,
             heartbeat,
             expected_capacity,
             simdb::demangle_type<ValueType>())
@@ -426,6 +479,18 @@ public:
         }
         return base + "_contig_capacity" + std::to_string(expected_capacity_);
     }
+
+    std::string traceSerializationRootType() const override { return dtype_hierarchy_->getRoot().type_name; }
+    size_t traceSerializationRootTypeBytes() const override
+    {
+        return detail::traceNodeFixedBytes(dtype_hierarchy_->getRoot());
+    }
+
+    bool traceIsContainer() const override { return true; }
+
+    bool traceIsSparseContainer() const override { return Sparse; }
+
+    uint32_t traceExpectedCapacity() const override { return static_cast<uint32_t>(expected_capacity_); }
 
     /// \brief On-demand collection, also called by auto-collecting subclass
     template <typename T = ContainerT>
@@ -496,6 +561,8 @@ protected:
     const size_t expected_capacity_;
 
 private:
+    std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
+
     using MinifierType = std::conditional_t<
         Sparse,
         SparseContainerMinifier<InnerContainerT>,
@@ -525,6 +592,8 @@ public:
             std::move(dtype_hierarchy))
         , container_(container)
     {}
+
+    bool traceRegisteredAsAutoCollectApi() const override { return true; }
 
     /// Run auto-collection for this collectable
     void autoCollect() override
