@@ -36,14 +36,14 @@ def _action_trace_value(action: int, mode: str) -> str:
     return str(action)
 
 
-def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None:
+def _iter_ui_trace_records(db_file: str, selected_cid: int | None):
     inspector = DataTypeInspector(db_file)
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     layouts_by_cid = load_layouts(conn, inspector)
     last_full_payload_bytes_by_cid: dict[int, int] = {}
 
-    with open(out_path, "w", encoding="utf-8") as out:
+    try:
         cursor.execute("SELECT Id,Timestamp FROM Timestamps")
         times_by_id = {}
         for _id, _timestamp in cursor.fetchall():
@@ -53,7 +53,7 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
         for _timestamp_id, compressed_blob in cursor.fetchall():
             raw_blob = zlib.decompress(compressed_blob)
             blob_buf = ByteBuffer(raw_blob)
-            time_str = times_by_id[_timestamp_id]
+            time_str = str(times_by_id[_timestamp_id])
 
             while not blob_buf.Done():
                 cid = int(blob_buf.Read("H"))
@@ -73,13 +73,110 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
                 if selected_cid is not None and cid != selected_cid:
                     continue
 
-                out.write(f"record at time {time_str}\n")
-                out.write(f"  2 bytes, cid, value {cid}\n")
-                action_label = _action_trace_value(action, layout.mode)
-                out.write(f"  1 byte, action, value {action_label}\n")
-                for nbytes in trailing_chunks:
-                    unit = "byte" if nbytes == 1 else "bytes"
-                    out.write(f"  {nbytes} {unit}, bytes\n")
+                yield (time_str, cid, _action_trace_value(action, layout.mode), trailing_chunks)
+    finally:
+        conn.close()
+
+
+def _write_ui_record(out, time_str: str, cid: int, action_label: str, trailing_chunks: list[int]) -> None:
+    out.write(f"record at time {time_str}\n")
+    out.write(f"  2 bytes, cid, value {cid}\n")
+    out.write(f"  1 byte, action, value {action_label}\n")
+    for nbytes in trailing_chunks:
+        unit = "byte" if nbytes == 1 else "bytes"
+        out.write(f"  {nbytes} {unit}, bytes\n")
+
+
+def _ui_record_rows(trailing_chunks: list[int]) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = [("2", "cid"), ("1", "action")]
+    rows.extend((str(nbytes), "bytes") for nbytes in trailing_chunks)
+    return rows
+
+
+def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None:
+    with open(out_path, "w", encoding="utf-8") as out:
+        for time_str, cid, action_label, trailing_chunks in _iter_ui_trace_records(db_file, selected_cid):
+            _write_ui_record(out, time_str, cid, action_label, trailing_chunks)
+
+
+def emit_ui_trace_lockstep(
+    db_file: str, out_path: str, sim_trace_file: str, selected_cid: int | None
+) -> int:
+    sim_rows = _read_filtered_trace_rows(sim_trace_file)
+    sim_records = _rows_to_record_totals(sim_rows)
+    matched_sim_records: set[int] = set()
+    ui_record_idx = 0
+
+    def _record_matches(
+        ui_rows: list[tuple[str, str]],
+        sim_record_rows: list[tuple[str, str]],
+    ) -> bool:
+        if len(sim_record_rows) < 2:
+            return False
+        if sim_record_rows[0] != ("2", "cid"):
+            return False
+        if sim_record_rows[1] != ("1", "action"):
+            return False
+
+        sim_pos = 2
+        for row_idx, ui_row in enumerate(ui_rows):
+            if row_idx < 2:
+                if sim_pos - 2 + row_idx >= len(sim_record_rows):
+                    return False
+                if sim_record_rows[row_idx] != ui_row:
+                    return False
+                continue
+
+            target_bytes = int(ui_row[0])
+            consumed = 0
+            while consumed < target_bytes:
+                if sim_pos >= len(sim_record_rows):
+                    return False
+                consumed += int(sim_record_rows[sim_pos][0])
+                sim_pos += 1
+            if consumed != target_bytes:
+                return False
+
+        # If SIM record has remaining payload bytes, UI under-consumed this record.
+        return sim_pos == len(sim_record_rows)
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        for time_str, cid, action_label, trailing_chunks in _iter_ui_trace_records(db_file, selected_cid):
+            _write_ui_record(out, time_str, cid, action_label, trailing_chunks)
+            ui_rows = _ui_record_rows(trailing_chunks)
+
+            matched = False
+            for sim_i, (_, sim_record_rows) in enumerate(sim_records):
+                if sim_i in matched_sim_records:
+                    continue
+                if _record_matches(ui_rows, sim_record_rows):
+                    matched = True
+                    matched_sim_records.add(sim_i)
+                    break
+
+            if not matched:
+                print("FIRST DIVERGENCE")
+                print("  could not find matching sim record for emitted ui record")
+                print(f"  ui record-index: {ui_record_idx}")
+                print(f"  time: {time_str}")
+                print(f"  cid: {cid}")
+                print(f"  action: {action_label}")
+                print(f"  ui rows: {ui_rows}")
+                print(f"  sim records scanned: {len(sim_records)}")
+                return 1
+
+            ui_record_idx += 1
+
+    # Any unmatched SIM records are tolerated sim-only (pre-dedup emission).
+    tolerated_sim_only_records = len(sim_records) - len(matched_sim_records)
+
+    if tolerated_sim_only_records > 0:
+        print("TRACE MATCH (sim has filtered pre-dedup records)")
+        print(f"  tolerated sim-only records: {tolerated_sim_only_records}")
+    else:
+        print("TRACE MATCH")
+    print(f"  records compared: {ui_record_idx}")
+    return 0
 
 
 def _read_filtered_trace_rows(path: str) -> list[tuple[str, str]]:
@@ -144,14 +241,15 @@ def run_trace_compare(db_file: str, ui_trace_file: str, sim_trace_file: str | No
     if not os.path.exists(db_file):
         raise RuntimeError(f"DB file does not exist: {db_file}")
 
-    emit_ui_trace(db_file, ui_trace_file, cid)
-    print(f"Wrote UI trace: {ui_trace_file}")
-
     if sim_trace_file is not None:
         if not os.path.exists(sim_trace_file):
             raise RuntimeError(f"SIM trace does not exist: {sim_trace_file}")
-        return compare_trace_files(sim_trace_file, ui_trace_file)
+        rc = emit_ui_trace_lockstep(db_file, ui_trace_file, sim_trace_file, cid)
+        print(f"Wrote UI trace: {ui_trace_file}")
+        return rc
 
+    emit_ui_trace(db_file, ui_trace_file, cid)
+    print(f"Wrote UI trace: {ui_trace_file}")
     return 0
 
 
