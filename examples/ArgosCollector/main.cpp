@@ -1372,7 +1372,7 @@ void GenTraceForScalarInts()
     always_zero->collect(0);
 
     tick = 3;
-    collector->disable(); // TODO XXX: This never shows up in trace when "always_zero->collect(0) each time"
+    collector->disable();
     constexpr auto enabled_tick = 50;
     while (tick < enabled_tick)
     {
@@ -1393,7 +1393,7 @@ void GenTraceForScalarInts()
     always_zero->collect(0);
 
     tick = 53;
-    collector->quiet(); // TODO XXX: This never shows up in trace when "always_zero->collect(0) each time"
+    collector->quiet();
     constexpr auto awakened_tick = 99;
     while (tick < awakened_tick)
     {

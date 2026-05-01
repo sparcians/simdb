@@ -70,8 +70,6 @@ public:
         : out_(path)
         , path_(reopen_mode ? path : "")
     {
-        out_ << "Bytes\tDescription\n";
-        out_.flush();
     }
 
     bool good() const { return out_.good(); }

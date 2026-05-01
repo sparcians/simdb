@@ -44,8 +44,6 @@ def emit_ui_trace(db_file: str, out_path: str, selected_cid: int | None) -> None
     last_full_payload_bytes_by_cid: dict[int, int] = {}
 
     with open(out_path, "w", encoding="utf-8") as out:
-        out.write("Bytes\tDescription\n")
-
         cursor.execute("SELECT Id,Timestamp FROM Timestamps")
         times_by_id = {}
         for _id, _timestamp in cursor.fetchall():
