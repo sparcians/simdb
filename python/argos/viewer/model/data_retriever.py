@@ -191,11 +191,18 @@ class DataRetriever:
             'DataVals': []
         }
 
-        for time_point in self._time_vals:
-            if time_point >= time_range[0] and time_point <= time_range[1]:
-                data_at_this_time = self._replay_session.GetDataValueAtTime(cid, time_point)
-                unpacked['TimeVals'].append(time_point)
-                unpacked['DataVals'].append(data_at_this_time)
+        lo, hi = time_range[0], time_range[1]
+        # Carry-only simulator ticks omit Timestamps rows; still query range endpoints so
+        # scrubbers (single-tick ranges) resolve via replay to the previous stored timestamp.
+        sample_times = {t for t in self._time_vals if lo <= t <= hi}
+        sample_times.add(lo)
+        if hi != lo:
+            sample_times.add(hi)
+
+        for time_point in sorted(sample_times):
+            data_at_this_time = self._replay_session.GetDataValueAtTime(cid, time_point)
+            unpacked['TimeVals'].append(time_point)
+            unpacked['DataVals'].append(data_at_this_time)
 
         return unpacked
 

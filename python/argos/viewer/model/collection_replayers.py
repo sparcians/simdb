@@ -342,8 +342,9 @@ def CreateReplayersByCID(
 
 class CollectionReplaySession:
     """
-    Rebuild collectable values for a requested time point by replaying only that
-    time point's heartbeat window from the DB.
+    Rebuild collectable values for a requested logical time point by replaying only
+    the DB heartbeat window that ends at the latest Timestamp row at or before that
+    time. Carry-only ticks with no emitted Timestamps resolve to that previous row.
     """
 
     def __init__(
@@ -358,7 +359,6 @@ class CollectionReplaySession:
             inspector=inspector,
             db_file=db_file
         )
-        self._last_replayed_time_point: Optional[int] = None
         self._values_by_time_point: Dict[int, Dict[int, Any]] = {}
 
         self._cursor.execute("SELECT Heartbeat FROM CollectionGlobals")
@@ -383,16 +383,32 @@ class CollectionReplaySession:
             # are not deepcopy-able in practice.
             return dict(self._replayers_by_cid)
 
+    def _DbTimestampAtOrBefore(self, time_point: int) -> Optional[int]:
+        """
+        Latest Timestamp column value recorded in Timestamps/ColllectionRecords at or
+        before ``time_point`` (matching replay window selection in _ReplayWindowForTimePoint).
+        """
+        anchor: Optional[int] = None
+        for _, ts in self._timestamps:
+            ts = int(ts)
+            if ts <= time_point:
+                anchor = ts
+            else:
+                break
+        return anchor
+
     def GetDataValueAtTime(self, cid: int, time_point: int) -> Any:
         time_point = int(time_point)
-        if time_point in self._values_by_time_point:
-            return self._values_by_time_point[time_point].get(cid, {})
+        anchor_tp = self._DbTimestampAtOrBefore(time_point)
+        if anchor_tp is None:
+            return {}
 
-        if self._last_replayed_time_point != time_point:
-            self._ReplayWindowForTimePoint(time_point)
-            self._last_replayed_time_point = time_point
+        row = self._values_by_time_point.get(anchor_tp)
+        if row is not None:
+            return row.get(cid, {})
 
-        return self._values_by_time_point.get(time_point, {}).get(cid, {})
+        self._ReplayWindowForTimePoint(time_point)
+        return self._values_by_time_point.get(anchor_tp, {}).get(cid, {})
 
     def _SnapshotCurrentValues(self) -> Dict[int, Any]:
         return {
