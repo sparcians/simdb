@@ -412,4 +412,9 @@ using auto_field_t = std::conditional_t<
     simdb::collection::ArgosStructField<collected_type, getter_ptr>                           \
         ARGOS_COLLECT_CAT(argos_collect_struct_, __COUNTER__){this, #field_name}
 
-#define ARGOS_FLATTEN(...) ARGOS_COLLECT_STRUCT("", __VA_ARGS__)
+// Do not route flatten through ARGOS_COLLECT_STRUCT("", ...): #"" stringizes to a non-empty
+// name (the quotes become part of the field name), which breaks duplicate-field suppression
+// across nested ARGOS_FLATTEN (every flatten looked like the same bogus name).
+#define ARGOS_FLATTEN(getter_ptr)                                                             \
+    simdb::collection::ArgosStructField<collected_type, getter_ptr>                           \
+        ARGOS_COLLECT_CAT(argos_collect_struct_, __COUNTER__){this, ""}
