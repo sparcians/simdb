@@ -1278,6 +1278,81 @@ private:
     std::shared_ptr<InnerB> inner_b_{std::make_shared<InnerB>()};
 };
 
+/// Nested ARGOS_FLATTEN reproducer: wire size for the outer root should include all
+/// flattened leaves (Leaves inside Middle inside Top). If \c traceSerializationRootTypeBytes
+/// under-counts, \c simdb_collection.trace.meta will show too small a payload and the Python
+/// UI can mis-read DB blobs.
+class LeavesReproWireBytes
+{
+    uint32_t foo_ = 1;
+    double bar_ = 2.0;
+
+public:
+    uint32_t getFoo() const { return foo_; }
+    double getBar() const { return bar_; }
+
+    class ArgosCollector : public simdb::collection::ArgosCollectorBase<LeavesReproWireBytes>
+    {
+    public:
+        ARGOS_COLLECT(foo, &LeavesReproWireBytes::getFoo);
+        ARGOS_COLLECT(bar, &LeavesReproWireBytes::getBar);
+    };
+};
+
+class MiddleReproWireBytes
+{
+    uint16_t mid_ = 3;
+    LeavesReproWireBytes leaves_;
+
+public:
+    uint16_t getMid() const { return mid_; }
+    const LeavesReproWireBytes& getLeaves() const { return leaves_; }
+
+    class ArgosCollector : public simdb::collection::ArgosCollectorBase<MiddleReproWireBytes>
+    {
+    public:
+        ARGOS_COLLECT(mid, &MiddleReproWireBytes::getMid);
+        ARGOS_FLATTEN(&MiddleReproWireBytes::getLeaves);
+    };
+};
+
+class TopOfBugReproWireBytes
+{
+    float top_ = 4.0F;
+    MiddleReproWireBytes middle_;
+
+public:
+    float getTop() const { return top_; }
+    const MiddleReproWireBytes& getMid() const { return middle_; }
+
+    class ArgosCollector : public simdb::collection::ArgosCollectorBase<TopOfBugReproWireBytes>
+    {
+    public:
+        ARGOS_COLLECT(top, &TopOfBugReproWireBytes::getTop);
+        ARGOS_FLATTEN(&TopOfBugReproWireBytes::getMid);
+    };
+};
+
+/// Regression / lock-down for nested \c ARGOS_FLATTEN wire-size accounting (see trace .meta).
+void TestFlattenNestedStructWireBytesRepro()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    simdb::collection::Collection<uint64_t> collection(3);
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    auto leaves_col = collection.collectScalarManually<LeavesReproWireBytes>("leaves_repro", "root");
+    auto middle_col = collection.collectScalarManually<MiddleReproWireBytes>("middle_repro", "root");
+    auto top_col = collection.collectScalarManually<TopOfBugReproWireBytes>("top_of_bug_repro", "root");
+
+    // Expected serialized payload bytes (Argos layout): float + uint16 + uint32 + double.
+    EXPECT_EQUAL(leaves_col->traceSerializationRootTypeBytes(), 12u);
+    EXPECT_EQUAL(middle_col->traceSerializationRootTypeBytes(), 14u);
+    EXPECT_EQUAL(top_col->traceSerializationRootTypeBytes(), 18u);
+}
+
 void TestMultiArgosCollectors()
 {
     TEST_METHOD_INIT;
@@ -1705,6 +1780,7 @@ int main()
     TestQuietLogic();
     TestMultiClock();
     TestFlatten();
+    TestFlattenNestedStructWireBytesRepro();
     TestContainers();
     TestMixedAutoManualLifecycle();
     TestPointers();
