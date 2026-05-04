@@ -15,6 +15,11 @@ class IterableStruct(wx.Panel):
         self.grid.EnableEditing(False)
         self.__SyncGridViewSettings()
 
+        # Create 10-point monospace font for the grid cells
+        mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        self.grid.SetDefaultCellFont(mono10)
+        self.grid.SetLabelFont(mono10)
+
         for i in range(self.capacity):
             self.grid.SetRowLabelValue(i, str(i))
 
