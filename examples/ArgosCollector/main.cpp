@@ -214,7 +214,7 @@ public:
     public:
         ARGOS_COLLECT(uid,      &Instruction::getUID, "Unique ID");
         ARGOS_COLLECT(type,     &Instruction::getType, "Instruction type");
-        ARGOS_COLLECT(opcode,   &Instruction::getOpcode, "Opcode");
+        ARGOS_COLLECT(opcode,   &Instruction::getOpcode, "Opcode", simdb::collection::HEX);
         ARGOS_COLLECT(mnemonic, &Instruction::getMnemonic, "Mnemonic");
         ARGOS_COLLECT(csr,      &Instruction::getCsr, "CSR number");
         ARGOS_COLLECT(last,     &Instruction::finishesSim, "Last instruction");

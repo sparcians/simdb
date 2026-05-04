@@ -85,6 +85,7 @@ public:
         dtype_nodes_tbl.addColumn("Description", dt::string_t);
         dtype_nodes_tbl.addColumn("TypeName", dt::string_t);
         dtype_nodes_tbl.addColumn("EnumBacking", dt::string_t);
+        dtype_nodes_tbl.addColumn("SpecialFormatters", dt::string_t);
 
         auto& dtype_enum_members_tbl = schema.addTable("DataTypeEnumMembers");
         dtype_enum_members_tbl.addColumn("EnumNodeId", dt::int32_t);

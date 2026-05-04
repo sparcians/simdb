@@ -28,6 +28,7 @@ public:
     virtual std::vector<EnumMember> getEnumMembers() const = 0;
     virtual std::string getStructTypeName() const = 0;
     virtual std::vector<const ArgosFieldBase*> getStructFields() const = 0;
+    virtual SpecialFormatters getSpecialFormatter() const { return None; }
     virtual void writeBufferErased(StreamBuffer&, const void*) const = 0;
     virtual std::string getValueStringErased(const void*) const = 0;
     virtual const void* getStructPtrErased(const void*) const = 0;
@@ -154,13 +155,28 @@ class ArgosPodField final : public ArgosFieldBase
     using value_t = detail::remove_cvref_t<raw_return_t>;
 
 public:
-    ArgosPodField(ArgosCollectorBase<OwnerT>* owner, const char* name, const char* description = nullptr)
+    ArgosPodField(
+        ArgosCollectorBase<OwnerT>* owner,
+        const char* name,
+        const char* description = nullptr,
+        SpecialFormatters formatter = None)
         : name_(name)
         , type_name_(demangle_type<value_t>())
         , description_(description && *description ? std::string{description} : std::string{})
+        , special_formatter_(formatter)
     {
-        static_assert(!std::is_enum_v<value_t>, "ArgosPodField only supports POD (non-enum) fields");
-        owner->addField_(this);
+        initialize_(owner);
+    }
+
+    ArgosPodField(
+        ArgosCollectorBase<OwnerT>* owner,
+        const char* name,
+        SpecialFormatters formatter)
+        : name_(name)
+        , type_name_(demangle_type<value_t>())
+        , special_formatter_(formatter)
+    {
+        initialize_(owner);
     }
 
     std::string getName() const override { return name_; }
@@ -174,6 +190,7 @@ public:
     std::vector<EnumMember> getEnumMembers() const override { return {}; }
     std::string getStructTypeName() const override { return {}; }
     std::vector<const ArgosFieldBase*> getStructFields() const override { return {}; }
+    SpecialFormatters getSpecialFormatter() const override { return special_formatter_; }
 
     void writeBufferErased(StreamBuffer& buffer, const void* owner_void) const override
     {
@@ -239,9 +256,29 @@ public:
     void setTinyStrings(TinyStrings<>* tiny_strings) override { tiny_strings_ = tiny_strings; }
 
 private:
+    void initialize_(ArgosCollectorBase<OwnerT>* owner)
+    {
+        static_assert(!std::is_enum_v<value_t>, "ArgosPodField only supports POD (non-enum) fields");
+        if (special_formatter_ == HEX)
+        {
+            if constexpr (std::is_same_v<value_t, std::string> ||
+                          (std::is_pointer_v<value_t> &&
+                           std::is_same_v<std::remove_cv_t<std::remove_pointer_t<value_t>>, char>) ||
+                          std::is_same_v<value_t, bool> ||
+                          std::is_floating_point_v<value_t> ||
+                          !std::is_integral_v<value_t>)
+            {
+                throw DBException("HEX formatter is only supported for integral POD fields");
+            }
+        }
+        owner->addField_(this);
+    }
+
+private:
     std::string name_;
     std::string type_name_;
     std::string description_;
+    SpecialFormatters special_formatter_ = None;
     TinyStrings<>* tiny_strings_ = nullptr;
 };
 
@@ -255,13 +292,26 @@ class ArgosEnumField final : public ArgosFieldBase
     using int_t = std::underlying_type_t<enum_t>;
 
 public:
-    ArgosEnumField(ArgosCollectorBase<OwnerT>* owner, const char* name, const char* description = nullptr)
+    ArgosEnumField(
+        ArgosCollectorBase<OwnerT>* owner,
+        const char* name,
+        const char* description = nullptr,
+        SpecialFormatters formatter = None)
         : name_(name)
         , type_name_(demangle_type<enum_t>())
         , description_(description && *description ? std::string{description} : std::string{})
     {
-        static_assert(std::is_enum_v<enum_t>, "ArgosEnumField requires an enum getter return type");
-        owner->addField_(this);
+        initialize_(owner, formatter);
+    }
+
+    ArgosEnumField(
+        ArgosCollectorBase<OwnerT>* owner,
+        const char* name,
+        SpecialFormatters formatter)
+        : name_(name)
+        , type_name_(demangle_type<enum_t>())
+    {
+        initialize_(owner, formatter);
     }
 
     std::string getName() const override { return name_; }
@@ -300,6 +350,17 @@ public:
     }
 
     const void* getStructPtrErased(const void*) const override { return nullptr; }
+
+private:
+    void initialize_(ArgosCollectorBase<OwnerT>* owner, const SpecialFormatters formatter)
+    {
+        static_assert(std::is_enum_v<enum_t>, "ArgosEnumField requires an enum getter return type");
+        if (formatter != None)
+        {
+            throw DBException("Enum fields do not support special formatters");
+        }
+        owner->addField_(this);
+    }
 
 private:
     std::string name_;
@@ -392,13 +453,14 @@ using auto_field_t = std::conditional_t<
 #define ARGOS_COLLECT_CAT_(a, b) a##b
 #define ARGOS_COLLECT_CAT(a, b)  ARGOS_COLLECT_CAT_(a, b)
 
-#define ARGOS_COLLECT_SELECT(_1, _2, _3, IMPL, ...) IMPL
+#define ARGOS_COLLECT_SELECT(_1, _2, _3, _4, IMPL, ...) IMPL
 
 // Scalar field: registers one getter-based scalar field in the owning ArgosCollector.
 // Enums are auto-routed to ArgosEnumField; all other scalar types use ArgosPodField.
-// Optional third argument: const char* description string literal (or other const char*).
+// Optional third argument: const char* description OR simdb::collection::SpecialFormatters.
+// Optional fourth argument: simdb::collection::SpecialFormatters.
 #define ARGOS_COLLECT(...)                                                                    \
-    ARGOS_COLLECT_SELECT(__VA_ARGS__, ARGOS_COLLECT_3, ARGOS_COLLECT_2)(__VA_ARGS__)
+    ARGOS_COLLECT_SELECT(__VA_ARGS__, ARGOS_COLLECT_4, ARGOS_COLLECT_3, ARGOS_COLLECT_2)(__VA_ARGS__)
 
 #define ARGOS_COLLECT_2(field_name, getter_ptr)                                               \
     simdb::collection::detail::auto_field_t<collected_type, getter_ptr>                       \
@@ -407,6 +469,10 @@ using auto_field_t = std::conditional_t<
 #define ARGOS_COLLECT_3(field_name, getter_ptr, desc)                                         \
     simdb::collection::detail::auto_field_t<collected_type, getter_ptr>                       \
         ARGOS_COLLECT_CAT(argos_collect_field_, __COUNTER__){this, #field_name, desc}
+
+#define ARGOS_COLLECT_4(field_name, getter_ptr, desc, formatter)                              \
+    simdb::collection::detail::auto_field_t<collected_type, getter_ptr>                       \
+        ARGOS_COLLECT_CAT(argos_collect_field_, __COUNTER__){this, #field_name, desc, formatter}
 
 #define ARGOS_COLLECT_STRUCT(field_name, getter_ptr)                                          \
     simdb::collection::ArgosStructField<collected_type, getter_ptr>                           \

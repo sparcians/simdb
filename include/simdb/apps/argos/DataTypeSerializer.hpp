@@ -47,7 +47,8 @@ private:
         void visitSimpleVariable(
             const std::string& var_name,
             const std::string& description,
-            PodTypeKind simple_type) override
+            PodTypeKind simple_type,
+            const std::string& special_formatter = {}) override
         {
             const int32_t parent_id = parent_node_ids_.empty() ? 0 : parent_node_ids_.back();
             const auto pod_name = podTypeKindToTypeName(simple_type);
@@ -58,7 +59,8 @@ private:
                                        var_name,
                                        description,
                                        pod_name,
-                                       ""));
+                                       "",
+                                       special_formatter));
         }
 
         void visitEnumVariable(
@@ -66,7 +68,8 @@ private:
             const std::string& description,
             const std::string& enum_type_name,
             EnumBackingKind backing_kind,
-            const std::vector<std::pair<std::string, std::string>>& name_value_pairs) override
+            const std::vector<std::pair<std::string, std::string>>& name_value_pairs,
+            const std::string& special_formatter = {}) override
         {
             const int32_t parent_id = parent_node_ids_.empty() ? 0 : parent_node_ids_.back();
             auto node_rec =
@@ -77,7 +80,8 @@ private:
                                            enum_name,
                                            description,
                                            enum_type_name,
-                                           enumBackingKindToString(backing_kind)));
+                                           enumBackingKindToString(backing_kind),
+                                           special_formatter));
             const int32_t enum_node_id = node_rec->getId();
             for (const auto& [member_name, member_value] : name_value_pairs)
             {
@@ -89,7 +93,8 @@ private:
         void visitStructVariable(
             const std::string& struct_key,
             const std::string& description,
-            const std::string& struct_type_name) override
+            const std::string& struct_type_name,
+            const std::string& special_formatter = {}) override
         {
             const int32_t parent_id = parent_node_ids_.empty() ? 0 : parent_node_ids_.back();
             auto rec =
@@ -100,7 +105,8 @@ private:
                                            struct_key,
                                            description,
                                            struct_type_name,
-                                           ""));
+                                           "",
+                                           special_formatter));
             parent_node_ids_.push_back(rec->getId());
             struct_stack_.push_back(struct_key);
         }

@@ -270,8 +270,14 @@ class StructDeserializer:
     def __init__(self, struct_defn, inspector, tiny_strings):
         self._field_deserializers = OrderedDict()
         self._flattened_field_names = []
+        self._field_special_formatters = {}
         StructDeserializer.__RecurseFindCollectableFields(
-            struct_defn, inspector, tiny_strings, self._field_deserializers, self._flattened_field_names)
+            struct_defn,
+            inspector,
+            tiny_strings,
+            self._field_deserializers,
+            self._flattened_field_names,
+            self._field_special_formatters)
         assert self._field_deserializers
         assert self._flattened_field_names
 
@@ -298,7 +304,13 @@ class StructDeserializer:
         return deserialized
 
     @staticmethod
-    def __RecurseFindCollectableFields(struct_defn, inspector, tiny_strings, field_deserializers, flattened_field_names):
+    def __RecurseFindCollectableFields(
+        struct_defn,
+        inspector,
+        tiny_strings,
+        field_deserializers,
+        flattened_field_names,
+        field_special_formatters):
         for field in struct_defn.children:
             if field.name and field.name in field_deserializers:
                 # DataType metadata keeps first field instance by name.
@@ -308,11 +320,25 @@ class StructDeserializer:
                 flattened_field_names.append(field.name)
             if field.kind == 'pod' and field.type_name != 'string':
                 field_deserializers[field.name] = SimpleDeserializer(field.type_name)
+                field_special_formatters[field.name] = field.special_formatter
             elif field.type_name == 'string':
                 field_deserializers[field.name] = StringDeserializer(tiny_strings)
             elif field.kind == 'enum':
                 field_deserializers[field.name] = CreateDeserializer(inspector, field.type_name)
             elif field.kind == 'struct':
-                StructDeserializer.__RecurseFindCollectableFields(field, inspector, tiny_strings, field_deserializers, flattened_field_names)
+                StructDeserializer.__RecurseFindCollectableFields(
+                    field,
+                    inspector,
+                    tiny_strings,
+                    field_deserializers,
+                    flattened_field_names,
+                    field_special_formatters)
             else:
                 raise ValueError(f'Unknown field data type: {field.kind}')
+
+def format_field_value_for_display(deserializer, field_name, value):
+    special_formatters = getattr(deserializer, '_field_special_formatters', None)
+    if special_formatters and special_formatters.get(field_name, '') == 'hex':
+        if isinstance(value, int) and not isinstance(value, bool):
+            return hex(value)
+    return str(value)

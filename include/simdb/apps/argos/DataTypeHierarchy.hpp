@@ -76,6 +76,22 @@ enum class PodTypeKind
     str
 };
 
+enum SpecialFormatters
+{
+    None,
+    HEX
+};
+
+inline std::string specialFormatterToString(SpecialFormatters formatter)
+{
+    switch (formatter)
+    {
+    case None: return "";
+    case HEX: return "hex";
+    }
+    throw DBException("Unknown special formatter");
+}
+
 inline size_t podKindToBytes(PodTypeKind kind)
 {
     switch (kind)
@@ -135,6 +151,7 @@ struct DataTypeNode
     std::string field_name;
     std::string description;
     std::string type_name;
+    std::string special_formatter;
     std::unique_ptr<PodTypeKind> pod_type;
     std::unique_ptr<EnumMeta> enum_meta;
     std::vector<std::unique_ptr<DataTypeNode>> children;
@@ -439,6 +456,7 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                 child->field_name = field_name;
                 child->description = field->getDescription();
                 child->type_name = field->getTypeName();
+                child->special_formatter = specialFormatterToString(field->getSpecialFormatter());
                 child->source_field = const_cast<void*>(static_cast<const void*>(field));
 
                 if (field->isStructField())

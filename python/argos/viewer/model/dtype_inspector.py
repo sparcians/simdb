@@ -15,6 +15,7 @@ class DataTypeInspector:
             "description",
             "type_name",
             "enum_backing",
+            "special_formatter",
             "children",
             "enum_members",
         )
@@ -29,8 +30,9 @@ class DataTypeInspector:
             description,
             type_name,
             enum_backing,
+            special_formatter,
         ):
-            # type: (Optional[int], int, Optional[int], str, str, str, str, str) -> None
+            # type: (Optional[int], int, Optional[int], str, str, str, str, str, str) -> None
             self.node_id = node_id
             self.schema_id = schema_id
             self.parent_id = parent_id
@@ -39,6 +41,7 @@ class DataTypeInspector:
             self.description = description
             self.type_name = type_name
             self.enum_backing = enum_backing
+            self.special_formatter = special_formatter
             self.children = []  # type: List[DataTypeInspector.DataTypeNode]
             # Populated for Kind == "enum": member name -> numeric value (parsed from DB string)
             self.enum_members = {}  # type: Dict[str, int]
@@ -77,7 +80,7 @@ class DataTypeInspector:
 
         cur.execute(
             """
-            SELECT Id, SchemaId, ParentId, Kind, Name, Description, TypeName, EnumBacking
+            SELECT Id, SchemaId, ParentId, Kind, Name, Description, TypeName, EnumBacking, SpecialFormatters
             FROM DataTypeNodes
             ORDER BY Id
             """
@@ -96,7 +99,7 @@ class DataTypeInspector:
         self._top_by_schema = {sid: [] for sid in self._schemas}
 
         for row in raw_rows:
-            nid, sid, parent_id, kind, name, desc, type_name, enum_back = row
+            nid, sid, parent_id, kind, name, desc, type_name, enum_back, special_formatter = row
             node = DataTypeInspector.DataTypeNode(
                 int(nid),
                 int(sid),
@@ -106,6 +109,7 @@ class DataTypeInspector:
                 str(desc) if desc is not None else "",
                 str(type_name) if type_name is not None else "",
                 str(enum_back) if enum_back is not None else "",
+                str(special_formatter) if special_formatter is not None else "",
             )
             self._nodes_by_id[node.node_id] = node
             if kind == "enum" and node.node_id in enum_rows:
@@ -142,6 +146,7 @@ class DataTypeInspector:
                 "",
                 "",
                 root_name,
+                "",
                 "",
             )
             view.children = list(self._top_by_schema.get(sid, []))
