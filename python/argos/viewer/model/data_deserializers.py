@@ -304,7 +304,7 @@ class StructDeserializer:
                 # DataType metadata keeps first field instance by name.
                 # Ignore subsequent duplicates for backward compatibility.
                 continue
-            if field.name:
+            if field.name and field.kind != 'struct':
                 flattened_field_names.append(field.name)
             if field.kind == 'pod' and field.type_name != 'string':
                 field_deserializers[field.name] = SimpleDeserializer(field.type_name)
