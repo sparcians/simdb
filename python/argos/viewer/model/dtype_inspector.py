@@ -205,6 +205,18 @@ class DataTypeInspector:
                 return node.enum_backing
         return None
 
+    def GetSimpleTypeSpecialFormatter(self, type_name):
+        # type: (str) -> str
+        """First ``Kind == 'pod'`` node whose ``TypeName`` matches *type_name* with non-empty ``SpecialFormatters``."""
+        for node in self._iter_nodes():
+            if node.kind != "pod":
+                continue
+            if node.type_name != type_name:
+                continue
+            if node.special_formatter:
+                return node.special_formatter
+        return ""
+
     def GetDeserializer(self, dtype_name, expect_exists=True):
         if dtype_name in self._deserializers_by_typename:
             return self._deserializers_by_typename[dtype_name]

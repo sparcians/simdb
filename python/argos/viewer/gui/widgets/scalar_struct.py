@@ -1,5 +1,4 @@
 import wx
-from viewer.model.data_deserializers import format_field_value_for_display
 
 class ScalarStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
@@ -30,9 +29,8 @@ class ScalarStruct(wx.Panel):
         struct_str = []
         for field_name in self._field_names:
             field_val = queue_data['DataVals'][0][field_name]
-            shown = format_field_value_for_display(self._deserializer, field_name, field_val)
             field_name = field_name.ljust(field_max_len)
-            struct_str.append('%s: %s' % (field_name, shown))
+            struct_str.append('%s: %s' % (field_name, field_val))
 
         self.struct_text_elem.SetLabel('\n'.join(struct_str))
 

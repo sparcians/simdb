@@ -1,6 +1,5 @@
 import wx, wx.grid
 from collections.abc import Iterable
-from viewer.model.data_deserializers import format_field_value_for_display
 
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
@@ -77,8 +76,7 @@ class IterableStruct(wx.Panel):
                     continue
 
                 for j, field_name in enumerate(self.visible_field_names):
-                    shown = format_field_value_for_display(self.deserializer, field_name, row_data[field_name])
-                    self.grid.SetCellValue(idx, j, shown)
+                    self.grid.SetCellValue(idx, j, str(row_data[field_name]))
                     if auto_colorize_col_idx is not None:
                         color = widget_renderer.GetAutoColor(row_data[self.visible_field_names[auto_colorize_col_idx]])
                         self.grid.SetCellBackgroundColour(idx, j, color)
