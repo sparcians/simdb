@@ -168,6 +168,16 @@ public:
         }
     }
 
+    /// TODO cnyce: remove this when scalars have good widgets in Argos
+    /// Also, there is a chance that when the sparta_core_example ReorderBuffer
+    /// (which is non-scalar but has similar bug failure) bug is fixed, that
+    /// scalars will naturally be fixed too (at least for scalar structs)
+    void disableScalarCollection()
+    {
+        scalars_allowed_ = false;
+    }
+
+
     /// \brief Create a collectable for a scalar (integral/floating-point/enum/string/bool, or a
     /// struct-like object containing these types). Supports auto-collection and manual collection.
     /// \param path Dot-delimited path to the scalar that uniquely defines where this variable
@@ -181,6 +191,11 @@ public:
         const std::string& clk_name,
         const CollectableT* scalar)
     {
+        if (!scalars_allowed_)
+        {
+            return nullptr;
+        }
+
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
@@ -197,6 +212,11 @@ public:
         const std::string& path,
         const std::string& clk_name)
     {
+        if (!scalars_allowed_)
+        {
+            return nullptr;
+        }
+
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
@@ -515,8 +535,8 @@ private:
     std::shared_ptr<Timestamp<TimeT>> timestamp_;
     std::unique_ptr<PipelineStager<TimeT>> stager_;
     std::unique_ptr<simdb::utils::CollectionByteTraceSession> tracer_;
-    /// When byte tracing is enabled, write \<path>.meta in \ref writeMetaOnPostInit (paths exist by then).
     std::string byte_trace_path_for_meta_;
+    bool scalars_allowed_ = true;
 };
 
 } // namespace simdb::collection
