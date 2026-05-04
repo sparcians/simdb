@@ -403,6 +403,14 @@ class CollectionReplaySession:
         if anchor_tp is None:
             return {}
 
+        # TODO cnyce: There seems to be a bug related to the replayers.
+        # Sometimes we hit a deserialization bug while sliding around
+        # the tick slider (say it hits at tick 1000). Then close Argos,
+        # reopen, and plot the same data at tick 1000 that hit the bug,
+        # and it may just plot without issues. Looks like a caching
+        # logic bug somewhere.
+        self._values_by_time_point = {}
+
         row = self._values_by_time_point.get(anchor_tp)
         if row is not None:
             return row.get(cid, {})
