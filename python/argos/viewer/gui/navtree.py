@@ -37,8 +37,9 @@ class NavTree(wx.TreeCtrl):
 
     def UpdateUtilizBitmaps(self):
         for elem_path in self.simhier.GetElemPaths(True):
-            elem_id = self.simhier.GetElemID(elem_path)
-            if self.simhier.GetWidgetType(elem_id) == 'QueueTable':
+            collectable_id = self.simhier.GetCollectionID(elem_path)
+            widget_type = self.simhier.GetWidgetType(collectable_id)
+            if widget_type == 'QueueTable':
                 utiliz_pct = self.frame.widget_renderer.utiliz_handler.GetUtilizPct(elem_path)
                 image_idx = int(utiliz_pct * 100)
                 item = self._leaf_tree_items_by_elem_path[elem_path]
@@ -47,7 +48,7 @@ class NavTree(wx.TreeCtrl):
                 capacity = self.simhier.GetCapacityByElemPath(elem_path)
                 size = int(capacity * utiliz_pct)
                 tooltip = '{}\nUtilization: {}% ({}/{} bins filled)'.format(elem_path, round(utiliz_pct*100), size, capacity)
-            elif self.simhier.GetWidgetType(elem_id) == 'Timeseries':
+            elif widget_type == 'Timeseries':
                 image_idx = self._utiliz_image_list.GetImageCount() - 1
                 item = self._leaf_tree_items_by_elem_path[elem_path]
                 self.SetItemImage(item, image_idx)

@@ -119,8 +119,9 @@ class Watchlist(wx.TreeCtrl):
 
         if elem_path in self._watched_sim_elems:
             simhier = self.frame.explorer.navtree.simhier
-            elem_id = simhier.GetElemID(elem_path)
-            if simhier.GetWidgetType(elem_id) == 'QueueTable':
+            collectable_id = simhier.GetCollectionID(elem_path)
+            widget_type = simhier.GetWidgetType(collectable_id)
+            if widget_type == 'QueueTable':
                 utiliz_pct = self.frame.widget_renderer.utiliz_handler.GetUtilizPct(elem_path)
                 image_idx = int(utiliz_pct * 100)
                 self.SetItemImage(item, image_idx)
@@ -129,7 +130,7 @@ class Watchlist(wx.TreeCtrl):
                 size = int(capacity * utiliz_pct)
                 tooltip = '{}\nUtilization: {}% ({}/{} bins filled)'.format(elem_path, round(utiliz_pct*100), size, capacity)
                 self._tooltips_by_item[item] = tooltip
-            elif simhier.GetWidgetType(elem_id) == 'Timeseries':
+            elif widget_type == 'Timeseries':
                 image_idx = self._utiliz_image_list.GetImageCount() - 1
                 self.SetItemImage(item, image_idx)
                 tooltip = '{}\nNo utilization data available for timeseries stats'.format(elem_path)
