@@ -19,9 +19,11 @@ public:
     virtual ~DataTypeNodeVisitor() = default;
 
     /// \brief Called before traversing each root hierarchy registered with \ref DataTypeInspector::registerType.
-    virtual void beginRegisteredRootType(const std::string& root_type_name)
+    virtual void beginRegisteredRootType(const std::string& root_type_name,
+                                         const std::string& effective_color_key = {})
     {
         (void)root_type_name;
+        (void)effective_color_key;
     }
 
     /// \brief Called after traversing a root hierarchy.
@@ -144,7 +146,7 @@ public:
         }
         for (const auto& [root_type_name, hier] : root_hierarchies_)
         {
-            visitor->beginRegisteredRootType(root_type_name);
+            visitor->beginRegisteredRootType(root_type_name, hier->getRoot().effective_color_key);
             visitRecursive_(hier->getRoot(), *visitor);
             visitor->endRegisteredRootType(root_type_name);
         }

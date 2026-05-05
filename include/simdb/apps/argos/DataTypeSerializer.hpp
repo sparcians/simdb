@@ -34,10 +34,12 @@ private:
         {}
 
     private:
-        void beginRegisteredRootType(const std::string& root_type_name) override
+        void beginRegisteredRootType(const std::string& root_type_name,
+                                     const std::string& effective_color_key = {}) override
         {
             auto rec =
-                db_mgr_->INSERT(SQL_TABLE("DataTypeSchemas"), SQL_VALUES(root_type_name));
+                db_mgr_->INSERT(SQL_TABLE("DataTypeSchemas"),
+                                SQL_VALUES(root_type_name, effective_color_key));
             current_schema_id_ = rec->getId();
             parent_node_ids_.clear();
         }

@@ -76,6 +76,7 @@ public:
 
         auto& dtype_schemas_tbl = schema.addTable("DataTypeSchemas");
         dtype_schemas_tbl.addColumn("RootTypeName", dt::string_t);
+        dtype_schemas_tbl.addColumn("EffectiveColorKey", dt::string_t);
 
         auto& dtype_nodes_tbl = schema.addTable("DataTypeNodes");
         dtype_nodes_tbl.addColumn("SchemaId", dt::int32_t);
