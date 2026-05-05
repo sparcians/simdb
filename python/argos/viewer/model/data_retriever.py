@@ -6,6 +6,7 @@ from viewer.model.data_deserializers import StringDeserializer
 from viewer.model.data_deserializers import EnumDeserializer
 from viewer.model.data_deserializers import ContigContainerDeserializer
 from viewer.model.data_deserializers import SparseContainerDeserializer
+from viewer.model.data_deserializers import StructDeserializer
 from viewer.model.collection_replayers import CollectionReplaySession
 
 class DataRetriever:
@@ -49,6 +50,8 @@ class DataRetriever:
         for elem_path, dtype in cursor.fetchall():
             self._dtypes_by_elem_path[elem_path] = dtype
 
+        self.ResetToDefaultViewSettings(update_widgets=False)
+
     def IsDevDebug(self):
         return self.frame.dev_debug
 
@@ -74,9 +77,18 @@ class DataRetriever:
         for struct_name,struct_settings in settings.items():
             displayed_columns = struct_settings['displayed_columns']
             auto_colorize_column = struct_settings['auto_colorize_column']
-
             self._displayed_columns_by_struct_name[struct_name] = copy.deepcopy(displayed_columns)
             self._auto_colorize_column_by_struct_name[struct_name] = auto_colorize_column
+
+        for elem_path in self.simhier.GetContainerElemPaths():
+            struct_name, struct_deserializer = self.__GetStructViewMeta(elem_path)
+            if struct_name is None or struct_deserializer is None:
+                continue
+            visible = self._displayed_columns_by_struct_name.get(struct_name)
+            if visible:
+                struct_deserializer.SetVisibleFieldNames(visible)
+            if self._auto_colorize_column_by_struct_name.get(struct_name) not in struct_deserializer.GetVisibleFieldNames():
+                self._auto_colorize_column_by_struct_name[struct_name] = None
 
         self.frame.inspector.RefreshWidgetsOnAllTabs()
 
@@ -89,42 +101,31 @@ class DataRetriever:
         pass
 
     def ResetToDefaultViewSettings(self, update_widgets=True):
-        # TODO cnyce
-        return
-
-        self.cursor.execute('SELECT DISTINCT(StructName) FROM StructFields')
-        struct_names = []
-        for struct_name in self.cursor.fetchall():
-            struct_names.append(struct_name[0])
-
         self._auto_colorize_column_by_struct_name = {}
         self._displayed_columns_by_struct_name = {}
+        for elem_path in self.simhier.GetContainerElemPaths():
+            struct_name, struct_deserializer = self.__GetStructViewMeta(elem_path)
+            if struct_name is None or struct_deserializer is None:
+                continue
+            if struct_name in self._displayed_columns_by_struct_name:
+                continue
 
-        for struct_name in struct_names:
-            cmd = 'SELECT FieldName FROM StructFields WHERE StructName="{}" AND IsAutoColorizeKey=1'.format(struct_name)
-            self.cursor.execute(cmd)
-            auto_colorize_column = [row[0] for row in self.cursor.fetchall()]
-            assert len(auto_colorize_column) <= 1
-            if len(auto_colorize_column) == 1:
-                self._auto_colorize_column_by_struct_name[struct_name] = auto_colorize_column[0]
-            else:
-                self._auto_colorize_column_by_struct_name[struct_name] = None
+            all_columns = struct_deserializer.GetAllFieldNames()
+            struct_deserializer.SetVisibleFieldNames(all_columns)
+            self._displayed_columns_by_struct_name[struct_name] = all_columns
 
-            cmd = 'SELECT FieldName FROM StructFields WHERE StructName="{}" AND IsDisplayedByDefault=1'.format(struct_name)
-            self.cursor.execute(cmd)
-            displayed_columns = [row[0] for row in self.cursor.fetchall()]
-            assert len(displayed_columns) > 0
-            self._displayed_columns_by_struct_name[struct_name] = displayed_columns
+            default_color_col = self.dtype_inspector.GetEffectiveColorKey(struct_name)
+            if default_color_col not in all_columns:
+                default_color_col = None
+            self._auto_colorize_column_by_struct_name[struct_name] = default_color_col
 
         if update_widgets:
             self.frame.inspector.RefreshWidgetsOnAllTabs()
 
     def SetVisibleFieldNames(self, elem_path, field_names):
-        # TODO cnyce
-        return
-
-        deserializer = self.GetDeserializer(elem_path)
-        struct_name = deserializer.struct_name
+        struct_name, struct_deserializer = self.__GetStructViewMeta(elem_path)
+        if struct_name is None or struct_deserializer is None:
+            return
         assert struct_name in self._displayed_columns_by_struct_name
 
         if self._displayed_columns_by_struct_name[struct_name] == field_names:
@@ -134,17 +135,19 @@ class DataRetriever:
         if auto_colorize_col not in field_names:
             self.SetAutoColorizeColumn(elem_path, None)
 
-        self._displayed_columns_by_struct_name[struct_name] = copy.deepcopy(field_names)
+        struct_deserializer.SetVisibleFieldNames(field_names)
+        self._displayed_columns_by_struct_name[struct_name] = struct_deserializer.GetVisibleFieldNames()
         self.frame.inspector.RefreshWidgetsOnAllTabs()
         self.frame.view_settings.SetDirty(reason=DirtyReasons.QueueTableDispColsChanged)
 
     def SetAutoColorizeColumn(self, elem_path, field_name):
-        # TODO cnyce
-        return
-
-        deserializer = self.GetDeserializer(elem_path)
-        struct_name = deserializer.struct_name
+        struct_name, struct_deserializer = self.__GetStructViewMeta(elem_path)
+        if struct_name is None or struct_deserializer is None:
+            return
         assert struct_name in self._auto_colorize_column_by_struct_name
+
+        if field_name is not None and field_name not in struct_deserializer.GetVisibleFieldNames():
+            return
 
         if self._auto_colorize_column_by_struct_name[struct_name] == field_name:
             return
@@ -154,12 +157,18 @@ class DataRetriever:
         self.frame.view_settings.SetDirty(reason=DirtyReasons.QueueTableAutoColorizeChanged)
 
     def GetAutoColorizeColumn(self, elem_path):
-        # TODO cnyce
-        return None
-
-        deserializer = self.GetDeserializer(elem_path)
-        struct_name = deserializer.struct_name
+        struct_name, _ = self.__GetStructViewMeta(elem_path)
+        if struct_name is None:
+            return None
         return self._auto_colorize_column_by_struct_name.get(struct_name)
+
+    def __GetStructViewMeta(self, elem_path):
+        deserializer = self.GetDeserializer(elem_path)
+        if isinstance(deserializer, (ContigContainerDeserializer, SparseContainerDeserializer)):
+            deserializer = deserializer._bin_deserializer
+        if isinstance(deserializer, StructDeserializer):
+            return deserializer.struct_name, deserializer
+        return None, None
 
     def GetDeserializer(self, elem_path):
         dtype = self._dtypes_by_elem_path[elem_path]

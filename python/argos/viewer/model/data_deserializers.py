@@ -145,7 +145,7 @@ def CreateDeserializer(inspector, dtype_name, tiny_strings=None):
     if struct_defn is None:
         raise Exception(f'Unable to create deserializer for data type: {dtype_name}')
 
-    return StructDeserializer(struct_defn, inspector, tiny_strings)
+    return StructDeserializer(dtype_name, struct_defn, inspector, tiny_strings)
 
 # This class deserializes non-enum POD types.
 class SimpleDeserializer:
@@ -302,7 +302,8 @@ class SparseContainerDeserializer:
 
 # This class deserializes struct types.
 class StructDeserializer:
-    def __init__(self, struct_defn, inspector, tiny_strings):
+    def __init__(self, struct_name, struct_defn, inspector, tiny_strings):
+        self.struct_name = struct_name
         self._field_deserializers = OrderedDict()
         self._flattened_field_names = []
         StructDeserializer.__RecurseFindCollectableFields(
@@ -310,13 +311,25 @@ class StructDeserializer:
         )
         assert self._field_deserializers
         assert self._flattened_field_names
+        self._visible_field_names = list(self._flattened_field_names)
 
     def GetAllFieldNames(self):
         return copy.deepcopy(self._flattened_field_names)
 
     def GetVisibleFieldNames(self):
-        # TODO cnyce
-        return self.GetAllFieldNames()
+        return copy.deepcopy(self._visible_field_names)
+
+    def SetVisibleFieldNames(self, field_names):
+        # type: (list) -> None
+        if not field_names:
+            return
+        allowed = set(self._flattened_field_names)
+        visible = []
+        for field_name in field_names:
+            if field_name in allowed and field_name not in visible:
+                visible.append(field_name)
+        if visible:
+            self._visible_field_names = visible
 
     def GetNumBytes(self):
         num_bytes = 0

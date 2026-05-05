@@ -16,6 +16,7 @@ class DataTypeInspector:
             "type_name",
             "enum_backing",
             "special_formatter",
+            "effective_color_key",
             "children",
             "enum_members",
         )
@@ -31,8 +32,9 @@ class DataTypeInspector:
             type_name,
             enum_backing,
             special_formatter,
+            effective_color_key="",
         ):
-            # type: (Optional[int], int, Optional[int], str, str, str, str, str, str) -> None
+            # type: (Optional[int], int, Optional[int], str, str, str, str, str, str, str) -> None
             self.node_id = node_id
             self.schema_id = schema_id
             self.parent_id = parent_id
@@ -42,6 +44,7 @@ class DataTypeInspector:
             self.type_name = type_name
             self.enum_backing = enum_backing
             self.special_formatter = special_formatter
+            self.effective_color_key = effective_color_key
             self.children = []  # type: List[DataTypeInspector.DataTypeNode]
             # Populated for Kind == "enum": member name -> numeric value (parsed from DB string)
             self.enum_members = {}  # type: Dict[str, int]
@@ -55,6 +58,8 @@ class DataTypeInspector:
     def __init__(self, db_file):
         self._conn = sqlite3.connect(db_file)
         self._schemas = {}
+        self._effective_color_keys_by_schema = {}
+        self._effective_color_keys_by_root_type = {}
         self._nodes_by_id = {}
         self._top_by_schema = {}
         self._root_views = []
@@ -74,9 +79,26 @@ class DataTypeInspector:
     def _load(self):
         # type: () -> None
         cur = self._conn.cursor()
-        cur.execute("SELECT Id, RootTypeName FROM DataTypeSchemas ORDER BY Id")
-        for sid, root_name in cur.fetchall():
-            self._schemas[int(sid)] = str(root_name)
+        try:
+            cur.execute(
+                "SELECT Id, RootTypeName, EffectiveColorKey FROM DataTypeSchemas ORDER BY Id"
+            )
+            for sid, root_name, effective_color_key in cur.fetchall():
+                sid = int(sid)
+                root_name = str(root_name)
+                key = str(effective_color_key) if effective_color_key is not None else ""
+                self._schemas[sid] = root_name
+                self._effective_color_keys_by_schema[sid] = key
+                self._effective_color_keys_by_root_type[root_name] = key
+        except sqlite3.OperationalError:
+            # Backward-compat with databases created before EffectiveColorKey existed.
+            cur.execute("SELECT Id, RootTypeName FROM DataTypeSchemas ORDER BY Id")
+            for sid, root_name in cur.fetchall():
+                sid = int(sid)
+                root_name = str(root_name)
+                self._schemas[sid] = root_name
+                self._effective_color_keys_by_schema[sid] = ""
+                self._effective_color_keys_by_root_type[root_name] = ""
 
         cur.execute(
             """
@@ -110,6 +132,7 @@ class DataTypeInspector:
                 str(type_name) if type_name is not None else "",
                 str(enum_back) if enum_back is not None else "",
                 str(special_formatter) if special_formatter is not None else "",
+                "",
             )
             self._nodes_by_id[node.node_id] = node
             if kind == "enum" and node.node_id in enum_rows:
@@ -148,6 +171,7 @@ class DataTypeInspector:
                 root_name,
                 "",
                 "",
+                self._effective_color_keys_by_schema.get(sid, ""),
             )
             view.children = list(self._top_by_schema.get(sid, []))
             self._root_views.append(view)
@@ -216,6 +240,11 @@ class DataTypeInspector:
             if node.special_formatter:
                 return node.special_formatter
         return ""
+
+    def GetEffectiveColorKey(self, dtype_name):
+        # type: (str) -> str
+        """Return DataTypeSchemas.EffectiveColorKey for a root type, or ""."""
+        return self._effective_color_keys_by_root_type.get(dtype_name, "")
 
     def GetDeserializer(self, dtype_name, expect_exists=True):
         if dtype_name in self._deserializers_by_typename:
