@@ -34,6 +34,9 @@ public:
     virtual const void* getStructPtrErased(const void*) const = 0;
     virtual void setTinyStrings(TinyStrings<>*) {}
 
+    /// For color-key inheritance: flattened leaf field name proposed by nested struct collectors only.
+    virtual std::string inheritedColorKeyFromNestedCollector() const { return {}; }
+
     size_t requiredBytes() const
     {
         return requiredBytes_(this);
@@ -78,7 +81,25 @@ public:
         fields_.push_back(f);
     }
 
+    /// Called from \c ARGOS_COLOR_KEY registrar; at most one per collector.
+    void setColorKeyField_(const char* name)
+    {
+        if (name == nullptr || *name == '\0')
+        {
+            return;
+        }
+        if (!color_key_field_.empty())
+        {
+            throw DBException("Duplicate ARGOS_COLOR_KEY registration");
+        }
+        color_key_field_ = name;
+    }
+
+    const std::string& getColorKeyField() const { return color_key_field_; }
+    bool hasColorKeyField() const { return !color_key_field_.empty(); }
+
 private:
+    std::string color_key_field_;
     std::vector<const ArgosFieldBase*> fields_;
 };
 
@@ -143,6 +164,15 @@ struct is_smart_pointer<std::unique_ptr<T, Deleter>> : std::true_type {};
 
 template <typename T>
 inline constexpr bool is_smart_ptr_v = is_smart_pointer<T>::value;
+
+template <typename CollectedT>
+struct ArgosColorKeyReg
+{
+    explicit ArgosColorKeyReg(ArgosCollectorBase<CollectedT>* owner, const char* field_name)
+    {
+        owner->setColorKeyField_(field_name);
+    }
+};
 
 } // namespace detail
 
@@ -409,6 +439,28 @@ public:
         return nested_schema.getFields();
     }
 
+    std::string inheritedColorKeyFromNestedCollector() const override
+    {
+        static typename nested_t::ArgosCollector nested_collector;
+        if (nested_collector.hasColorKeyField())
+        {
+            return nested_collector.getColorKeyField();
+        }
+        for (const auto* member : nested_collector.getFields())
+        {
+            if (member == nullptr || !member->isStructField())
+            {
+                continue;
+            }
+            std::string k = member->inheritedColorKeyFromNestedCollector();
+            if (!k.empty())
+            {
+                return k;
+            }
+        }
+        return {};
+    }
+
     void writeBufferErased(StreamBuffer&, const void*) const override {}
     std::string getValueStringErased(const void*) const override { return "<struct>"; }
 
@@ -473,6 +525,11 @@ using auto_field_t = std::conditional_t<
 #define ARGOS_COLLECT_4(field_name, getter_ptr, desc, formatter)                              \
     simdb::collection::detail::auto_field_t<collected_type, getter_ptr>                       \
         ARGOS_COLLECT_CAT(argos_collect_field_, __COUNTER__){this, #field_name, desc, formatter}
+
+/// Optional: default table color-key column (flattened leaf field name; at most one per collected type).
+#define ARGOS_COLOR_KEY(field_name)                                                           \
+    ::simdb::collection::detail::ArgosColorKeyReg<collected_type>                              \
+        ARGOS_COLLECT_CAT(argos_color_key_, __COUNTER__){this, #field_name}
 
 #define ARGOS_COLLECT_STRUCT(field_name, getter_ptr)                                          \
     simdb::collection::ArgosStructField<collected_type, getter_ptr>                           \

@@ -218,6 +218,7 @@ public:
         ARGOS_COLLECT(mnemonic, &Instruction::getMnemonic, "Mnemonic");
         ARGOS_COLLECT(csr,      &Instruction::getCsr, "CSR number");
         ARGOS_COLLECT(last,     &Instruction::finishesSim, "Last instruction");
+        ARGOS_COLOR_KEY(uid);
     };
 
     void compare(const char*& bytes, simdb::TinyStrings<>* tiny_strings) const
@@ -1773,8 +1774,6 @@ void GenTraceForSparseContainers()
 
 int main()
 {
-    system("rm -f *.test.out");
-
     TestScalarCollection();
     TestEnabledLogic();
     TestQuietLogic();

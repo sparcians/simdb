@@ -151,6 +151,8 @@ struct DataTypeNode
     std::string field_name;
     std::string description;
     std::string type_name;
+    /// Resolved default column for auto-color / preferred table ordering (flattened leaf field name).
+    std::string effective_color_key;
     std::string special_formatter;
     std::unique_ptr<PodTypeKind> pod_type;
     std::unique_ptr<EnumMeta> enum_meta;
@@ -315,6 +317,29 @@ struct has_argos_collector<T, std::void_t<typename type_traits::remove_any_point
 
 template <typename T>
 inline constexpr bool has_argos_collector_v = has_argos_collector<T>::value;
+
+/// Names of flattened table columns under a struct \c DataTypeNode (matches struct deserializer leaf order).
+inline void collectFlatTableColumnNames(const DataTypeNode& row_node, std::unordered_set<std::string>& out_names)
+{
+    for (const auto& ch : row_node.children)
+    {
+        if (!ch)
+        {
+            continue;
+        }
+        if (ch->kind == NodeKind::Struct)
+        {
+            collectFlatTableColumnNames(*ch, out_names);
+        }
+        else if (ch->kind == NodeKind::Pod || ch->kind == NodeKind::Enum)
+        {
+            if (!ch->field_name.empty())
+            {
+                out_names.insert(ch->field_name);
+            }
+        }
+    }
+}
 
 } // namespace detail
 
@@ -566,6 +591,35 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         node.write_erased = populate_children(node,
                                               collector.getFields(),
                                               populate_children);
+
+        std::unordered_set<std::string> flat_column_names;
+        detail::collectFlatTableColumnNames(node, flat_column_names);
+
+        std::string color_key;
+        if (collector.hasColorKeyField())
+        {
+            color_key = collector.getColorKeyField();
+        }
+        else
+        {
+            for (const auto* field : collector.getFields())
+            {
+                if (field == nullptr || !field->isStructField())
+                {
+                    continue;
+                }
+                color_key = field->inheritedColorKeyFromNestedCollector();
+                if (!color_key.empty())
+                {
+                    break;
+                }
+            }
+        }
+        if (!color_key.empty() && flat_column_names.count(color_key) == 0)
+        {
+            color_key.clear();
+        }
+        node.effective_color_key = std::move(color_key);
     }
     else if constexpr (detail::is_pod_leaf_v<value_t>)
     {
