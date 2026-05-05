@@ -45,8 +45,6 @@ class NavTree(wx.TreeCtrl):
                 self.SetItemImage(item, image_idx)
 
                 capacity = self.simhier.GetCapacityByElemPath(elem_path)
-                if capacity is None:
-                    capacity = 0 # TODO cnyce
                 size = int(capacity * utiliz_pct)
                 tooltip = '{}\nUtilization: {}% ({}/{} bins filled)'.format(elem_path, round(utiliz_pct*100), size, capacity)
             elif self.simhier.GetWidgetType(elem_id) == 'Timeseries':

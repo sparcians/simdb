@@ -11,6 +11,7 @@ import copy
 import sqlite3
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
+from collections.abc import Iterable
 
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.dtype_inspector import DataTypeInspector
@@ -397,7 +398,7 @@ class CollectionReplaySession:
                 break
         return anchor
 
-    def GetDataValueAtTime(self, cid: int, time_point: int) -> Any:
+    def GetDataValueAtTime(self, cid: Any, time_point: int) -> Any:
         time_point = int(time_point)
         anchor_tp = self._DbTimestampAtOrBefore(time_point)
         if anchor_tp is None:
@@ -411,12 +412,37 @@ class CollectionReplaySession:
         # logic bug somewhere.
         self._values_by_time_point = {}
 
-        row = self._values_by_time_point.get(anchor_tp)
-        if row is not None:
-            return row.get(cid, {})
+        row = self._values_by_time_point.get(anchor_tp, {})
+        if not row:
+            self._ReplayWindowForTimePoint(time_point)
+            row = self._values_by_time_point.get(anchor_tp, {})
+            if not row:
+                return {}
 
-        self._ReplayWindowForTimePoint(time_point)
-        return self._values_by_time_point.get(anchor_tp, {}).get(cid, {})
+        # Handle case: cid is an int
+        if isinstance(cid, int):
+            if cid in row:
+                return row[cid]
+            else:
+                return None
+
+        # Handle case: cid is an iterable
+        elif isinstance(cid, Iterable):
+            ret = {}
+            for _cid_ in cid:
+                if _cid_ in row:
+                    ret[_cid_] = row[_cid_]
+                else:
+                    ret[_cid_] = None
+
+            return ret
+
+        # Handle case: requesting data for all cids at this time point
+        elif cid is None:
+            return row
+
+        else:
+            raise ValueError(f"Invalid cid data type: {type(cid)}")
 
     def _SnapshotCurrentValues(self) -> Dict[int, Any]:
         return {

@@ -166,11 +166,20 @@ class DataRetriever:
         return self.dtype_inspector.GetDeserializer(dtype)
 
     def GetIterableSizesByCollectionID(self, time_val):
-        # TODO cnyce: what was this code even doing?
         if self._cached_utiliz_time_val is not None and time_val == self._cached_utiliz_time_val:
             return self._cached_utiliz_sizes
 
-        return {id:0 for id in self.simhier.GetContainerIDs()}
+        cids = self.simhier.GetContainerIDs()
+        cids_data_dicts = self._replay_session.GetDataValueAtTime(cids, time_val)
+
+        sizes_by_cid = {}
+        for cid, elems in cids_data_dicts.items():
+            elems = [e for e in elems if e is not None]
+            sizes_by_cid[cid] = len(elems)
+
+        self._cached_utiliz_time_val = time_val
+        self._cached_utiliz_sizes = sizes_by_cid
+        return sizes_by_cid
 
     def Unpack(self, elem_path, time_range):
         if not type(time_range) in (list, tuple):
