@@ -3,6 +3,7 @@
 #include "simdb/apps/AppManager.hpp"
 #include "simdb/apps/argos/Collection.hpp"
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/sqlite/DatabaseManager.hpp"
 
 #include <cstddef>
 #include <cstdio>
@@ -27,6 +28,20 @@ TEST_INIT;
 constexpr size_t RUN_TICKS = 1000;
 
 namespace {
+
+#ifndef ARGOS_UI_SMOKE_DEFAULT
+#define ARGOS_UI_SMOKE_DEFAULT 0
+#endif
+
+bool shouldRunUiSmoke()
+{
+    const char* env = std::getenv("ARGOS_UI_SMOKE");
+    if (env != nullptr)
+    {
+        return std::string(env) == "1";
+    }
+    return ARGOS_UI_SMOKE_DEFAULT != 0;
+}
 
 std::mt19937_64& testRng()
 {
@@ -317,6 +332,30 @@ void CompareValuesWithPython(
     EXPECT_EQUAL(rc, 0);
 }
 
+void MaybeRunUiSmokeTest(simdb::DatabaseManager* db_mgr, const bool expect_pass = true)
+{
+    if (!shouldRunUiSmoke())
+    {
+        return;
+    }
+
+    const auto db_path = db_mgr->getDatabaseFilePath();
+    std::ostringstream cmd;
+    cmd << "python3 ./ui_smoke.py";
+    cmd << " --db-file " << std::quoted(db_path);
+    cmd << " --timeout-ms 1000";
+
+    const auto rc = std::system(cmd.str().c_str());
+    if (expect_pass)
+    {
+        EXPECT_EQUAL(rc, 0);
+    }
+    else
+    {
+        EXPECT_NOTEQUAL(rc, 0);
+    }
+}
+
 void PostTestValidate(
     const std::string& test_name,
     simdb::DatabaseManager* db_mgr,
@@ -339,6 +378,8 @@ void PostTestValidate(
     {
         CompareValuesWithPython(db_mgr, test_name + ".trace");
     }
+
+    MaybeRunUiSmokeTest(db_mgr);
 }
 
 #define POST_TEST_VALIDATE(db_mgr, collection, ...) \
@@ -1772,6 +1813,26 @@ void GenTraceForSparseContainers()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
+void TestUiSmokeRejectsNonArgosDB()
+{
+    if (std::getenv("DISPLAY") == nullptr && std::getenv("WAYLAND_DISPLAY") == nullptr)
+    {
+        return;
+    }
+
+    simdb::Schema schema;
+    using dt = simdb::SqlDataType;
+    auto& tbl = schema.addTable("DummyMetadata");
+    tbl.addColumn("Name", dt::string_t);
+    tbl.addColumn("Value", dt::int32_t);
+
+    simdb::DatabaseManager db_mgr("non_argos_ui_smoke.db", true);
+    db_mgr.appendSchema(schema);
+    db_mgr.INSERT(SQL_TABLE("DummyMetadata"), SQL_VALUES("foo", 1));
+
+    MaybeRunUiSmokeTest(&db_mgr, false);
+}
+
 int main()
 {
     TestScalarCollection();
@@ -1790,6 +1851,7 @@ int main()
     GenTraceForScalarStructs();
     GenTraceForContigContainers();
     GenTraceForSparseContainers();
+    TestUiSmokeRejectsNonArgosDB();
 
     // TODO cnyce: initial value/bytes
     // TODO cnyce: default disabled
