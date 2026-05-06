@@ -33,8 +33,15 @@ namespace {
 #define ARGOS_UI_SMOKE_DEFAULT 0
 #endif
 
+simdb::ValidValue<bool> ARGOS_UI_SMOKE_OVERRIDE;
+
 bool shouldRunUiSmoke()
 {
+    if (ARGOS_UI_SMOKE_OVERRIDE.isValid())
+    {
+        return ARGOS_UI_SMOKE_OVERRIDE;
+    }
+
     const char* env = std::getenv("ARGOS_UI_SMOKE");
     if (env != nullptr)
     {
@@ -1833,8 +1840,16 @@ void TestUiSmokeRejectsNonArgosDB()
     MaybeRunUiSmokeTest(&db_mgr, false);
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc > 1)
+    {
+        if (std::string(argv[1]) == "fast")
+        {
+            ARGOS_UI_SMOKE_OVERRIDE = false;
+        }
+    }
+
     TestScalarCollection();
     TestEnabledLogic();
     TestQuietLogic();
@@ -1845,13 +1860,13 @@ int main()
     TestMixedAutoManualLifecycle();
     TestPointers();
     TestMultiArgosCollectors();
+    TestUiSmokeRejectsNonArgosDB();
 
     // TODO cnyce: these tests are redundant
     GenTraceForScalarInts();
     GenTraceForScalarStructs();
     GenTraceForContigContainers();
     GenTraceForSparseContainers();
-    TestUiSmokeRejectsNonArgosDB();
 
     // TODO cnyce: initial value/bytes
     // TODO cnyce: default disabled

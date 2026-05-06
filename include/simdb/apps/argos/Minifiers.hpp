@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -23,13 +24,16 @@ namespace simdb::collection {
 template <typename ContainerT, bool Sparse>
 inline uint16_t getNumElements(const ContainerT& container)
 {
-    // TODO cnyce: Do we support collecting things like vector<int>?
-    // We use "if (*it)" to match legacy behavior, but that stops
-    // vector<int> from collecting actual values of 0. It looks like
-    // the legacy behavior is to assume that queues always store
-    // pointers (which is a reasonable assumption for simulators,
-    // but not so much for general-purpose collection).
-    static_assert(type_traits::is_any_pointer_v<typename ContainerT::value_type>);
+    using ElemT = typename ContainerT::value_type;
+    using BareElemT = std::remove_cv_t<std::remove_reference_t<ElemT>>;
+
+    static_assert(
+        !(type_traits::is_collectable_stl_v<ContainerT> &&
+          std::is_arithmetic_v<BareElemT> &&
+          !type_traits::is_any_pointer_v<ElemT>),
+        "Ambiguous collection: std::{vector,deque,list}<arithmetic> has no iterator::isValid(), "
+        "so 0/false cannot be distinguished from 'invalid'. Collect pointers instead, or use "
+        "a container with an iterator providing isValid().");
 
     size_t count = 0;
     for (auto it = container.begin(), end = container.end(); it != end; ++it)
