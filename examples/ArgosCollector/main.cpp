@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <list>
 #include <random>
 #include <sstream>
 #include <string>
@@ -368,10 +369,14 @@ void PostTestValidate(
     simdb::DatabaseManager* db_mgr,
     const simdb::collection::CollectionBase& collection,
     bool compare_bytes = false,
-    bool compare_values = false)
+    bool compare_values = false,
+    bool expect_all_minifier_actions = true)
 {
     DumpCollection(db_mgr);
-    EXPECT_TRUE(collection.minifiersSawAllActions());
+    if (expect_all_minifier_actions)
+    {
+        EXPECT_TRUE(collection.minifiersSawAllActions());
+    }
 
     if (compare_bytes)
     {
@@ -1025,6 +1030,75 @@ void TestContainers()
 
     app_mgrs.postSimLoopTeardown();
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+}
+
+void TestListContainers()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 100;
+    constexpr size_t capacity = 16;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    using SharedList = std::list<std::shared_ptr<Instruction>>;
+    auto shared_collector = collection.collectContainerManually<SharedList, false>(
+        "list_shared_ptr_inst", "root", capacity);
+
+    using ValueList = std::list<Instruction>;
+    auto value_collector = collection.collectContainerManually<ValueList, false>(
+        "list_inst", "root", capacity);
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    SharedList shared_list;
+    ValueList value_list;
+
+    auto mk_inst = [](InstType type, uint64_t opcode, const std::string& mnemonic, uint32_t csr = 0, bool last = false) {
+        return Instruction(type, opcode, mnemonic, csr, last);
+    };
+
+    tick = 1;
+    shared_list.clear();
+    value_list.clear();
+    shared_list.push_back(std::make_shared<Instruction>(InstType::NO_OP, 0x101, "addi", 0, false));
+    shared_list.push_back(std::make_shared<Instruction>(InstType::MEM, 0x202, "ld", 0, false));
+    value_list.push_back(mk_inst(InstType::NO_OP, 0x101, "addi", 0, false));
+    value_list.push_back(mk_inst(InstType::MEM, 0x202, "ld", 0, false));
+    shared_collector->collect(shared_list);
+    value_collector->collect(value_list);
+
+    tick = 2;
+    shared_collector->collect(shared_list);
+    value_collector->collect(value_list);
+
+    tick = 3;
+    shared_list.pop_front();
+    shared_list.push_back(std::make_shared<Instruction>(InstType::CSR, 0x303, "csrrw", 12, false));
+    value_list.pop_front();
+    value_list.push_back(mk_inst(InstType::CSR, 0x303, "csrrw", 12, false));
+    shared_collector->collect(shared_list);
+    value_collector->collect(value_list);
+
+    EXPECT_TRUE(shared_collector->traceSerializationRootTypeBytes() > 0);
+    EXPECT_TRUE(value_collector->traceSerializationRootTypeBytes() > 0);
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true, false);
 }
 
 void TestMixedAutoManualLifecycle()
@@ -1857,6 +1931,7 @@ int main(int argc, char** argv)
     TestFlatten();
     TestFlattenNestedStructWireBytesRepro();
     TestContainers();
+    TestListContainers();
     TestMixedAutoManualLifecycle();
     TestPointers();
     TestMultiArgosCollectors();
