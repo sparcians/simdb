@@ -21,70 +21,72 @@
 
 namespace simdb::collection {
 
+namespace detail {
+
+template <typename IterT, typename = void>
+struct has_isValid : std::false_type
+{
+};
+
+template <typename IterT>
+struct has_isValid<IterT, std::void_t<decltype(std::declval<IterT&>().isValid())>> : std::true_type
+{
+};
+
+template <typename IterT>
+constexpr bool has_isValid_v = has_isValid<std::remove_cv_t<std::remove_reference_t<IterT>>>::value;
+
+template <typename IterT>
+inline bool iteratorPointsToValidBin(const IterT& it)
+{
+    if constexpr (has_isValid_v<IterT>)
+    {
+        return it.isValid();
+    }
+    else
+    {
+        using DerefT = std::remove_cv_t<std::remove_reference_t<decltype(*it)>>;
+        static_assert(type_traits::is_any_pointer_v<DerefT>);
+        return static_cast<bool>(*it);
+    }
+}
+
+} // namespace detail
+
 template <typename ContainerT, bool Sparse>
 inline uint16_t getNumElements(const ContainerT& container)
 {
     using ElemT = typename ContainerT::value_type;
     using BareElemT = std::remove_cv_t<std::remove_reference_t<ElemT>>;
+    using IterT = decltype(container.begin());
+    constexpr bool pointer_type_bins = type_traits::is_any_pointer_v<BareElemT>;
+    constexpr bool iterator_has_isValid = detail::has_isValid_v<IterT>;
 
-    //static_assert(
-    //    !(type_traits::is_collectable_stl_v<ContainerT> &&
-    //      std::is_arithmetic_v<BareElemT> &&
-    //      !type_traits::is_any_pointer_v<ElemT>),
-    //    "Ambiguous collection: std::{vector,deque,list}<arithmetic> has no iterator::isValid(), "
-    //    "so 0/false cannot be distinguished from 'invalid'. Collect pointers instead, or use "
-    //    "a container with an iterator providing isValid().");
+    if constexpr (Sparse)
+    {
+        static_assert(
+            pointer_type_bins || iterator_has_isValid,
+            "Sparse collection requires pointer bins or an iterator with isValid().");
+    }
 
     size_t count = 0;
-    for (auto it = container.begin(), end = container.end(); it != end; ++it)
+    if constexpr (!Sparse && !pointer_type_bins && !iterator_has_isValid)
     {
-        bool valid = false;
-        if constexpr (type_traits::is_collectable_stl_v<ContainerT>)
+        count = container.size();
+    }
+    else
+    {
+        for (auto it = container.begin(), end = container.end(); it != end; ++it)
         {
-            constexpr auto pointer_type_bins = type_traits::is_any_pointer_v<BareElemT>;
-            if constexpr (Sparse)
+            const bool valid = detail::iteratorPointsToValidBin(it);
+            if (valid)
             {
-                if constexpr (!pointer_type_bins)
-                {
-                    static_assert(!std::is_arithmetic_v<BareElemT>);
-                }
-
-                if (*it)
-                {
-                    valid = true;
-                }
+                ++count;
             }
-            else
+            else if constexpr (!Sparse)
             {
-                if constexpr (pointer_type_bins)
-                {
-                    if (*it)
-                    {
-                        valid = true;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-                else
-                {
-                    static_assert(!std::is_arithmetic_v<BareElemT>);
-                    valid = true;
-                }
+                break;
             }
-        }
-        else
-        {
-            if (it.isValid())
-            {
-                valid = true;
-            }
-        }
-
-        if (valid)
-        {
-            ++count;
         }
     }
 
@@ -771,29 +773,19 @@ private:
 
     void writePairs_(const ContainerType& container)
     {
+        using IterT = decltype(container.begin());
+        using ElemT = typename ContainerType::value_type;
+        using BareElemT = std::remove_cv_t<std::remove_reference_t<ElemT>>;
+        static_assert(
+            type_traits::is_any_pointer_v<BareElemT> || detail::has_isValid_v<IterT>,
+            "Sparse collection requires pointer bins or an iterator with isValid().");
+
         curr_pairs_.clear();
         curr_pair_field_events_.clear();
         uint16_t bin_idx = 0;
         for (auto it = container.begin(), end = container.end(); it != end; ++it, ++bin_idx)
         {
-            bool valid = false;
-            if constexpr (type_traits::is_collectable_stl_v<ContainerType>)
-            {
-                static_assert(type_traits::is_any_pointer_v<decltype(*it)>);
-                if (*it)
-                {
-                    valid = true;
-                }
-            }
-            else
-            {
-                if (it.isValid())
-                {
-                    valid = true;
-                }
-            }
-
-            if (!valid)
+            if (!detail::iteratorPointsToValidBin(it))
             {
                 continue;
             }
