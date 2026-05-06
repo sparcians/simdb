@@ -27,13 +27,13 @@ inline uint16_t getNumElements(const ContainerT& container)
     using ElemT = typename ContainerT::value_type;
     using BareElemT = std::remove_cv_t<std::remove_reference_t<ElemT>>;
 
-    static_assert(
-        !(type_traits::is_collectable_stl_v<ContainerT> &&
-          std::is_arithmetic_v<BareElemT> &&
-          !type_traits::is_any_pointer_v<ElemT>),
-        "Ambiguous collection: std::{vector,deque,list}<arithmetic> has no iterator::isValid(), "
-        "so 0/false cannot be distinguished from 'invalid'. Collect pointers instead, or use "
-        "a container with an iterator providing isValid().");
+    //static_assert(
+    //    !(type_traits::is_collectable_stl_v<ContainerT> &&
+    //      std::is_arithmetic_v<BareElemT> &&
+    //      !type_traits::is_any_pointer_v<ElemT>),
+    //    "Ambiguous collection: std::{vector,deque,list}<arithmetic> has no iterator::isValid(), "
+    //    "so 0/false cannot be distinguished from 'invalid'. Collect pointers instead, or use "
+    //    "a container with an iterator providing isValid().");
 
     size_t count = 0;
     for (auto it = container.begin(), end = container.end(); it != end; ++it)
@@ -41,9 +41,37 @@ inline uint16_t getNumElements(const ContainerT& container)
         bool valid = false;
         if constexpr (type_traits::is_collectable_stl_v<ContainerT>)
         {
-            if (*it)
+            constexpr auto pointer_type_bins = type_traits::is_any_pointer_v<BareElemT>;
+            if constexpr (Sparse)
             {
-                valid = true;
+                if constexpr (!pointer_type_bins)
+                {
+                    static_assert(!std::is_arithmetic_v<BareElemT>);
+                }
+
+                if (*it)
+                {
+                    valid = true;
+                }
+            }
+            else
+            {
+                if constexpr (pointer_type_bins)
+                {
+                    if (*it)
+                    {
+                        valid = true;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    static_assert(!std::is_arithmetic_v<BareElemT>);
+                    valid = true;
+                }
             }
         }
         else
@@ -57,10 +85,6 @@ inline uint16_t getNumElements(const ContainerT& container)
         if (valid)
         {
             ++count;
-        }
-        else if (!Sparse)
-        {
-            break;
         }
     }
 
@@ -755,6 +779,7 @@ private:
             bool valid = false;
             if constexpr (type_traits::is_collectable_stl_v<ContainerType>)
             {
+                static_assert(type_traits::is_any_pointer_v<decltype(*it)>);
                 if (*it)
                 {
                     valid = true;
