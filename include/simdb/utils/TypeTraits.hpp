@@ -12,9 +12,11 @@
 #include <queue>
 #include <set>
 #include <stack>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace simdb::type_traits {
@@ -229,6 +231,18 @@ static constexpr bool is_collectable_stl_v =
     type_traits::is_std_vector_v<T> ||
     type_traits::is_std_deque_v<T>  ||
     type_traits::is_std_list_v<T>;
+
+template <typename T>
+struct is_std_pair : std::false_type {};
+
+template <typename A, typename B>
+struct is_std_pair<std::pair<A, B>> : std::true_type {};
+
+template <typename T>
+struct is_std_tuple : std::false_type {};
+
+template <typename... Ts>
+struct is_std_tuple<std::tuple<Ts...>> : std::true_type {};
 
 // TypeAt<N, Ts...> gets the N-th type in the parameter pack Ts...
 template <std::size_t N, typename... Ts> struct TypeAt;
