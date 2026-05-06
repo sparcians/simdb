@@ -129,7 +129,7 @@ public:
     /// Check enabled
     bool enabled() const
     {
-        return enabled_;
+        return enabled_ && stager_ != nullptr;
     }
 
     /// Check whether heartbeat re-emission is suppressed.
