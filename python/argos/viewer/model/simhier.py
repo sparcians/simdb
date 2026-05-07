@@ -1,16 +1,34 @@
 import copy, re
+import sqlite3
 
 class SimHierarchy:
     def __init__(self, db, dtype_inspector):
-        cmd = 'SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes'
         full_paths = []
         metas_by_path = {}
 
         cursor = db.cursor()
-        cursor.execute(cmd)
-        for full_path, cid, clk_id, type_name in cursor.fetchall():
+        try:
+            cursor.execute(
+                'SELECT FullPath,SerializationCID,ClockID,TypeName,ArgosDefaultHiddenColumns FROM CollectableTreeNodes'
+            )
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError:
+            cursor.execute('SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes')
+            rows = [(r[0], r[1], r[2], r[3], '') for r in cursor.fetchall()]
+
+        for row in rows:
+            if len(row) == 5:
+                full_path, cid, clk_id, type_name, hidden_cols = row
+            else:
+                full_path, cid, clk_id, type_name = row
+                hidden_cols = ''
             full_paths.append(full_path)
-            metas_by_path[full_path] = {'CID': cid, 'ClkID': clk_id, 'TypeName': type_name}
+            metas_by_path[full_path] = {
+                'CID': cid,
+                'ClkID': clk_id,
+                'TypeName': type_name,
+                'ArgosDefaultHiddenColumns': hidden_cols or '',
+            }
 
         self._simhier_tree = SimHierTree()
         self._simhier_tree.BuildFromList(full_paths)
@@ -92,6 +110,9 @@ class SimHierarchy:
 
     def GetTree(self):
         return self._simhier_tree
+
+    def GetMetaAtPath(self, elem_path, meta_name):
+        return self._simhier_tree.GetMetaAtPath(elem_path, meta_name)
 
     def GetParentID(self, elem_id):
         return self._parent_ids_by_child_id[elem_id]

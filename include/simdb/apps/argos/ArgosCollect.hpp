@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -103,7 +104,84 @@ private:
     std::vector<const ArgosFieldBase*> fields_;
 };
 
+/// Base for container-wrapper default-hidden column metadata (\c ARGOS_FILTER on nested
+/// \c ArgosContainerCollector). Does not participate in serialization; see \c ElemT::ArgosCollector.
+class ArgosFilteredCollectorBase
+{
+public:
+    void registerDefaultHiddenField_(const char* field_name)
+    {
+        if (field_name != nullptr && *field_name != '\0')
+        {
+            default_hidden_.emplace_back(field_name);
+        }
+    }
+
+    const std::vector<std::string>& getDefaultHiddenFieldNames() const { return default_hidden_; }
+
+    std::string defaultHiddenColumnsCommaSeparatedForDb() const
+    {
+        std::string out;
+        for (const auto& n : default_hidden_)
+        {
+            if (!out.empty())
+            {
+                out += ',';
+            }
+            out += n;
+        }
+        return out;
+    }
+
+private:
+    std::vector<std::string> default_hidden_;
+};
+
+template <typename ElemT>
+class ArgosFilteredCollector : public ArgosFilteredCollectorBase
+{
+public:
+    using element_type = ElemT;
+
+    void validateDefaultHiddenAgainstElement_() const
+    {
+        const auto& hidden = getDefaultHiddenFieldNames();
+        if (hidden.empty())
+        {
+            return;
+        }
+        static const std::unordered_set<std::string> allowed = [] {
+            auto hier = createDataTypeHier<ElemT>();
+            std::unordered_set<std::string> names;
+            detail::collectFlatTableColumnNames(hier->getRoot(), names);
+            return names;
+        }();
+        for (const auto& h : hidden)
+        {
+            if (!allowed.count(h))
+            {
+                throw DBException("ARGOS_FILTER: unknown field name: ") << h;
+            }
+        }
+        if (hidden.size() >= allowed.size())
+        {
+            throw DBException(
+                "ARGOS_FILTER: at least one column must remain visible by default (cannot hide all)");
+        }
+    }
+};
+
+template <typename ElemT>
+struct ArgosDefaultHiddenFieldReg
+{
+    explicit ArgosDefaultHiddenFieldReg(ArgosFilteredCollector<ElemT>* owner, const char* field_name)
+    {
+        owner->registerDefaultHiddenField_(field_name);
+    }
+};
+
 namespace detail {
+
 
 template <auto Getter>
 struct getter_traits;
@@ -134,6 +212,20 @@ struct has_nested_argos_collector<T, std::void_t<typename remove_cvref_t<T>::Arg
 
 template <typename T>
 inline constexpr bool has_nested_argos_collector_v = has_nested_argos_collector<T>::value;
+
+
+template <typename T, typename = void>
+struct has_nested_argos_container_collector : std::false_type {};
+
+template <typename T>
+struct has_nested_argos_container_collector<
+    T,
+    std::void_t<typename remove_cvref_t<T>::ArgosContainerCollector>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool has_nested_argos_container_collector_v =
+    has_nested_argos_container_collector<T>::value;
 
 template <typename T, typename = void>
 struct has_ostream_insertion : std::false_type {};
@@ -537,6 +629,49 @@ using auto_field_t = std::conditional_t<
         ARGOS_COLLECT_CAT(argos_collect_field_, __COUNTER__){this, #field_name, desc, formatter}
 
 /// Optional: default table color-key column (flattened leaf field name; at most one per collected type).
+
+#define ARGOS_FILTER_NARG_(...) ARGOS_FILTER_NARG__(__VA_ARGS__, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1)
+#define ARGOS_FILTER_NARG__(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, n, ...) n
+#define ARGOS_FILTER_NARG(...) ARGOS_FILTER_NARG_(__VA_ARGS__)
+
+#define ARGOS_DHF(field)                                                                 \
+    ::simdb::collection::ArgosDefaultHiddenFieldReg<element_type> ARGOS_COLLECT_CAT(       \
+        argos_dhf_, __COUNTER__)                                                         \
+    {                                                                                      \
+        this, #field                                                                       \
+    };
+
+#define ARGOS_FILTER_1(f0) ARGOS_DHF(f0)
+#define ARGOS_FILTER_2(f0, f1) ARGOS_DHF(f0) ARGOS_DHF(f1)
+#define ARGOS_FILTER_3(f0, f1, f2) ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2)
+#define ARGOS_FILTER_4(f0, f1, f2, f3) ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3)
+#define ARGOS_FILTER_5(f0, f1, f2, f3, f4) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4)
+#define ARGOS_FILTER_6(f0, f1, f2, f3, f4, f5) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5)
+#define ARGOS_FILTER_7(f0, f1, f2, f3, f4, f5, f6) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5) ARGOS_DHF(f6)
+#define ARGOS_FILTER_8(f0, f1, f2, f3, f4, f5, f6, f7) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5) ARGOS_DHF(f6) \
+        ARGOS_DHF(f7)
+#define ARGOS_FILTER_9(f0, f1, f2, f3, f4, f5, f6, f7, f8) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5) ARGOS_DHF(f6) \
+        ARGOS_DHF(f7) ARGOS_DHF(f8)
+#define ARGOS_FILTER_10(f0, f1, f2, f3, f4, f5, f6, f7, f8, f9) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5) ARGOS_DHF(f6) \
+        ARGOS_DHF(f7) ARGOS_DHF(f8) ARGOS_DHF(f9)
+#define ARGOS_FILTER_11(f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5) ARGOS_DHF(f6) \
+        ARGOS_DHF(f7) ARGOS_DHF(f8) ARGOS_DHF(f9) ARGOS_DHF(f10)
+#define ARGOS_FILTER_12(f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11) \
+    ARGOS_DHF(f0) ARGOS_DHF(f1) ARGOS_DHF(f2) ARGOS_DHF(f3) ARGOS_DHF(f4) ARGOS_DHF(f5) ARGOS_DHF(f6) \
+        ARGOS_DHF(f7) ARGOS_DHF(f8) ARGOS_DHF(f9) ARGOS_DHF(f10) ARGOS_DHF(f11)
+
+/// Opt-out default-hidden table columns for a nested \c ArgosContainerCollector (wrapper only).
+#define ARGOS_FILTER(...) \
+    ARGOS_COLLECT_CAT(ARGOS_FILTER_, ARGOS_FILTER_NARG(__VA_ARGS__))(__VA_ARGS__)
+
+
 #define ARGOS_COLOR_KEY(field_name)                                                           \
     ::simdb::collection::detail::ArgosColorKeyReg<collected_type>                              \
         ARGOS_COLLECT_CAT(argos_color_key_, __COUNTER__){this, #field_name}

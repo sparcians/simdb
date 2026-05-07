@@ -103,6 +103,7 @@ public:
         collectable_tns_tbl.addColumn("FullPath", dt::string_t);
         collectable_tns_tbl.addColumn("ClockID", dt::int32_t);
         collectable_tns_tbl.addColumn("TypeName", dt::string_t);
+        collectable_tns_tbl.addColumn("ArgosDefaultHiddenColumns", dt::string_t);
         collectable_tns_tbl.ensureUnique("SerializationCID");
         collectable_tns_tbl.unsetPrimaryKey();
 

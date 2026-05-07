@@ -98,8 +98,34 @@ inline uint16_t getNumElements(const ContainerT& container)
     return static_cast<uint16_t>(count);
 }
 
+class MinifierBase
+{
+public:
+    virtual ~MinifierBase() = default;
+
+    void disableActionTracking()
+    {
+        action_counts_irrelevant_ = true;
+    }
+
+    bool sawAllActions() const
+    {
+        if (action_counts_irrelevant_)
+        {
+            return true;
+        }
+        return sawAllActions_();
+    }
+
+protected:
+    bool action_counts_irrelevant_ = false;
+
+private:
+    virtual bool sawAllActions_() const = 0;
+};
+
 template <typename ValueType>
-class Minifier
+class Minifier : public MinifierBase
 {
     static_assert(!type_traits::is_collectable_stl_v<ValueType>);
 
@@ -228,13 +254,6 @@ public:
         return std::vector<size_t>(action_counts_.begin(), action_counts_.end());
     }
 
-    bool sawAllActions() const
-    {
-        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
-            return n > 0;
-        });
-    }
-
 private:
     enum class MinifierAction : uint8_t
     {
@@ -260,6 +279,18 @@ private:
         return "?";
     }
 
+    bool sawAllActions_() const override
+    {
+        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
+            return n > 0;
+        });
+    }
+
+    bool shouldWriteFull_() const
+    {
+        return (cycles_since_last_full_ + 1) % heartbeat_ == 0;
+    }
+
     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy_;
     const size_t heartbeat_;
     size_t cycles_since_last_full_ = 0;
@@ -269,16 +300,10 @@ private:
     std::vector<char> cur_extracted_bytes_;
     ValidValue<size_t> expected_num_bytes_;
     EnumDefinitions* enum_definitions_ = nullptr;
-
-    /// Heartbeat is validated non-zero in \c Collection<TimeT> ctor. \c heartbeat_ == 1 ⇒ FULL every collect.
-    bool shouldWriteFull_() const
-    {
-        return (cycles_since_last_full_ + 1) % heartbeat_ == 0;
-    }
 };
 
 template <typename ContainerType>
-class ContigContainerMinifier
+class ContigContainerMinifier : public MinifierBase
 {
     static_assert(!type_traits::is_any_pointer_v<ContainerType>);
     using ValueType = type_traits::remove_any_pointer_t<typename ContainerType::value_type>;
@@ -337,13 +362,6 @@ public:
         return std::vector<size_t>(action_counts_.begin(), action_counts_.end());
     }
 
-    bool sawAllActions() const
-    {
-        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
-            return n > 0;
-        });
-    }
-
 private:
     struct FieldEvent
     {
@@ -397,6 +415,13 @@ private:
     {
         constexpr auto base = static_cast<size_t>(MinifierAction::FULL);
         return static_cast<size_t>(action) - base;
+    }
+
+    bool sawAllActions_() const override
+    {
+        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
+            return n > 0;
+        });
     }
 
     uint16_t writeBins_(const ContainerType& container, std::vector<std::vector<char>>& bins)
@@ -670,7 +695,7 @@ private:
 };
 
 template <typename ContainerType>
-class SparseContainerMinifier
+class SparseContainerMinifier : public MinifierBase
 {
     static_assert(!type_traits::is_any_pointer_v<ContainerType>);
     using ValueType = type_traits::remove_any_pointer_t<typename ContainerType::value_type>;
@@ -727,13 +752,6 @@ public:
     std::vector<size_t> getActionCounts() const
     {
         return std::vector<size_t>(action_counts_.begin(), action_counts_.end());
-    }
-
-    bool sawAllActions() const
-    {
-        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
-            return n > 0;
-        });
     }
 
 private:
@@ -803,6 +821,13 @@ private:
     {
         constexpr auto base = static_cast<size_t>(MinifierAction::FULL);
         return static_cast<size_t>(action) - base;
+    }
+
+    bool sawAllActions_() const override
+    {
+        return std::all_of(action_counts_.begin(), action_counts_.end(), [](size_t n) {
+            return n > 0;
+        });
     }
 
     void writePairs_(const ContainerType& container)

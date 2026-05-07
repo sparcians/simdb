@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos/ArgosCollect.hpp"
 #include "simdb/apps/argos/EnumDefinitions.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/apps/argos/Minifiers.hpp"
@@ -185,11 +186,17 @@ public:
     /// Declared queue capacity (\c expected_capacity ctor arg); 0 when not a container collectable.
     virtual uint32_t traceExpectedCapacity() const { return 0; }
 
+    /// Comma-separated flattened field names default-hidden in Argos UI (wrapper collectables only).
+    virtual std::string argosDefaultHiddenColumnsForDb() const { return ""; }
+
     /// \c collect*WithAutoCollection factories vs manual \c collect*Manually registration.
     virtual bool traceRegisteredAsAutoCollectApi() const { return false; }
 
     /// \brief Return true if this collectable exercised all minifier actions relevant to its type.
     virtual bool minifierSawAllActions() const = 0;
+
+    /// \brief Turn off action tracking for this collectable (minifierSawAllActions will always return true)
+    virtual void disableActionTracking() = 0;
 
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs()
@@ -375,7 +382,7 @@ public:
         }
     }
 
-    virtual void reattach(const ScalarT*)
+    void reattach(const ScalarT*)
     {
         throw DBException("Cannot reattach a manually-collected object");
     }
@@ -401,6 +408,11 @@ public:
             return minifier_.sawAllActions();
         }
         return true;
+    }
+
+    void disableActionTracking() override
+    {
+        minifier_.disableActionTracking();
     }
 
 private:
@@ -445,7 +457,7 @@ public:
         return auto_collecting_;
     }
 
-    void reattach(const ScalarT* scalar) override
+    void reattach(const ScalarT* scalar)
     {
         assert(scalar != nullptr);
         scalar_ = scalar;
@@ -486,7 +498,16 @@ public:
             expected_capacity,
             simdb::demangle_type<ValueType>(),
             getEnumDefinitions_())
-    {}
+    {
+        if constexpr (detail::has_nested_argos_container_collector_v<ContainerT>)
+        {
+            static typename ContainerT::ArgosContainerCollector filt;
+            filt.validateDefaultHiddenAgainstElement_();
+            argos_default_hidden_csv_ = filt.defaultHiddenColumnsCommaSeparatedForDb();
+        }
+    }
+
+    std::string argosDefaultHiddenColumnsForDb() const override { return argos_default_hidden_csv_; }
 
     std::string collectableTypeNameForDb() const override
     {
@@ -498,7 +519,11 @@ public:
         return base + "_contig_capacity" + std::to_string(expected_capacity_);
     }
 
-    std::string traceSerializationRootType() const override { return dtype_hierarchy_->getRoot().type_name; }
+    std::string traceSerializationRootType() const override
+    {
+        return dtype_hierarchy_->getRoot().type_name;
+    }
+
     size_t traceSerializationRootTypeBytes() const override
     {
         return detail::traceNodeFixedBytes(dtype_hierarchy_->getRoot());
@@ -571,7 +596,12 @@ public:
         return minifier_.sawAllActions();
     }
 
-    virtual void reattach(const ContainerT*)
+    void disableActionTracking() override
+    {
+        minifier_.disableActionTracking();
+    }
+
+    void reattach(const ContainerT*)
     {
         throw DBException("Cannot reattach a manually-collected object");
     }
@@ -588,6 +618,7 @@ private:
         ContigContainerMinifier<InnerContainerT>>;
     MinifierType minifier_;
     uint16_t max_size_collected_ = 0;
+    std::string argos_default_hidden_csv_;
 };
 
 /// \class AutoContainerCollector
@@ -633,7 +664,7 @@ public:
         return auto_collecting_;
     }
 
-    virtual void reattach(const ContainerT* container)
+    void reattach(const ContainerT* container)
     {
         assert(container != nullptr);
         container_ = container;

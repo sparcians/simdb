@@ -250,6 +250,52 @@ public:
     }
 };
 
+class InstGroup
+{
+public:
+    class ArgosContainerCollector : public simdb::collection::ArgosFilteredCollector<Instruction>
+    {
+    public:
+        ARGOS_FILTER(type, opcode, csr, last);
+    };
+
+    using iterator = typename std::vector<std::shared_ptr<Instruction>>::iterator;
+    using const_iterator = typename std::vector<std::shared_ptr<Instruction>>::const_iterator;
+
+    using size_type = size_t;
+    using value_type = std::shared_ptr<Instruction>;
+
+    explicit InstGroup(size_t count) : count_(count) {}
+
+    iterator begin() { return insts_.begin(); }
+
+    iterator end() { return insts_.end(); }
+
+    const_iterator begin() const { return insts_.begin(); }
+
+    const_iterator end() const { return insts_.end(); }
+
+    void randomize()
+    {
+        insts_.resize(count_);
+        for (auto& inst : insts_)
+        {
+            if (randomOneIn(8))
+            {
+                inst = Instruction::genRandom();
+            }
+            else
+            {
+                inst.reset();
+            }
+        }
+    }
+
+private:
+    const size_t count_;
+    std::vector<std::shared_ptr<Instruction>> insts_;
+};
+
 std::ostream& operator<<(std::ostream& os, const Instruction& inst)
 {
     os << "itype: "     << inst.getType() << ", ";
@@ -934,6 +980,12 @@ void TestContainers()
     auto sparse_collector = collection.collectContainerWithAutoCollection<SparseQ, true>(
         "sparse", "root", &sparse_q, capacity);
 
+    InstGroup inst_group(capacity);
+    auto inst_group_collector = collection.collectContainerWithAutoCollection<InstGroup, true>(
+        "instgroup_filtered", "root", &inst_group, capacity);
+
+    inst_group_collector->disableActionTracking();
+
     auto randomize = [&]()
     {
         auto contig_count = randomInt<size_t>(0, capacity);
@@ -952,6 +1004,7 @@ void TestContainers()
                 item = SharedPtr<Instruction>(Instruction::newRandom());
             }
         }
+        inst_group.randomize();
     };
 
     auto collect = [&]()
@@ -1025,7 +1078,7 @@ void TestContainers()
     collect_next_tick();
 
     app_mgrs.postSimLoopTeardown();
-    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
 }
 
 void TestListContainers()

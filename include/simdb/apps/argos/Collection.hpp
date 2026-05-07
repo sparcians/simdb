@@ -483,7 +483,8 @@ private:
                             (uint32_t)coll->getID(),
                             path,
                             clock_id,
-                            coll->collectableTypeNameForDb()));
+                            coll->collectableTypeNameForDb(),
+                            coll->argosDefaultHiddenColumnsForDb()));
                 }
             }
         });
