@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos/EnumDefinitions.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/apps/argos/Minifiers.hpp"
 #include "simdb/utils/Demangle.hpp"
@@ -55,9 +56,10 @@ public:
     uint16_t getID() const { return cid_; }
 
     /// \brief Connect to the CollectorPipeline's main input queue
-    void connectToPipeline(PipelineStagerBase* stager)
+    void connectToPipeline(PipelineStagerBase* stager, EnumDefinitions* enum_definitions)
     {
         stager_ = stager;
+        enum_definitions_ = enum_definitions;
     }
 
     /// Enable collection
@@ -231,6 +233,11 @@ protected:
         return stager_;
     }
 
+    EnumDefinitions* getEnumDefinitions_() const
+    {
+        return enum_definitions_;
+    }
+
     ValidValue<size_t> expected_num_bytes_;
 
 private:
@@ -270,6 +277,9 @@ private:
     /// \brief Main entry point into the pipeline
     PipelineStagerBase* stager_ = nullptr;
 
+    /// \brief All metadata for all collected enums
+    EnumDefinitions* enum_definitions_ = nullptr;
+
     /// \brief Captured initial bytes
     std::unique_ptr<CollectedData> initial_value_;
 
@@ -289,7 +299,8 @@ public:
                     std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy)
         : CollectableBase(collection, heartbeat)
         , dtype_hierarchy_(std::move(dtype_hierarchy))
-        , minifier_(dtype_hierarchy_, heartbeat)
+        //TODO cnyce: Why give it to the Minifier ctor? Is this enum defn even set yet?
+        , minifier_(dtype_hierarchy_, heartbeat, getEnumDefinitions_())
     {}
 
     std::string collectableTypeNameForDb() const override
@@ -330,6 +341,7 @@ public:
         CollectedData collected(getID());
         if constexpr (detail::has_argos_collector_v<ValueType>)
         {
+            minifier_.setEnumDefinitions(getEnumDefinitions_());
             minifier_.minifyAndAppend(collected.getBuffer(), value);
         }
         else
@@ -338,7 +350,12 @@ public:
             constexpr uint8_t kFirstMinifierActionValue =
                 static_cast<uint8_t>(LifecycleAction::AWAKENED) + 1;
             collected.getBuffer().appendValue(kFirstMinifierActionValue, "action", "FULL");
-            dtype_hierarchy_->writeBuffer(collected.getBuffer(), value, &expected_num_bytes_);
+            dtype_hierarchy_->writeBuffer(
+                collected.getBuffer(),
+                value,
+                &expected_num_bytes_,
+                nullptr,
+                getEnumDefinitions_());
         }
         stage_(std::move(collected));
     }
@@ -467,7 +484,8 @@ public:
             dtype_hierarchy_,
             heartbeat,
             expected_capacity,
-            simdb::demangle_type<ValueType>())
+            simdb::demangle_type<ValueType>(),
+            getEnumDefinitions_())
     {}
 
     std::string collectableTypeNameForDb() const override
@@ -512,6 +530,7 @@ public:
         CollectedData collected(getID());
         auto num_elements = getNumElements<T, Sparse>(container);
         max_size_collected_ = std::max(max_size_collected_, num_elements);
+        minifier_.setEnumDefinitions(getEnumDefinitions_());
         minifier_.minifyAndAppend(collected.getBuffer(), container);
 
         stage_(std::move(collected));

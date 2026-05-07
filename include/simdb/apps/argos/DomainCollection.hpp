@@ -7,6 +7,7 @@
 #include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/apps/argos/CollectionBase.hpp"
+#include "simdb/apps/argos/EnumDefinitions.hpp"
 
 namespace simdb::collection {
 
@@ -91,9 +92,12 @@ public:
     }
 
     /// \brief Connect the collectables to the CollectorPipeline's main input queue
-    virtual void connectToPipeline(ConcurrentQueue<QueueCollectionData>* pipeline_head)
+    virtual void connectToPipeline(
+        ConcurrentQueue<QueueCollectionData>* pipeline_head,
+        EnumDefinitions* enum_definitions)
     {
         pipeline_head_ = pipeline_head;
+        enum_definitions_ = enum_definitions;
     }
 
     /// \brief Run auto-collection on all collectables configured for it
@@ -131,6 +135,7 @@ private:
     std::map<std::string, std::shared_ptr<CollectableBase>> collectables_by_path_;
     CollectionBase* collection_if_ = nullptr;
     ConcurrentQueue<QueueCollectionData>* pipeline_head_ = nullptr;
+    EnumDefinitions* enum_definitions_ = nullptr;
 };
 
 /// \class TimeDomainCollection
@@ -144,14 +149,16 @@ public:
         , timestamp_(std::move(timestamp))
     {}
 
-    void connectToPipeline(ConcurrentQueue<QueueCollectionData>* pipeline_head) override final
+    void connectToPipeline(
+        ConcurrentQueue<QueueCollectionData>* pipeline_head,
+        EnumDefinitions* enum_definitions) override final
     {
         stager_ = std::make_unique<PipelineStager<TimeT>>(heartbeat_, timestamp_.get(), pipeline_head);
         for (auto& collectable : getCollectables_())
         {
-            collectable->connectToPipeline(stager_.get());
+            collectable->connectToPipeline(stager_.get(), enum_definitions);
         }
-        DomainCollection::connectToPipeline(pipeline_head);
+        DomainCollection::connectToPipeline(pipeline_head, enum_definitions);
     }
 
     void sendCollectedDataToPipeline() override final

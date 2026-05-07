@@ -1,5 +1,6 @@
 #pragma once
 
+#include "simdb/apps/argos/EnumTraits.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/MoveOnlyFunction.hpp"
 #include "simdb/utils/TinyStrings.hpp"
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <map>
 #include <utility>
 #include <sstream>
 #include <stdexcept>
@@ -45,18 +47,6 @@ enum class NodeKind
     Pod,
     Enum,
     Struct
-};
-
-enum class EnumBackingKind
-{
-    i8,
-    ui8,
-    i16,
-    ui16,
-    i32,
-    ui32,
-    i64,
-    ui64
 };
 
 enum class PodTypeKind
@@ -118,26 +108,18 @@ inline size_t podKindToBytes(PodTypeKind kind)
     return 0;
 }
 
-struct EnumMember
-{
-    std::string name;
-    int64_t value = 0; // TODO cnyce: should this be a string?
-};
-
 struct EnumMeta
 {
     EnumBackingKind backing_kind = EnumBackingKind::i32;
-    std::vector<EnumMember> members;
+    std::map<int64_t, std::string> raw_to_name;
 };
 
-inline std::string enum_raw_display_string(const std::vector<EnumMember>& members, const int64_t raw)
+inline std::string enum_raw_display_string(const std::map<int64_t, std::string>& raw_to_name, const int64_t raw)
 {
-    for (const auto& member : members)
+    auto it = raw_to_name.find(raw);
+    if (it != raw_to_name.end())
     {
-        if (member.value == raw)
-        {
-            return member.name;
-        }
+        return it->second;
     }
     std::ostringstream oss;
     oss << raw;
@@ -189,44 +171,6 @@ inline std::string podTypeKindToTypeName(PodTypeKind kind)
     return "";
 }
 
-inline std::string enumBackingKindToString(EnumBackingKind kind)
-{
-    switch (kind)
-    {
-    case EnumBackingKind::i8: return demangle_type<int8_t>();
-    case EnumBackingKind::ui8: return demangle_type<uint8_t>();
-    case EnumBackingKind::i16: return demangle_type<int16_t>();
-    case EnumBackingKind::ui16: return demangle_type<uint16_t>();
-    case EnumBackingKind::i32: return demangle_type<int32_t>();
-    case EnumBackingKind::ui32: return demangle_type<uint32_t>();
-    case EnumBackingKind::i64: return demangle_type<int64_t>();
-    case EnumBackingKind::ui64: return demangle_type<uint64_t>();
-}
-    throw DBException("Unknown enum backing kind");
-    return "";
-}
-
-inline size_t enumBackingKindToBytes(EnumBackingKind kind)
-{
-    switch (kind)
-    {
-    case EnumBackingKind::i8:
-    case EnumBackingKind::ui8:
-        return sizeof(int8_t);
-    case EnumBackingKind::i16:
-    case EnumBackingKind::ui16:
-        return sizeof(uint16_t);
-    case EnumBackingKind::i32:
-    case EnumBackingKind::ui32:
-        return sizeof(uint32_t);
-    case EnumBackingKind::i64:
-    case EnumBackingKind::ui64:
-        return sizeof(uint64_t);
-    }
-    throw DBException("Unknown enum backing kind");
-    return 0;
-}
-
 namespace detail {
 
 template <typename T>
@@ -240,24 +184,6 @@ constexpr bool is_pod_leaf_v =
     (std::is_trivial_v<remove_cvref_t<T>> &&
      std::is_standard_layout_v<remove_cvref_t<T>> &&
      !std::is_enum_v<remove_cvref_t<T>>);
-
-template <typename IntT>
-constexpr EnumBackingKind getBackingKind()
-{
-    static_assert(std::is_integral_v<IntT>, "IntT must be integral");
-    static_assert(!std::is_same_v<IntT, bool>, "bool is not a valid enum backing type");
-
-    if constexpr (std::is_same_v<IntT, int8_t>)   return EnumBackingKind::i8;
-    if constexpr (std::is_same_v<IntT, uint8_t>)  return EnumBackingKind::ui8;
-    if constexpr (std::is_same_v<IntT, int16_t>)  return EnumBackingKind::i16;
-    if constexpr (std::is_same_v<IntT, uint16_t>) return EnumBackingKind::ui16;
-    if constexpr (std::is_same_v<IntT, int32_t>)  return EnumBackingKind::i32;
-    if constexpr (std::is_same_v<IntT, uint32_t>) return EnumBackingKind::ui32;
-    if constexpr (std::is_same_v<IntT, int64_t>)  return EnumBackingKind::i64;
-    if constexpr (std::is_same_v<IntT, uint64_t>) return EnumBackingKind::ui64;
-    if constexpr (std::is_signed_v<IntT>)         return EnumBackingKind::i64;
-    return EnumBackingKind::i32;
-}
 
 template <typename PodT>
 constexpr PodTypeKind getPodTypeKind()
@@ -343,16 +269,6 @@ inline void collectFlatTableColumnNames(const DataTypeNode& row_node, std::unord
 
 } // namespace detail
 
-template <typename EnumT>
-struct EnumDescriptor
-{
-    static std::vector<EnumMember> members()
-    {
-        static_assert(type_traits::always_false_v<EnumT>, "Must specialize this template for your enum");
-        return {};
-    }
-};
-
 class DataTypeHierarchyBase
 {
 public:
@@ -373,8 +289,10 @@ public:
         StreamBuffer& buffer,
         const RootT& value,
         ValidValue<size_t>* expected_num_bytes = nullptr,
-        FieldTraceSink* field_trace_sink = nullptr) const
+        FieldTraceSink* field_trace_sink = nullptr,
+        EnumDefinitions* enum_definitions = nullptr) const
     {
+        buffer.setEnumDefinitions(enum_definitions);
         if (root_.write_erased)
         {
             auto curr_size = buffer.size();
@@ -400,11 +318,12 @@ public:
         StreamBuffer& buffer,
         const T& value,
         ValidValue<size_t>* expected_num_bytes = nullptr,
-        FieldTraceSink* field_trace_sink = nullptr) const
+        FieldTraceSink* field_trace_sink = nullptr,
+        EnumDefinitions* enum_definitions = nullptr) const
     {
         if (value)
         {
-            writeBuffer(buffer, *value, expected_num_bytes, field_trace_sink);
+            writeBuffer(buffer, *value, expected_num_bytes, field_trace_sink, enum_definitions);
         }
     }
 
@@ -436,13 +355,19 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
         node.kind = NodeKind::Enum;
         node.enum_meta = std::make_unique<EnumMeta>();
         using enum_int_t = std::underlying_type_t<value_t>;
-        node.enum_meta->backing_kind = detail::getBackingKind<enum_int_t>();
-        node.enum_meta->members = EnumDescriptor<value_t>::members();
+        node.enum_meta->backing_kind = getEnumBackingKind<enum_int_t>();
         node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
             const auto* value = static_cast<const value_t*>(value_void);
             const auto raw = static_cast<enum_int_t>(*value);
             const int64_t raw_i64 = static_cast<int64_t>(raw);
-            const std::string val_str = enum_raw_display_string(node.enum_meta->members, raw_i64);
+            buffer.observeEnum(*value, node.type_name);
+            if (node.enum_meta)
+            {
+                std::ostringstream oss;
+                oss << *value;
+                node.enum_meta->raw_to_name.emplace(raw_i64, oss.str());
+            }
+            const std::string val_str = enum_raw_display_string(node.enum_meta->raw_to_name, raw_i64);
             buffer.appendValue(raw, node.type_name, val_str);
         };
     }
@@ -524,11 +449,16 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
                     child->kind = NodeKind::Enum;
                     child->enum_meta = std::make_unique<EnumMeta>();
                     child->enum_meta->backing_kind = field->getEnumBackingKind();
-                    child->enum_meta->members = field->getEnumMembers();
 
-                    child->write_erased = [field, child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
+                    child->write_erased = [field, child = child.get(), child_field_name = child->field_name](StreamBuffer& buffer, const void* parent_void, FieldTraceSink* field_trace_sink) {
                         auto before = buffer.size();
                         field->writeBufferErased(buffer, parent_void);
+                        if (child && child->enum_meta)
+                        {
+                            const int64_t raw = field->getEnumValueErased(parent_void);
+                            const std::string value_repr = field->getValueStringErased(parent_void);
+                            child->enum_meta->raw_to_name.emplace(raw, value_repr);
+                        }
                         if (field_trace_sink)
                         {
                             const auto num_bytes = buffer.size() - before;

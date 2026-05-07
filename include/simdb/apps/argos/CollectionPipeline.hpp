@@ -5,6 +5,7 @@
 #include "simdb/apps/App.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/apps/argos/CollectionBase.hpp"
+#include "simdb/apps/argos/EnumDefinitions.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include "simdb/utils/Compress.hpp"
@@ -134,7 +135,7 @@ public:
         pipeline->noMoreBindings();
 
         auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
-        collection_->connectToPipeline(pipeline_head);
+        collection_->connectToPipeline(pipeline_head, &enum_definitions_);
     }
 
     /// \brief Run after initialization; invokes \ref CollectionPipelineMeta::writeMetaOnPostInit.
@@ -235,6 +236,7 @@ private:
 
     DatabaseManager *const db_mgr_;
     CollectionBase* collection_ = nullptr;
+    EnumDefinitions enum_definitions_;
 };
 
 } // namespace simdb::collection

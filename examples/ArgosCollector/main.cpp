@@ -86,22 +86,18 @@ enum InstType
     __N
 };
 
-// Template specializations
-namespace simdb::collection {
-
-template <>
-struct EnumDescriptor<InstType>
+std::ostream& operator<<(std::ostream& os, const InstType type)
 {
-    static std::vector<EnumMember> members()
+    switch (type)
     {
-        return {{"NO_OP", 0},
-                {"MEM", 1},
-                {"CSR", 2},
-                {"ILLEGAL", 3}};
+    case NO_OP:   os << "NO_OP"; break;
+    case MEM:     os << "MEM"; break;
+    case CSR:     os << "CSR"; break;
+    case ILLEGAL: os << "ILLEGAL"; break;
+    case __N:     throw simdb::DBException("Invalid enum");
     }
-};
-
-} // namespace simdb::collection
+    return os;
+}
 
 class Instruction
 {

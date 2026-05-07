@@ -25,7 +25,7 @@ public:
     virtual bool isStructField() const = 0;
     virtual PodTypeKind getPodTypeKind() const = 0;
     virtual EnumBackingKind getEnumBackingKind() const = 0;
-    virtual std::vector<EnumMember> getEnumMembers() const = 0;
+    virtual int64_t getEnumValueErased(const void*) const { return 0; }
     virtual std::string getStructTypeName() const = 0;
     virtual std::vector<const ArgosFieldBase*> getStructFields() const = 0;
     virtual SpecialFormatters getSpecialFormatter() const { return None; }
@@ -135,6 +135,18 @@ struct has_nested_argos_collector<T, std::void_t<typename remove_cvref_t<T>::Arg
 template <typename T>
 inline constexpr bool has_nested_argos_collector_v = has_nested_argos_collector<T>::value;
 
+template <typename T, typename = void>
+struct has_ostream_insertion : std::false_type {};
+
+template <typename T>
+struct has_ostream_insertion<
+    T,
+    std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
+    : std::true_type {};
+
+template <typename T>
+inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
+
 // Bare getter return type (reference stripped) -> nested struct type for ArgosStructField.
 template <typename BareRet>
 struct argos_struct_nested_type {
@@ -217,7 +229,6 @@ public:
     PodTypeKind getPodTypeKind() const override { return detail::getPodTypeKind<value_t>(); }
 
     EnumBackingKind getEnumBackingKind() const override { return EnumBackingKind::i32; }
-    std::vector<EnumMember> getEnumMembers() const override { return {}; }
     std::string getStructTypeName() const override { return {}; }
     std::vector<const ArgosFieldBase*> getStructFields() const override { return {}; }
     SpecialFormatters getSpecialFormatter() const override { return special_formatter_; }
@@ -313,7 +324,6 @@ private:
 };
 
 // Enum: getter returns enum type; bytes are the underlying integral representation.
-// Symbol names / values for the schema come from EnumDescriptor<EnumT>::members().
 template <typename OwnerT, auto Getter>
 class ArgosEnumField final : public ArgosFieldBase
 {
@@ -350,15 +360,21 @@ public:
     bool isEnumField() const override { return true; }
     bool isStructField() const override { return false; }
     PodTypeKind getPodTypeKind() const override { return PodTypeKind::i32; }
-    EnumBackingKind getEnumBackingKind() const override { return detail::getBackingKind<int_t>(); }
-    std::vector<EnumMember> getEnumMembers() const override { return EnumDescriptor<enum_t>::members(); }
+    EnumBackingKind getEnumBackingKind() const override { return simdb::collection::getEnumBackingKind<int_t>(); }
+    int64_t getEnumValueErased(const void* owner_void) const override
+    {
+        const auto* owner = static_cast<const OwnerT*>(owner_void);
+        return static_cast<int64_t>(static_cast<int_t>(std::invoke(Getter, owner)));
+    }
     std::string getStructTypeName() const override { return {}; }
     std::vector<const ArgosFieldBase*> getStructFields() const override { return {}; }
 
     void writeBufferErased(StreamBuffer& buffer, const void* owner_void) const override
     {
         const auto* owner = static_cast<const OwnerT*>(owner_void);
-        const int_t raw = static_cast<int_t>(std::invoke(Getter, owner));
+        const enum_t enum_value = static_cast<enum_t>(std::invoke(Getter, owner));
+        const int_t raw = static_cast<int_t>(enum_value);
+        buffer.observeEnum(enum_value, type_name_);
         buffer.append(raw);
     }
 
@@ -366,16 +382,8 @@ public:
     {
         const auto* owner = static_cast<const OwnerT*>(owner_void);
         const enum_t value = static_cast<enum_t>(std::invoke(Getter, owner));
-        const auto members = EnumDescriptor<enum_t>::members();
-        for (const auto& member : members)
-        {
-            if (member.value == static_cast<int64_t>(value))
-            {
-                return member.name;
-            }
-        }
         std::ostringstream oss;
-        oss << static_cast<int64_t>(value);
+        oss << value;
         return oss.str();
     }
 
@@ -385,6 +393,9 @@ private:
     void initialize_(ArgosCollectorBase<OwnerT>* owner, const SpecialFormatters formatter)
     {
         static_assert(std::is_enum_v<enum_t>, "ArgosEnumField requires an enum getter return type");
+        static_assert(
+            detail::has_ostream_insertion_v<enum_t>,
+            "Enum fields require operator<< to produce string names for enum definitions");
         if (formatter != None)
         {
             throw DBException("Enum fields do not support special formatters");
@@ -430,7 +441,6 @@ public:
     bool isStructField() const override { return true; }
     PodTypeKind getPodTypeKind() const override { return PodTypeKind::i32; }
     EnumBackingKind getEnumBackingKind() const override { return EnumBackingKind::i32; }
-    std::vector<EnumMember> getEnumMembers() const override { return {}; }
     std::string getStructTypeName() const override { return struct_type_name_; }
 
     std::vector<const ArgosFieldBase*> getStructFields() const override

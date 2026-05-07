@@ -8,6 +8,7 @@
 #include "simdb/apps/argos/Minifiers.hpp"
 #include "simdb/apps/argos/DataTypeInspector.hpp"
 #include "simdb/apps/argos/DataTypeSerializer.hpp"
+#include "simdb/apps/argos/EnumDefinitions.hpp"
 #include "simdb/utils/CollectionByteTrace.hpp"
 #include "simdb/utils/Tree.hpp"
 #include "simdb/utils/TypeTraits.hpp"
@@ -20,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -270,11 +272,14 @@ public:
     }
 
     /// \brief Connect the collectables to the CollectorPipeline's main input queue
-    void connectToPipeline(ConcurrentQueue<QueueCollectionData>* pipeline_head) override
+    void connectToPipeline(
+        ConcurrentQueue<QueueCollectionData>* pipeline_head,
+        EnumDefinitions* enum_definitions) override
     {
+        enum_definitions_ = enum_definitions;
         for (auto& [_, collection] : collections_)
         {
-            collection->connectToPipeline(pipeline_head);
+            collection->connectToPipeline(pipeline_head, enum_definitions_);
         }
     }
 
@@ -524,6 +529,116 @@ private:
         {
             inserter->createRecordWithColValues(cid, sz);
         }
+
+        if (enum_definitions_ == nullptr)
+        {
+            return;
+        }
+
+        const auto enum_snapshot = enum_definitions_->getSnapshot();
+        if (enum_snapshot.empty())
+        {
+            return;
+        }
+
+        db_mgr->safeTransaction([&]() {
+            std::unordered_map<std::string, std::vector<int32_t>> node_ids_by_enum_type;
+            std::unordered_map<int32_t, std::string> enum_backing_by_node_id;
+            {
+                auto node_query = db_mgr->createQuery("DataTypeNodes");
+                int32_t node_id = 0;
+                std::string kind;
+                std::string type_name;
+                std::string enum_backing;
+                node_query->select("Id", node_id);
+                node_query->select("Kind", kind);
+                node_query->select("TypeName", type_name);
+                node_query->select("EnumBacking", enum_backing);
+                node_query->addConstraintForString("Kind", Constraints::EQUAL, "enum");
+                auto node_rs = node_query->getResultSet();
+                while (node_rs.getNextRecord())
+                {
+                    if (enum_snapshot.find(type_name) != enum_snapshot.end())
+                    {
+                        node_ids_by_enum_type[type_name].push_back(node_id);
+                        enum_backing_by_node_id.emplace(node_id, enum_backing);
+                    }
+                }
+            }
+
+            auto members_inserter = db_mgr->prepareINSERT(SQL_TABLE("DataTypeEnumMembers"));
+            for (const auto& [enum_type_name, enum_def] : enum_snapshot)
+            {
+                auto node_it = node_ids_by_enum_type.find(enum_type_name);
+                if (node_it == node_ids_by_enum_type.end())
+                {
+                    continue;
+                }
+
+                const std::string expected_backing =
+                    enumBackingKindToString(enum_def.backing_kind);
+                for (const auto enum_node_id : node_it->second)
+                {
+                    const auto backing_it = enum_backing_by_node_id.find(enum_node_id);
+                    if (backing_it == enum_backing_by_node_id.end())
+                    {
+                        continue;
+                    }
+                    if (backing_it->second.empty())
+                    {
+                        std::ostringstream update_cmd;
+                        update_cmd << "UPDATE DataTypeNodes SET EnumBacking='"
+                                   << expected_backing
+                                   << "' WHERE Id="
+                                   << enum_node_id;
+                        db_mgr->EXECUTE(update_cmd.str(), false);
+                    }
+                    else if (backing_it->second != expected_backing)
+                    {
+                        throw DBException("Enum backing kind mismatch for enum type '")
+                            << enum_type_name
+                            << "'. DataTypeNodes.EnumBacking='"
+                            << backing_it->second
+                            << "', runtime observed backing='"
+                            << expected_backing
+                            << "'";
+                    }
+
+                    std::unordered_set<std::string> existing_member_pairs;
+                    {
+                        auto member_query = db_mgr->createQuery("DataTypeEnumMembers");
+                        std::string member_name;
+                        std::string member_value;
+                        member_query->select("MemberName", member_name);
+                        member_query->select("MemberValue", member_value);
+                        member_query->addConstraintForInt(
+                            "EnumNodeId",
+                            Constraints::EQUAL,
+                            enum_node_id);
+                        auto member_rs = member_query->getResultSet();
+                        while (member_rs.getNextRecord())
+                        {
+                            existing_member_pairs.emplace(member_name + "\n" + member_value);
+                        }
+                    }
+
+                    for (const auto& [raw_value, member_name] : enum_def.raw_to_name)
+                    {
+                        const auto member_value = std::to_string(raw_value);
+                        const std::string key = member_name + "\n" + member_value;
+                        if (existing_member_pairs.find(key) != existing_member_pairs.end())
+                        {
+                            continue;
+                        }
+                        members_inserter->createRecordWithColValues(
+                            enum_node_id,
+                            member_name,
+                            member_value);
+                        existing_member_pairs.emplace(key);
+                    }
+                }
+            }
+        });
     }
 
     const size_t heartbeat_;
@@ -537,6 +652,7 @@ private:
     std::unique_ptr<simdb::utils::CollectionByteTraceSession> tracer_;
     std::string byte_trace_path_for_meta_;
     bool scalars_allowed_ = true;
+    EnumDefinitions* enum_definitions_ = nullptr;
 };
 
 } // namespace simdb::collection

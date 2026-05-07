@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos/EnumDefinitions.hpp"
 #include "simdb/apps/argos/LifecycleAction.hpp"
 
 #include <algorithm>
@@ -104,10 +105,17 @@ class Minifier
 
 public:
     Minifier(std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
-             size_t heartbeat)
+             size_t heartbeat,
+             EnumDefinitions* enum_definitions = nullptr)
         : dtype_hierarchy_(dtype_hierarchy)
         , heartbeat_(heartbeat)
+        , enum_definitions_(enum_definitions)
     {}
+
+    void setEnumDefinitions(EnumDefinitions* enum_definitions)
+    {
+        enum_definitions_ = enum_definitions;
+    }
 
     void minifyAndAppend(StreamBuffer& buf, const ValueType& value)
     {
@@ -159,8 +167,13 @@ public:
             field_trace_sink = tracer ? &field_sink : nullptr;
         }
 
-        StreamBuffer my_buffer(cur_extracted_bytes_, true, false);
-        dtype_hierarchy_->writeBuffer(my_buffer, value, &expected_num_bytes_, field_trace_sink);
+        StreamBuffer my_buffer(cur_extracted_bytes_, true, false, enum_definitions_);
+        dtype_hierarchy_->writeBuffer(
+            my_buffer,
+            value,
+            &expected_num_bytes_,
+            field_trace_sink,
+            enum_definitions_);
 
         if (!has_history_ || shouldWriteFull_() || last_sent_bytes_ != cur_extracted_bytes_)
         {
@@ -255,6 +268,7 @@ private:
     std::vector<char> last_sent_bytes_;
     std::vector<char> cur_extracted_bytes_;
     ValidValue<size_t> expected_num_bytes_;
+    EnumDefinitions* enum_definitions_ = nullptr;
 
     /// Heartbeat is validated non-zero in \c Collection<TimeT> ctor. \c heartbeat_ == 1 ⇒ FULL every collect.
     bool shouldWriteFull_() const
@@ -273,13 +287,20 @@ public:
     ContigContainerMinifier(std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
                             size_t heartbeat,
                             size_t expected_capacity,
-                            const std::string& elem_path)
+                            const std::string& elem_path,
+                            EnumDefinitions* enum_definitions = nullptr)
         : dtype_hierarchy_(dtype_hierarchy)
         , heartbeat_(heartbeat)
         , prev_bins_(expected_capacity)
         , curr_bins_(expected_capacity)
         , elem_path_(elem_path)
+        , enum_definitions_(enum_definitions)
     {}
+
+    void setEnumDefinitions(EnumDefinitions* enum_definitions)
+    {
+        enum_definitions_ = enum_definitions;
+    }
 
     void minifyAndAppend(StreamBuffer& buf, const ContainerType& container)
     {
@@ -406,14 +427,19 @@ private:
 
     void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer, const size_t bin_idx)
     {
-        StreamBuffer buf(bin_buffer, true, false);
+        StreamBuffer buf(bin_buffer, true, false, enum_definitions_);
         auto* tracer = simdb::utils::active_collection_byte_tracer();
         if constexpr (detail::has_argos_collector_v<ValueType>)
         {
             if (tracer)
             {
                 PendingFieldTraceSink field_sink;
-                dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_, &field_sink);
+                dtype_hierarchy_->writeBuffer(
+                    buf,
+                    bin_value,
+                    &expected_num_bytes_,
+                    &field_sink,
+                    enum_definitions_);
                 if (curr_bin_field_events_.size() <= bin_idx)
                 {
                     curr_bin_field_events_.resize(bin_idx + 1);
@@ -423,7 +449,7 @@ private:
             }
         }
 
-        dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_);
+        dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_, nullptr, enum_definitions_);
     }
 
     template <typename BinType>
@@ -640,6 +666,7 @@ private:
     const std::string elem_path_;
     bool warn_on_size_ = true;
     ValidValue<size_t> expected_num_bytes_;
+    EnumDefinitions* enum_definitions_ = nullptr;
 };
 
 template <typename ContainerType>
@@ -653,12 +680,19 @@ public:
     SparseContainerMinifier(std::shared_ptr<DataTypeHierarchy<ValueType>> dtype_hierarchy,
                             size_t heartbeat,
                             size_t expected_capacity,
-                            const std::string& elem_path)
+                            const std::string& elem_path,
+                            EnumDefinitions* enum_definitions = nullptr)
         : dtype_hierarchy_(dtype_hierarchy)
         , heartbeat_(heartbeat)
+        , enum_definitions_(enum_definitions)
     {
         (void)elem_path;
         curr_pairs_.reserve(expected_capacity);
+    }
+
+    void setEnumDefinitions(EnumDefinitions* enum_definitions)
+    {
+        enum_definitions_ = enum_definitions;
     }
 
     void minifyAndAppend(StreamBuffer& buf, const ContainerType& container)
@@ -797,19 +831,24 @@ private:
 
     void writeBin_(const ValueType& bin_value, std::vector<char>& bin_buffer, const uint16_t bin_idx)
     {
-        StreamBuffer buf(bin_buffer, true, false);
+        StreamBuffer buf(bin_buffer, true, false, enum_definitions_);
         auto* tracer = simdb::utils::active_collection_byte_tracer();
         if constexpr (detail::has_argos_collector_v<ValueType>)
         {
             if (tracer)
             {
                 PendingFieldTraceSink field_sink;
-                dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_, &field_sink);
+                dtype_hierarchy_->writeBuffer(
+                    buf,
+                    bin_value,
+                    &expected_num_bytes_,
+                    &field_sink,
+                    enum_definitions_);
                 curr_pair_field_events_[bin_idx] = field_sink.events();
                 return;
             }
         }
-        dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_);
+        dtype_hierarchy_->writeBuffer(buf, bin_value, &expected_num_bytes_, nullptr, enum_definitions_);
     }
 
     template <typename BinType>
@@ -971,6 +1010,7 @@ private:
     std::vector<BinPair> curr_pairs_;
     std::unordered_map<uint16_t, std::vector<FieldEvent>> curr_pair_field_events_;
     ValidValue<size_t> expected_num_bytes_;
+    EnumDefinitions* enum_definitions_ = nullptr;
 };
 
 } // namespace simdb::collection

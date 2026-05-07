@@ -174,10 +174,10 @@ private:
         {
             const std::string enum_name = node.field_name.empty() ? node.type_name : node.field_name;
             std::vector<std::pair<std::string, std::string>> name_value_pairs;
-            name_value_pairs.reserve(node.enum_meta->members.size());
-            for (const auto& member : node.enum_meta->members)
+            name_value_pairs.reserve(node.enum_meta->raw_to_name.size());
+            for (const auto& [raw_value, member_name] : node.enum_meta->raw_to_name)
             {
-                name_value_pairs.emplace_back(member.name, std::to_string(member.value));
+                name_value_pairs.emplace_back(member_name, std::to_string(raw_value));
             }
             visitor.visitEnumVariable(enum_name,
                                       node.description,

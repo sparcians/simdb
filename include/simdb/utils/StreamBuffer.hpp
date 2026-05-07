@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/apps/argos/EnumDefinitions.hpp"
 #include "simdb/utils/CollectionByteTrace.hpp"
 
 #include <array>
@@ -28,8 +29,15 @@ public:
     /// \param participate_in_byte_trace When false, this buffer never records to
     ///        \ref simdb::utils::active_collection_byte_tracer (use for scratch
     ///        buffers whose bytes are not part of the persisted collection layout).
-    StreamBuffer(std::vector<char>& out, bool clear_first = true, bool participate_in_byte_trace = true) :
-        out_(out), participate_in_byte_trace_(participate_in_byte_trace)
+    StreamBuffer(
+        std::vector<char>& out,
+        bool clear_first = true,
+        bool participate_in_byte_trace = true,
+        //TODO cnyce: this cannot default to nullptr (put directly after "out")
+        collection::EnumDefinitions* enum_definitions = nullptr) :
+        out_(out),
+        participate_in_byte_trace_(participate_in_byte_trace),
+        enum_definitions_(enum_definitions)
     {
         if (clear_first)
         {
@@ -168,6 +176,22 @@ public:
 
     size_t size() const { return out_.size(); }
 
+    template <typename EnumT, typename ValueType = std::remove_cv_t<std::remove_reference_t<EnumT>>,
+              std::enable_if_t<std::is_enum_v<ValueType>, int> = 0>
+    void observeEnum(const EnumT value, const std::string& enum_type_name = {})
+    {
+        //TODO cnyce: no valid case where this is null
+        if (enum_definitions_)
+        {
+            enum_definitions_->observe(value, enum_type_name);
+        }
+    }
+
+    void setEnumDefinitions(collection::EnumDefinitions* enum_definitions)
+    {
+        enum_definitions_ = enum_definitions;
+    }
+
     /// Read-only view of bytes written so far (e.g. for post-append trace introspection).
     const std::vector<char>& byte_storage() const { return out_; }
 
@@ -180,6 +204,7 @@ public:
 private:
     std::vector<char>& out_;
     bool participate_in_byte_trace_ = true;
+    collection::EnumDefinitions* enum_definitions_ = nullptr;
 };
 
 /// Serialize an enum as its fixed-width underlying integer, with an optional byte-trace label.
