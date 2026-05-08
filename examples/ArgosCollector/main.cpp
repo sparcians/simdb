@@ -2166,7 +2166,7 @@ void TestDirectCollectPairs()
     TEST_METHOD_INIT;
 
     using pod_pair = std::pair<int, double>;
-    (void)simdb::collection::createDataTypeHier<pod_pair>();
+    using hex_pair = std::pair<InstType, uint64_t>;
 
     uint64_t tick = 0;
     constexpr size_t heartbeat = 3;
@@ -2182,7 +2182,6 @@ void TestDirectCollectPairs()
     auto string_pair_collector = collection.collectScalarManually<string_pair>(
         "string_pair", "root");
 
-    using hex_pair = std::pair<double, uint64_t>;
     auto hex_pair_collector = collection.collectScalarManually<hex_pair>(
         "hex_pair", "root", simdb::collection::PairFieldFormatters{simdb::collection::None, simdb::collection::HEX});
 
@@ -2202,7 +2201,7 @@ void TestDirectCollectPairs()
     tick = 1;
     pod_pair_collector->collect(std::make_pair(4, 5.5));
     string_pair_collector->collect(std::make_pair(7, std::string("hello")));
-    hex_pair_collector->collect(std::make_pair(3.5, 0x1234ULL));
+    hex_pair_collector->collect(std::make_pair(InstType::MEM, 0x1234ULL));
 
     EXPECT_TRUE(pod_pair_collector->traceSerializationRootTypeBytes() > 0);
     EXPECT_TRUE(string_pair_collector->traceSerializationRootTypeBytes() > 0);
@@ -2216,8 +2215,7 @@ void TestDirectCollectTuples()
 {
     TEST_METHOD_INIT;
 
-    using mixed_tuple = std::tuple<double, std::string, uint64_t>;
-    (void)simdb::collection::createDataTypeHier<mixed_tuple>();
+    using mixed_tuple = std::tuple<double, std::string, uint64_t, InstType>;
 
     uint64_t tick = 0;
     constexpr size_t heartbeat = 3;
@@ -2231,8 +2229,9 @@ void TestDirectCollectTuples()
         "root",
         std::array<simdb::collection::SpecialFormatters,
                     std::tuple_size_v<mixed_tuple>>{{simdb::collection::None,
-                                                    simdb::collection::None,
-                                                    simdb::collection::HEX}});
+                                                     simdb::collection::None,
+                                                     simdb::collection::HEX,
+                                                     simdb::collection::None}});
 
     simdb::AppManagers app_mgrs;
     app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
@@ -2248,7 +2247,11 @@ void TestDirectCollectTuples()
     app_mgrs.openPipelines();
 
     tick = 1;
-    tuple_collector->collect(std::make_tuple(1.5, std::string("tuple_msg"), 0xff00ULL));
+    tuple_collector->collect(std::make_tuple(
+        1.5,
+        std::string("tuple_msg"),
+        0xff00ULL,
+        InstType::CSR));
 
     EXPECT_TRUE(tuple_collector->traceSerializationRootTypeBytes() > 0);
 
@@ -2259,7 +2262,6 @@ void TestDirectCollectTuples()
 void TestDirectCollectInstGroup()
 {
     //TEST_METHOD_INIT;
-    //(void)simdb::collection::createDataTypeHier<InstGroup>();
 }
 
 int main(int argc, char** argv)
