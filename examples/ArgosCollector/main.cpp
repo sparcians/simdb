@@ -1943,6 +1943,174 @@ void GenTraceForSparseContainers()
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true);
 }
 
+/// Tests that std::pair and std::tuple (and any type providing operator<<) can be collected
+/// via the new ARGOS_STRINGIFY macro. The pair/tuple is serialized as a single TinyStrings
+/// id (uint32_t) representing the string built from each element's operator<<.
+class Offense
+{
+public:
+    enum class Position { QB, RB, WR, TE, __COUNT__ };
+    using player_name = std::pair<std::string, std::string>; // Last,First
+    using player_info = std::pair<player_name, Position>;
+    // Last, First, Position, jersey number, years experience -- exercises std::tuple stringification.
+    using player_card = std::tuple<std::string, std::string, Position, uint32_t, uint32_t>;
+
+    Offense()
+    {
+        // 2025 Baltimore Ravens offensive roster
+        roster_ = {
+            {{"Jackson", "Lamar"},      Position::QB},
+            {{"Huntley", "Tyler"},      Position::QB},
+            {{"Henry", "Derrick"},      Position::RB},
+            {{"Hill", "Justice"},       Position::RB},
+            {{"Mitchell", "Keaton"},    Position::RB},
+            {{"Flowers", "Zay"},        Position::WR},
+            {{"Bateman", "Rashod"},     Position::WR},
+            {{"Hopkins", "DeAndre"},    Position::WR},
+            {{"Andrews", "Mark"},       Position::TE},
+            {{"Likely", "Isaiah"},      Position::TE}
+        };
+
+        team_captain_ = {"Jackson", "Lamar", Position::QB, 8u, 8u};
+        last_random_ = roster_.front();
+    }
+
+    player_name getQB1() const { return getFirstPlayerForPosition_(Position::QB); }
+    player_name getRB1() const { return getFirstPlayerForPosition_(Position::RB); }
+    player_name getWR1() const { return getFirstPlayerForPosition_(Position::WR); }
+    player_name getTE1() const { return getFirstPlayerForPosition_(Position::TE); }
+
+    /// Returns the most recently picked player. Stays stable across multiple
+    /// calls so byte serialization and trace value strings agree.
+    player_info getPlayerAtRandom() const { return last_random_; }
+
+    /// Tuple-valued getter exercising ARGOS_STRINGIFY across std::tuple.
+    player_card getCaptain() const { return team_captain_; }
+
+    /// Roll a fresh random player; subsequent getPlayerAtRandom() calls return this player.
+    void pickRandom()
+    {
+        const auto idx = randomInt<size_t>(0, roster_.size() - 1);
+        last_random_ = roster_[idx];
+    }
+
+    /// Force a specific roster index; useful for deterministic CARRY/FULL coverage.
+    void pickByIndex(size_t idx)
+    {
+        last_random_ = roster_.at(idx);
+    }
+
+    size_t rosterSize() const { return roster_.size(); }
+
+    class ArgosCollector : public simdb::collection::ArgosCollectorBase<Offense>
+    {
+    public:
+        ARGOS_STRINGIFY(qb1,     &Offense::getQB1);
+        ARGOS_STRINGIFY(rb1,     &Offense::getRB1);
+        ARGOS_STRINGIFY(wr1,     &Offense::getWR1);
+        ARGOS_STRINGIFY(te1,     &Offense::getTE1);
+        ARGOS_STRINGIFY(any,     &Offense::getPlayerAtRandom);
+        ARGOS_STRINGIFY(captain, &Offense::getCaptain);
+    };
+
+private:
+    player_name getFirstPlayerForPosition_(const Position position) const
+    {
+        for (const auto& [player, pos] : roster_)
+        {
+            if (pos == position)
+            {
+                return player;
+            }
+        }
+
+        throw simdb::DBException("Coult not find player");
+        return {};
+    }
+
+    player_card team_captain_;
+    std::vector<player_info> roster_;
+    player_info last_random_;
+};
+
+inline std::ostream& operator<<(std::ostream& os, const Offense::Position pos)
+{
+    switch (pos)
+    {
+    case Offense::Position::QB:        os << "QB"; break;
+    case Offense::Position::RB:        os << "RB"; break;
+    case Offense::Position::WR:        os << "WR"; break;
+    case Offense::Position::TE:        os << "TE"; break;
+    case Offense::Position::__COUNT__: throw simdb::DBException("Invalid enum");
+    }
+    return os;
+}
+
+void TestStringifiedFields()
+{
+    TEST_METHOD_INIT;
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 3;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    auto offense_collector = collection.collectScalarManually<Offense>(
+        "offense", "root");
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    Offense offense;
+
+    // Tick 1: baseline FULL with QB1 selected as the random pick.
+    tick = 1;
+    offense.pickByIndex(0);
+    offense_collector->collect(offense);
+
+    // Tick 2: same data again -> CARRY for the struct minifier.
+    tick = 2;
+    offense_collector->collect(offense);
+
+    // Tick 3: change the random pick -> different bytes for "any" -> FULL.
+    tick = 3;
+    offense.pickByIndex(2); // Derrick Henry
+    offense_collector->collect(offense);
+
+    // Walk every roster entry to exercise stringification of pair-of-pair-of-strings + enum.
+    for (size_t i = 0; i < offense.rosterSize(); ++i)
+    {
+        ++tick;
+        offense.pickByIndex(i);
+        offense_collector->collect(offense);
+    }
+
+    // Force one explicit FULL->CARRY pair so action coverage is deterministic.
+    ++tick;
+    offense.pickByIndex(0);
+    offense_collector->collect(offense);
+    ++tick;
+    offense_collector->collect(offense);
+
+    EXPECT_TRUE(offense_collector->minifierSawAllActions());
+    EXPECT_TRUE(offense_collector->traceSerializationRootTypeBytes() > 0);
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
+}
+
 void TestUiSmokeRejectsNonArgosDB()
 {
     if (std::getenv("DISPLAY") == nullptr && std::getenv("WAYLAND_DISPLAY") == nullptr)
@@ -1984,6 +2152,7 @@ int main(int argc, char** argv)
     TestMixedAutoManualLifecycle();
     TestPointers();
     TestMultiArgosCollectors();
+    TestStringifiedFields();
     TestUiSmokeRejectsNonArgosDB();
 
     // TODO cnyce: these tests are redundant

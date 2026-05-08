@@ -4,10 +4,12 @@
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -238,6 +240,76 @@ struct has_ostream_insertion<
 
 template <typename T>
 inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
+
+// Stringification helpers for ARGOS_STRINGIFY: descend into std::pair / std::tuple, and
+// fall back to operator<< for everything else. The recursion is structural so every
+// element in the pair/tuple only needs to provide operator<<.
+template <typename T>
+struct is_std_pair : std::false_type {};
+
+template <typename A, typename B>
+struct is_std_pair<std::pair<A, B>> : std::true_type {};
+
+template <typename T>
+struct is_std_tuple : std::false_type {};
+
+template <typename... Ts>
+struct is_std_tuple<std::tuple<Ts...>> : std::true_type {};
+
+template <typename T>
+std::string argos_stringify(const T& value);
+
+template <typename Tuple, std::size_t... Is>
+std::string argos_stringify_tuple_impl(const Tuple& t, std::index_sequence<Is...>)
+{
+    std::ostringstream oss;
+    oss << '(';
+    std::size_t i = 0;
+    auto append = [&](const auto& v) {
+        if (i++ > 0)
+        {
+            oss << ", ";
+        }
+        oss << argos_stringify(v);
+    };
+    (append(std::get<Is>(t)), ...);
+    oss << ')';
+    return oss.str();
+}
+
+template <typename T>
+std::string argos_stringify(const T& value)
+{
+    using bare = remove_cvref_t<T>;
+    if constexpr (is_std_pair<bare>::value)
+    {
+        return std::string{"("} + argos_stringify(value.first)
+             + ", " + argos_stringify(value.second) + ")";
+    }
+    else if constexpr (is_std_tuple<bare>::value)
+    {
+        return argos_stringify_tuple_impl(
+            value,
+            std::make_index_sequence<std::tuple_size<bare>::value>{});
+    }
+    else if constexpr (std::is_same_v<bare, std::string>)
+    {
+        return value;
+    }
+    else if constexpr (std::is_pointer_v<bare> &&
+                       std::is_same_v<std::remove_cv_t<std::remove_pointer_t<bare>>, char>)
+    {
+        return value ? std::string{value} : std::string{};
+    }
+    else
+    {
+        static_assert(has_ostream_insertion_v<bare>,
+                      "ARGOS_STRINGIFY requires every leaf element to provide operator<<");
+        std::ostringstream oss;
+        oss << value;
+        return oss.str();
+    }
+}
 
 // Bare getter return type (reference stripped) -> nested struct type for ArgosStructField.
 template <typename BareRet>
@@ -591,6 +663,76 @@ private:
     std::string description_;
 };
 
+// Stringified field (\c ARGOS_STRINGIFY): the getter may return any type whose elements
+// (recursively, for std::pair / std::tuple) provide \c operator<<. The string is interned
+// via \ref TinyStrings and serialized as a uint32 string id, matching std::string fields.
+template <typename OwnerT, auto Getter>
+class ArgosStringifiedField final : public ArgosFieldBase
+{
+    using traits = detail::getter_traits<Getter>;
+    using raw_return_t = typename traits::return_t;
+    using value_t = detail::remove_cvref_t<raw_return_t>;
+
+public:
+    ArgosStringifiedField(
+        ArgosCollectorBase<OwnerT>* owner,
+        const char* name,
+        const char* description = nullptr)
+        : name_(name)
+        , type_name_(demangle_type<value_t>())
+        , description_(description && *description ? std::string{description} : std::string{})
+    {
+        static_assert(!std::is_enum_v<value_t>,
+                      "ARGOS_STRINGIFY does not support raw enum getters; use ARGOS_COLLECT");
+        static_assert(
+            detail::has_ostream_insertion_v<value_t> ||
+            detail::is_std_pair<value_t>::value ||
+            detail::is_std_tuple<value_t>::value ||
+            std::is_same_v<value_t, std::string>,
+            "ARGOS_STRINGIFY requires the getter return type (or every leaf inside it) "
+            "to provide operator<<");
+        owner->addField_(this);
+    }
+
+    std::string getName() const override { return name_; }
+    std::string getDescription() const override { return description_; }
+    std::string getTypeName() const override { return type_name_; }
+    bool isEnumField() const override { return false; }
+    bool isStructField() const override { return false; }
+    PodTypeKind getPodTypeKind() const override { return PodTypeKind::str; }
+    EnumBackingKind getEnumBackingKind() const override { return EnumBackingKind::i32; }
+    std::string getStructTypeName() const override { return {}; }
+    std::vector<const ArgosFieldBase*> getStructFields() const override { return {}; }
+    SpecialFormatters getSpecialFormatter() const override { return None; }
+
+    void writeBufferErased(StreamBuffer& buffer, const void* owner_void) const override
+    {
+        if (tiny_strings_ == nullptr)
+        {
+            throw DBException("TinyStrings not set before stringified collection");
+        }
+        const auto* owner = static_cast<const OwnerT*>(owner_void);
+        const std::string s = detail::argos_stringify(std::invoke(Getter, owner));
+        const uint32_t id = tiny_strings_->getStringID(s);
+        buffer.append(id);
+    }
+
+    std::string getValueStringErased(const void* owner_void) const override
+    {
+        const auto* owner = static_cast<const OwnerT*>(owner_void);
+        return detail::argos_stringify(std::invoke(Getter, owner));
+    }
+
+    const void* getStructPtrErased(const void*) const override { return nullptr; }
+    void setTinyStrings(TinyStrings<>* tiny_strings) override { tiny_strings_ = tiny_strings; }
+
+private:
+    std::string name_;
+    std::string type_name_;
+    std::string description_;
+    TinyStrings<>* tiny_strings_ = nullptr;
+};
+
 namespace detail {
 
 template <typename OwnerT, auto Getter>
@@ -686,3 +828,19 @@ using auto_field_t = std::conditional_t<
 #define ARGOS_FLATTEN(getter_ptr)                                                             \
     simdb::collection::ArgosStructField<collected_type, getter_ptr>                           \
         ARGOS_COLLECT_CAT(argos_collect_struct_, __COUNTER__){this, ""}
+
+// Stringified scalar field: the getter may return std::pair<...>, std::tuple<...>, or any
+// type whose leaf elements provide operator<<. The composed string is interned via
+// TinyStrings and serialized as a uint32 string id (same wire shape as a std::string field).
+#define ARGOS_STRINGIFY_SELECT(_1, _2, _3, IMPL, ...) IMPL
+
+#define ARGOS_STRINGIFY(...)                                                                  \
+    ARGOS_STRINGIFY_SELECT(__VA_ARGS__, ARGOS_STRINGIFY_3, ARGOS_STRINGIFY_2)(__VA_ARGS__)
+
+#define ARGOS_STRINGIFY_2(field_name, getter_ptr)                                             \
+    simdb::collection::ArgosStringifiedField<collected_type, getter_ptr>                      \
+        ARGOS_COLLECT_CAT(argos_collect_stringify_, __COUNTER__){this, #field_name, nullptr}
+
+#define ARGOS_STRINGIFY_3(field_name, getter_ptr, desc)                                       \
+    simdb::collection::ArgosStringifiedField<collected_type, getter_ptr>                      \
+        ARGOS_COLLECT_CAT(argos_collect_stringify_, __COUNTER__){this, #field_name, desc}
