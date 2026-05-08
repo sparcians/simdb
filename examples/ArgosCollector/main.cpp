@@ -5,6 +5,7 @@
 #include "simdb/apps/argos/DataTypeHierarchy.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -15,9 +16,18 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
+// Run from the CMake build dir for this target (e.g. debug/examples/
+// ArgosCollector), never the repo root: traces and *.trace.meta land in cwd.
+// Typical: ~/simdb-collector-v3/debug/examples/ArgosCollector or a temp cwd;
+// see examples/ArgosCollector/README.md.
 /// This test shows how to use the SimDB data collection system for Argos.
 TEST_INIT;
 
@@ -50,6 +60,20 @@ bool shouldRunUiSmoke()
         return std::string(env) == "1";
     }
     return ARGOS_UI_SMOKE_DEFAULT != 0;
+}
+
+/// Keep in sync with `examples/ArgosCollector/ui_smoke.py` `_EXIT_SKIP_UI_SMOKE`.
+constexpr int UI_SMOKE_SKIPPED_EXIT = 125;
+
+int subprocessExitCode(int system_status)
+{
+#ifndef _WIN32
+    if (WIFEXITED(system_status))
+    {
+        return WEXITSTATUS(system_status);
+    }
+#endif
+    return -1;
 }
 
 std::mt19937_64& testRng()
@@ -396,14 +420,19 @@ void MaybeRunUiSmokeTest(simdb::DatabaseManager* db_mgr, const bool expect_pass 
     cmd << " --db-file " << std::quoted(db_path);
     cmd << " --timeout-ms 1000";
 
-    const auto rc = std::system(cmd.str().c_str());
+    const int status = std::system(cmd.str().c_str());
+    const int code = subprocessExitCode(status);
+    if (code == UI_SMOKE_SKIPPED_EXIT)
+    {
+        return;
+    }
     if (expect_pass)
     {
-        EXPECT_EQUAL(rc, 0);
+        EXPECT_EQUAL(code, 0);
     }
     else
     {
-        EXPECT_NOTEQUAL(rc, 0);
+        EXPECT_NOTEQUAL(code, 0);
     }
 }
 
@@ -2185,9 +2214,46 @@ void TestDirectCollectPairs()
 
 void TestDirectCollectTuples()
 {
-    //TEST_METHOD_INIT;
-    //using test_tuple = std::tuple<int, float, InstType, std::string>;
-    //(void)simdb::collection::createDataTypeHier<test_tuple>();
+    TEST_METHOD_INIT;
+
+    using mixed_tuple = std::tuple<double, std::string, uint64_t>;
+    (void)simdb::collection::createDataTypeHier<mixed_tuple>();
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 3;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    auto tuple_collector = collection.collectScalarManually<mixed_tuple>(
+        "mixed_tuple",
+        "root",
+        std::array<simdb::collection::SpecialFormatters,
+                    std::tuple_size_v<mixed_tuple>>{{simdb::collection::None,
+                                                    simdb::collection::None,
+                                                    simdb::collection::HEX}});
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test_direct_tuple.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    tick = 1;
+    tuple_collector->collect(std::make_tuple(1.5, std::string("tuple_msg"), 0xff00ULL));
+
+    EXPECT_TRUE(tuple_collector->traceSerializationRootTypeBytes() > 0);
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
 }
 
 void TestDirectCollectInstGroup()

@@ -3,6 +3,9 @@ import argparse
 import os
 import sys
 
+# Matches ArgosCollector `MaybeRunUiSmokeTest`: cannot exercise UI → skip assertions.
+_EXIT_SKIP_UI_SMOKE = 125
+
 
 def _bootstrap_viewer_import_path():
     # ui_smoke.py lives in examples/ArgosCollector; viewer package is under python/argos.
@@ -25,7 +28,7 @@ def main():
 
     if not _has_display():
         print("ui_smoke: skip (no DISPLAY/WAYLAND_DISPLAY set)")
-        return 0
+        return _EXIT_SKIP_UI_SMOKE
 
     _bootstrap_viewer_import_path()
 
@@ -34,7 +37,7 @@ def main():
     except ModuleNotFoundError as ex:
         if ex.name == "wx":
             print(f"ui_smoke: skip ({ex})")
-            return 0
+            return _EXIT_SKIP_UI_SMOKE
         raise
 
     from viewer.model.workspace import Workspace

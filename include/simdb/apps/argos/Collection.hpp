@@ -18,9 +18,11 @@
 #include <cstdint>
 #include <fstream>
 #include <functional>
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -62,6 +64,9 @@ struct PairFieldFormatters
     SpecialFormatters first = None;
     SpecialFormatters second = None;
 };
+
+template <typename TupleT>
+using TupleScalarLayout = std::array<ScalarFieldOption, std::tuple_size_v<TupleT>>;
 
 /// \class Collection
 /// \brief Holds one \ref TimeT for all clock domains and a \ref TimeDomainCollection per clock.
@@ -236,6 +241,67 @@ public:
                 std::move(dtype_hier));
         collection->addCollectable(path, collectable, false /*manually collect*/);
         return collectable;
+    }
+
+    template <typename CollectableT>
+    std::enable_if_t<
+        detail::is_std_pair_product_v<type_traits::remove_any_pointer_t<CollectableT>>,
+        std::shared_ptr<ScalarCollector<CollectableT>>>
+    collectScalarManually(
+        const std::string& path,
+        const std::string& clk_name,
+        const PairScalarLayout& layout)
+    {
+        verifyNoDupPaths_(path);
+        using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
+        auto dtype_hier = dtype_inspector_.registerType<ElemT>();
+        dtype_hier->setPairScalarLayout(layout);
+        auto collection = getCollection_(clk_name, true /*must exist*/);
+        auto collectable =
+            std::make_shared<ScalarCollector<CollectableT>>(collection, heartbeat_,
+                std::move(dtype_hier));
+        collection->addCollectable(path, collectable, false /*manually collect*/);
+        return collectable;
+    }
+
+    template <typename CollectableT>
+    std::enable_if_t<
+        detail::is_std_tuple_product_v<type_traits::remove_any_pointer_t<CollectableT>>,
+        std::shared_ptr<ScalarCollector<CollectableT>>>
+    collectScalarManually(
+        const std::string& path,
+        const std::string& clk_name,
+        const TupleScalarLayout<type_traits::remove_any_pointer_t<CollectableT>>& layout)
+    {
+        verifyNoDupPaths_(path);
+        using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
+        auto dtype_hier = dtype_inspector_.registerType<ElemT>();
+        dtype_hier->setTupleScalarLayout(layout);
+        auto collection = getCollection_(clk_name, true /*must exist*/);
+        auto collectable =
+            std::make_shared<ScalarCollector<CollectableT>>(collection, heartbeat_,
+                std::move(dtype_hier));
+        collection->addCollectable(path, collectable, false /*manually collect*/);
+        return collectable;
+    }
+
+    template <typename CollectableT>
+    std::enable_if_t<
+        detail::is_std_tuple_product_v<type_traits::remove_any_pointer_t<CollectableT>>,
+        std::shared_ptr<ScalarCollector<CollectableT>>>
+    collectScalarManually(
+        const std::string& path,
+        const std::string& clk_name,
+        const std::array<SpecialFormatters, std::tuple_size_v<type_traits::remove_any_pointer_t<
+            CollectableT>>>& formatters_only)
+    {
+        using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
+        TupleScalarLayout<ElemT> layout{};
+        for (std::size_t i = 0; i < std::tuple_size_v<ElemT>; ++i)
+        {
+            layout[i].formatter = formatters_only[i];
+        }
+        return collectScalarManually<CollectableT>(path, clk_name, layout);
     }
 
     /// \brief Create a collectable for a queue-like data structure, where ValueType is

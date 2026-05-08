@@ -13,6 +13,8 @@ _INTEGRAL_DISPLAY_DTYPES = frozenset(
         "unsigned int",
         "long",
         "unsigned long",
+        "long long",
+        "unsigned long long",
     }
 )
 

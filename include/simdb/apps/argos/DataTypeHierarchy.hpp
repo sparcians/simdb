@@ -7,14 +7,17 @@
 #include "simdb/utils/StreamBuffer.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
-#include <memory>
 #include <map>
-#include <utility>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -70,6 +73,21 @@ enum SpecialFormatters
 {
     None,
     HEX
+};
+
+/// Per-field options for root-level product-type scalars (\c std::pair / \c std::tuple).
+/// Leave \ref field_name empty to keep hierarchy defaults (\c first / \c second, or \c t0,\c t1,\c …).
+struct ScalarFieldOption
+{
+    std::string field_name;
+    SpecialFormatters formatter = None;
+};
+
+/// Optional field renames plus formatters for a root \c std::pair scalar registration.
+struct PairScalarLayout
+{
+    ScalarFieldOption first{};
+    ScalarFieldOption second{};
 };
 
 inline std::string specialFormatterToString(SpecialFormatters formatter)
@@ -259,6 +277,146 @@ struct is_std_pair_product<std::pair<A, B>> : std::true_type {};
 template <typename T>
 inline constexpr bool is_std_pair_product_v = is_std_pair_product<remove_cvref_t<T>>::value;
 
+template <typename T>
+struct is_std_tuple_product : std::false_type {};
+
+template <typename... Ts>
+struct is_std_tuple_product<std::tuple<Ts...>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_std_tuple_product_v = is_std_tuple_product<remove_cvref_t<T>>::value;
+
+template <typename TupleT>
+void buildTupleProductChildren(DataTypeNode& node);
+
+template <typename TupleT>
+void installTupleProductSubtreeWriters(DataTypeNode& node);
+
+template <typename TupleT, std::size_t... Is>
+void throw_if_tuple_hex_invalid(const std::array<ScalarFieldOption, sizeof...(Is)>& elems,
+                                std::index_sequence<Is...>)
+{
+    if (((elems[Is].formatter == HEX &&
+          !supports_hex_formatter_v<std::tuple_element_t<Is, TupleT>>) ||
+         ...))
+    {
+        throw DBException("HEX formatter is only supported for integral POD fields");
+    }
+}
+
+/// Lexical ASCII requirement for dotted collection paths usable from Python tab-completion:
+/// identifiers only, rejecting Python keywords (ASCII subset; no Unicode identifiers).
+inline bool isValidPythonAsciiIdentifierForCollectionPath(std::string_view name)
+{
+    if (name.empty())
+    {
+        return false;
+    }
+    const unsigned char c0 = static_cast<unsigned char>(name[0]);
+    if (!(std::isalpha(static_cast<int>(c0)) || c0 == '_'))
+    {
+        return false;
+    }
+    for (size_t i = 1; i < name.size(); ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if (!(std::isalnum(static_cast<int>(c)) || c == '_'))
+        {
+            return false;
+        }
+    }
+
+    std::string lower;
+    lower.reserve(name.size());
+    for (unsigned char c : name)
+    {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    static constexpr const char* const k_kw[] = {"and",
+                                                 "as",
+                                                 "assert",
+                                                 "async",
+                                                 "await",
+                                                 "break",
+                                                 "case",
+                                                 "class",
+                                                 "continue",
+                                                 "def",
+                                                 "del",
+                                                 "elif",
+                                                 "else",
+                                                 "except",
+                                                 "false",
+                                                 "finally",
+                                                 "for",
+                                                 "from",
+                                                 "global",
+                                                 "if",
+                                                 "import",
+                                                 "in",
+                                                 "is",
+                                                 "lambda",
+                                                 "match",
+                                                 "nonlocal",
+                                                 "none",
+                                                 "not",
+                                                 "or",
+                                                 "pass",
+                                                 "raise",
+                                                 "return",
+                                                 "true",
+                                                 "try",
+                                                 "while",
+                                                 "with",
+                                                 "yield"};
+
+    for (const char* kw : k_kw)
+    {
+        if (lower == kw)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline void throwIfDuplicateSiblingFieldNames(std::initializer_list<std::string_view> names)
+{
+    std::unordered_set<std::string> seen;
+    for (std::string_view n : names)
+    {
+        if (!seen.insert(std::string{n}).second)
+        {
+            throw DBException("Duplicate sibling field name: ") << n;
+        }
+    }
+}
+
+inline void throwIfDuplicateSiblingFieldNamesOrdered(const std::vector<std::string>& names_ordered)
+{
+    std::unordered_set<std::string> seen;
+    for (const std::string& n : names_ordered)
+    {
+        if (!seen.insert(n).second)
+        {
+            throw DBException("Duplicate sibling field name: ") << n;
+        }
+    }
+}
+
+inline void enforceCollectionPathFieldIdentifierOrThrow(std::string_view logical_context,
+                                                        std::string_view field_name)
+{
+    if (!isValidPythonAsciiIdentifierForCollectionPath(field_name))
+    {
+        throw DBException("Field name '")
+            << std::string{field_name}
+            << "' is not a valid Python identifier segment (see context '" << std::string{logical_context}
+            << "')";
+    }
+}
+
 /// After moving a \c DataTypeNode subtree, fix \c parent links (addresses change).
 inline void relinkParentPointers(DataTypeNode* subtree_root, DataTypeNode* new_parent)
 {
@@ -357,6 +515,10 @@ void reattachErasedWritersAfterSubtreeSteal(DataTypeNode& node)
             }
         };
     }
+    else if constexpr (is_std_tuple_product_v<value_t>)
+    {
+        installTupleProductSubtreeWriters<value_t>(node);
+    }
     else if constexpr (is_pod_leaf_v<value_t>)
     {
         if constexpr (std::is_same_v<value_t, std::string>)
@@ -401,6 +563,9 @@ public:
     virtual ~DataTypeHierarchyBase() = default;
     virtual const DataTypeNode& getRoot() const = 0;
 };
+
+template <typename RootT>
+class DataTypeHierarchy;
 
 template <typename RootT>
 class DataTypeHierarchy : public DataTypeHierarchyBase
@@ -455,32 +620,101 @@ public:
 
     template <typename T = RootT>
     std::enable_if_t<detail::is_std_pair_product_v<T>, void>
-    setPairChildSpecialFormatters(
-        const SpecialFormatters first_formatter,
-        const SpecialFormatters second_formatter)
+    setPairScalarLayout(const PairScalarLayout& layout)
     {
         using first_t = typename T::first_type;
         using second_t = typename T::second_type;
 
-        if ((first_formatter == HEX && !detail::supports_hex_formatter_v<first_t>) ||
-            (second_formatter == HEX && !detail::supports_hex_formatter_v<second_t>))
+        if (root_.children.size() != 2 || !root_.children[0] || !root_.children[1])
+        {
+            throw DBException("Cannot apply scalar layout to malformed pair hierarchy");
+        }
+
+        const std::string n0 =
+            layout.first.field_name.empty() ? root_.children[0]->field_name : layout.first.field_name;
+        const std::string n1 =
+            layout.second.field_name.empty() ? root_.children[1]->field_name : layout.second.field_name;
+
+        detail::enforceCollectionPathFieldIdentifierOrThrow(std::string_view{"std::pair"}, n0);
+        detail::enforceCollectionPathFieldIdentifierOrThrow(std::string_view{"std::pair"}, n1);
+        detail::throwIfDuplicateSiblingFieldNamesOrdered(std::vector<std::string>{n0, n1});
+
+        if ((layout.first.formatter == HEX && !detail::supports_hex_formatter_v<first_t>) ||
+            (layout.second.formatter == HEX && !detail::supports_hex_formatter_v<second_t>))
         {
             throw DBException("HEX formatter is only supported for integral POD fields");
         }
 
-        if (root_.children.size() != 2 || !root_.children[0] || !root_.children[1])
+        root_.children[0]->field_name = n0;
+        root_.children[1]->field_name = n1;
+        root_.children[0]->special_formatter = specialFormatterToString(layout.first.formatter);
+        root_.children[1]->special_formatter = specialFormatterToString(layout.second.formatter);
+    }
+
+    template <typename T = RootT>
+    std::enable_if_t<detail::is_std_pair_product_v<T>, void>
+    setPairChildSpecialFormatters(const SpecialFormatters first_formatter,
+                                  const SpecialFormatters second_formatter)
+    {
+        setPairScalarLayout(
+            PairScalarLayout{ScalarFieldOption{{}, first_formatter}, ScalarFieldOption{{}, second_formatter}});
+    }
+
+    template <typename T = RootT, std::size_t N>
+    std::enable_if_t<detail::is_std_tuple_product_v<T> && (N == std::tuple_size_v<T>), void>
+    setTupleScalarLayout(const std::array<ScalarFieldOption, N>& elems)
+    {
+        if (root_.children.size() != N)
         {
-            throw DBException("Cannot apply pair formatters to malformed pair hierarchy");
+            throw DBException("Cannot apply scalar layout to malformed tuple hierarchy");
         }
-        root_.children[0]->special_formatter = specialFormatterToString(first_formatter);
-        root_.children[1]->special_formatter = specialFormatterToString(second_formatter);
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            if (!root_.children[i])
+            {
+                throw DBException("Cannot apply scalar layout to malformed tuple hierarchy");
+            }
+        }
+
+        detail::throw_if_tuple_hex_invalid<T>(
+            elems, std::make_index_sequence<std::tuple_size_v<T>>{});
+
+        std::vector<std::string> resolved;
+        resolved.reserve(N);
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            const std::string nm = elems[i].field_name.empty() ? root_.children[i]->field_name
+                                                                  : elems[i].field_name;
+            std::ostringstream ctx;
+            ctx << "std::tuple[" << i << ']';
+            detail::enforceCollectionPathFieldIdentifierOrThrow(ctx.str(), nm);
+            resolved.push_back(nm);
+        }
+        detail::throwIfDuplicateSiblingFieldNamesOrdered(resolved);
+
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            root_.children[i]->field_name = resolved[i];
+            root_.children[i]->special_formatter = specialFormatterToString(elems[i].formatter);
+        }
     }
 
 private:
+    friend struct HierarchyRootStealer;
     template <typename T>
     friend std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataTypeHier();
 
     DataTypeNode root_;
+};
+
+/// Steals \ref DataTypeHierarchy::root_ after \c createDataTypeHier for nested product children.
+struct HierarchyRootStealer
+{
+    template <typename ElemT>
+    static void move_root_into_node(DataTypeHierarchy<ElemT>& hier, DataTypeNode& sink)
+    {
+        sink = std::move(hier.root_);
+    }
 };
 
 template <typename T>
@@ -744,6 +978,16 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
 
         node.effective_color_key.clear();
     }
+    else if constexpr (detail::is_std_tuple_product_v<value_t>)
+    {
+        static_assert(std::tuple_size_v<value_t> > 0,
+                      "Unsupported empty std::tuple in DataTypeHierarchy");
+        node.kind = NodeKind::Struct;
+        node.effective_color_key.clear();
+
+        detail::buildTupleProductChildren<value_t>(node);
+        detail::installTupleProductSubtreeWriters<value_t>(node);
+    }
     else if constexpr (detail::is_pod_leaf_v<value_t>)
     {
         node.kind = NodeKind::Pod;
@@ -791,5 +1035,61 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
 
     return hier;
 }
+
+namespace detail {
+
+template <typename TupleT, std::size_t I>
+void tuple_append_one_product_child(DataTypeNode& node)
+{
+    using Elem = std::tuple_element_t<I, TupleT>;
+    auto hier = createDataTypeHier<Elem>();
+    auto child = std::make_unique<DataTypeNode>();
+    HierarchyRootStealer::move_root_into_node(*hier, *child);
+
+    std::ostringstream field;
+    field << 't' << I;
+    child->field_name = field.str();
+    enforceCollectionPathFieldIdentifierOrThrow("std::tuple", child->field_name);
+
+    relinkParentPointers(child.get(), &node);
+    node.children.emplace_back(std::move(child));
+}
+
+template <typename TupleT, std::size_t... Is>
+void tuple_build_each(DataTypeNode& node, std::index_sequence<Is...>)
+{
+    [[maybe_unused]] const int build_all[] = {(tuple_append_one_product_child<TupleT, Is>(node), 0)...};
+    (void)build_all;
+}
+
+template <typename TupleT>
+void buildTupleProductChildren(DataTypeNode& node)
+{
+    tuple_build_each<TupleT>(node, std::make_index_sequence<std::tuple_size_v<TupleT>>{});
+}
+
+template <typename TupleT, std::size_t... Is>
+void tuple_finalize_product(DataTypeNode& node, std::index_sequence<Is...>)
+{
+    ((void)(reattachErasedWritersAfterSubtreeSteal<std::tuple_element_t<Is, TupleT>>(*node.children[Is]),
+            0), ...);
+
+    constexpr std::size_t arity = sizeof...(Is);
+    std::array<DataTypeNode*, arity> ch{node.children[Is].get()...};
+    node.write_erased = [ch](StreamBuffer& buffer, const void* void_tuple, FieldTraceSink* field_trace_sink) {
+        const auto* p = static_cast<const TupleT*>(void_tuple);
+        ((void)((ch[Is] && ch[Is]->write_erased &&
+                 (ch[Is]->write_erased(buffer, &std::get<Is>(*p), field_trace_sink), 0))),
+         ...);
+    };
+}
+
+template <typename TupleT>
+void installTupleProductSubtreeWriters(DataTypeNode& node)
+{
+    tuple_finalize_product<TupleT>(node, std::make_index_sequence<std::tuple_size_v<TupleT>>{});
+}
+
+} // namespace detail
 
 } // namespace simdb::collection
