@@ -2153,6 +2153,10 @@ void TestDirectCollectPairs()
     auto string_pair_collector = collection.collectScalarManually<string_pair>(
         "string_pair", "root");
 
+    using hex_pair = std::pair<double, uint64_t>;
+    auto hex_pair_collector = collection.collectScalarManually<hex_pair>(
+        "hex_pair", "root", simdb::collection::PairFieldFormatters{simdb::collection::None, simdb::collection::HEX});
+
     simdb::AppManagers app_mgrs;
     app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
 
@@ -2169,9 +2173,11 @@ void TestDirectCollectPairs()
     tick = 1;
     pod_pair_collector->collect(std::make_pair(4, 5.5));
     string_pair_collector->collect(std::make_pair(7, std::string("hello")));
+    hex_pair_collector->collect(std::make_pair(3.5, 0x1234ULL));
 
     EXPECT_TRUE(pod_pair_collector->traceSerializationRootTypeBytes() > 0);
     EXPECT_TRUE(string_pair_collector->traceSerializationRootTypeBytes() > 0);
+    EXPECT_TRUE(hex_pair_collector->traceSerializationRootTypeBytes() > 0);
 
     app_mgrs.postSimLoopTeardown();
     POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);

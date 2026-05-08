@@ -23,6 +23,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace simdb::collection {
@@ -55,6 +56,12 @@ struct dtype_register_element
 } // namespace detail
 
 constexpr inline size_t DEFAULT_HEARTBEAT = 10;
+
+struct PairFieldFormatters
+{
+    SpecialFormatters first = None;
+    SpecialFormatters second = None;
+};
 
 /// \class Collection
 /// \brief Holds one \ref TimeT for all clock domains and a \ref TimeDomainCollection per clock.
@@ -170,16 +177,6 @@ public:
         }
     }
 
-    /// TODO cnyce: remove this when scalars have good widgets in Argos
-    /// Also, there is a chance that when the sparta_core_example ReorderBuffer
-    /// (which is non-scalar but has similar bug failure) bug is fixed, that
-    /// scalars will naturally be fixed too (at least for scalar structs)
-    void disableScalarCollection()
-    {
-        scalars_allowed_ = false;
-    }
-
-
     /// \brief Create a collectable for a scalar (integral/floating-point/enum/string/bool, or a
     /// struct-like object containing these types). Supports auto-collection and manual collection.
     /// \param path Dot-delimited path to the scalar that uniquely defines where this variable
@@ -193,11 +190,6 @@ public:
         const std::string& clk_name,
         const CollectableT* scalar)
     {
-        if (!scalars_allowed_)
-        {
-            return nullptr;
-        }
-
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
@@ -214,14 +206,30 @@ public:
         const std::string& path,
         const std::string& clk_name)
     {
-        if (!scalars_allowed_)
-        {
-            return nullptr;
-        }
-
         verifyNoDupPaths_(path);
         using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
         auto dtype_hier = dtype_inspector_.registerType<ElemT>();
+        auto collection = getCollection_(clk_name, true /*must exist*/);
+        auto collectable =
+            std::make_shared<ScalarCollector<CollectableT>>(collection, heartbeat_,
+                std::move(dtype_hier));
+        collection->addCollectable(path, collectable, false /*manually collect*/);
+        return collectable;
+    }
+
+    template <typename CollectableT>
+    std::enable_if_t<
+        detail::is_std_pair_product_v<type_traits::remove_any_pointer_t<CollectableT>>,
+        std::shared_ptr<ScalarCollector<CollectableT>>>
+    collectScalarManually(
+        const std::string& path,
+        const std::string& clk_name,
+        const PairFieldFormatters& formatters)
+    {
+        verifyNoDupPaths_(path);
+        using ElemT = type_traits::remove_any_pointer_t<CollectableT>;
+        auto dtype_hier = dtype_inspector_.registerType<ElemT>();
+        dtype_hier->setPairChildSpecialFormatters(formatters.first, formatters.second);
         auto collection = getCollection_(clk_name, true /*must exist*/);
         auto collectable =
             std::make_shared<ScalarCollector<CollectableT>>(collection, heartbeat_,
@@ -652,7 +660,6 @@ private:
     std::unique_ptr<PipelineStager<TimeT>> stager_;
     std::unique_ptr<simdb::utils::CollectionByteTraceSession> tracer_;
     std::string byte_trace_path_for_meta_;
-    bool scalars_allowed_ = true;
     EnumDefinitions* enum_definitions_ = nullptr;
 };
 

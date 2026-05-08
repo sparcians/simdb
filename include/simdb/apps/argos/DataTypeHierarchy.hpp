@@ -235,6 +235,11 @@ constexpr PodTypeKind getPodTypeKind()
     }
 }
 
+template <typename T>
+constexpr bool supports_hex_formatter_v =
+    std::is_integral_v<remove_cvref_t<T>> &&
+    !std::is_same_v<remove_cvref_t<T>, bool>;
+
 template <typename T, typename = void>
 struct has_argos_collector : std::false_type {};
 
@@ -446,6 +451,29 @@ public:
         {
             writeBuffer(buffer, *value, expected_num_bytes, field_trace_sink, enum_definitions);
         }
+    }
+
+    template <typename T = RootT>
+    std::enable_if_t<detail::is_std_pair_product_v<T>, void>
+    setPairChildSpecialFormatters(
+        const SpecialFormatters first_formatter,
+        const SpecialFormatters second_formatter)
+    {
+        using first_t = typename T::first_type;
+        using second_t = typename T::second_type;
+
+        if ((first_formatter == HEX && !detail::supports_hex_formatter_v<first_t>) ||
+            (second_formatter == HEX && !detail::supports_hex_formatter_v<second_t>))
+        {
+            throw DBException("HEX formatter is only supported for integral POD fields");
+        }
+
+        if (root_.children.size() != 2 || !root_.children[0] || !root_.children[1])
+        {
+            throw DBException("Cannot apply pair formatters to malformed pair hierarchy");
+        }
+        root_.children[0]->special_formatter = specialFormatterToString(first_formatter);
+        root_.children[1]->special_formatter = specialFormatterToString(second_formatter);
     }
 
 private:
