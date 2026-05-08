@@ -203,6 +203,49 @@ constexpr bool is_pod_leaf_v =
      std::is_standard_layout_v<remove_cvref_t<T>> &&
      !std::is_enum_v<remove_cvref_t<T>>);
 
+/// True iff \c getPodTypeKind<PodT>() would select a kind (mirrors \c createDataTypeHier POD branch).
+template <typename PodT>
+constexpr bool is_supported_pod_leaf_kind_v = [] {
+    using value_t = remove_cvref_t<PodT>;
+    if constexpr (std::is_same_v<value_t, std::string>)
+    {
+        return true;
+    }
+    else if constexpr (std::is_pointer_v<value_t> &&
+                       std::is_same_v<std::remove_cv_t<std::remove_pointer_t<value_t>>, char>)
+    {
+        return true;
+    }
+    else if constexpr (std::is_same_v<value_t, char>)
+    {
+        return true;
+    }
+    else if constexpr (std::is_same_v<value_t, double>)
+    {
+        return true;
+    }
+    else if constexpr (std::is_same_v<value_t, float>)
+    {
+        return true;
+    }
+    else if constexpr (std::is_same_v<value_t, bool>)
+    {
+        return true;
+    }
+    else if constexpr (std::is_integral_v<value_t> && std::is_signed_v<value_t>)
+    {
+        return sizeof(value_t) == 1 || sizeof(value_t) == 2 || sizeof(value_t) == 4 || sizeof(value_t) == 8;
+    }
+    else if constexpr (std::is_integral_v<value_t> && std::is_unsigned_v<value_t>)
+    {
+        return sizeof(value_t) == 1 || sizeof(value_t) == 2 || sizeof(value_t) == 4 || sizeof(value_t) == 8;
+    }
+    else
+    {
+        return false;
+    }
+}();
+
 template <typename PodT>
 constexpr PodTypeKind getPodTypeKind()
 {
@@ -1090,6 +1133,61 @@ void installTupleProductSubtreeWriters(DataTypeNode& node)
     tuple_finalize_product<TupleT>(node, std::make_index_sequence<std::tuple_size_v<TupleT>>{});
 }
 
+/// Mirrors structural success of \c createDataTypeHier<T>() without instantiating collectors.
+template <typename TupleT, std::size_t... Is>
+constexpr bool tuple_elements_schema_supported(std::index_sequence<Is...>);
+
+template <typename T>
+struct data_type_schema_supported_impl
+{
+    using value_t = remove_cvref_t<T>;
+
+    static constexpr bool value = [] {
+        if constexpr (std::is_enum_v<value_t>)
+        {
+            return true;
+        }
+        else if constexpr (has_argos_collector_v<value_t>)
+        {
+            return true;
+        }
+        else if constexpr (is_std_pair_product_v<value_t>)
+        {
+            return data_type_schema_supported_impl<typename value_t::first_type>::value &&
+                   data_type_schema_supported_impl<typename value_t::second_type>::value;
+        }
+        else if constexpr (is_std_tuple_product_v<value_t>)
+        {
+            if constexpr (std::tuple_size_v<value_t> == 0)
+            {
+                return false;
+            }
+            return tuple_elements_schema_supported<value_t>(
+                std::make_index_sequence<std::tuple_size_v<value_t>>{});
+        }
+        else if constexpr (is_pod_leaf_v<value_t>)
+        {
+            return is_supported_pod_leaf_kind_v<value_t>;
+        }
+        else
+        {
+            return false;
+        }
+    }();
+};
+
+template <typename TupleT, std::size_t... Is>
+constexpr bool tuple_elements_schema_supported(std::index_sequence<Is...>)
+{
+    return (
+        data_type_schema_supported_impl<std::tuple_element_t<Is, TupleT>>::value && ...);
+}
+
 } // namespace detail
+
+/// True iff SimDB can build an Argos \c DataTypeHierarchy for \p T (same cases as \ref createDataTypeHier).
+template <typename T>
+inline constexpr bool is_data_type_schema_supported_v =
+    detail::data_type_schema_supported_impl<detail::remove_cvref_t<T>>::value;
 
 } // namespace simdb::collection

@@ -57,6 +57,15 @@ struct dtype_register_element
 
 } // namespace detail
 
+/// Normalized element type SimDB uses for container registration (see \c dtype_register_element).
+template <typename T>
+using dtype_register_element_t = typename detail::dtype_register_element<T>::type;
+
+/// True if the normalized element type can be registered for Argos (scalar or container collection).
+template <typename T>
+inline constexpr bool is_registered_collection_element_v =
+    is_data_type_schema_supported_v<dtype_register_element_t<T>>;
+
 constexpr inline size_t DEFAULT_HEARTBEAT = 10;
 
 struct PairFieldFormatters
