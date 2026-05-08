@@ -244,6 +244,33 @@ struct has_argos_collector<T, std::void_t<typename type_traits::remove_any_point
 template <typename T>
 inline constexpr bool has_argos_collector_v = has_argos_collector<T>::value;
 
+/// Root-level \c std::pair handling in \c createDataTypeHier (distinct name from \c ArgosCollect.hpp stringification traits).
+template <typename T>
+struct is_std_pair_product : std::false_type {};
+
+template <typename A, typename B>
+struct is_std_pair_product<std::pair<A, B>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_std_pair_product_v = is_std_pair_product<remove_cvref_t<T>>::value;
+
+/// After moving a \c DataTypeNode subtree, fix \c parent links (addresses change).
+inline void relinkParentPointers(DataTypeNode* subtree_root, DataTypeNode* new_parent)
+{
+    if (subtree_root == nullptr)
+    {
+        return;
+    }
+    subtree_root->parent = new_parent;
+    for (const auto& ch : subtree_root->children)
+    {
+        if (ch)
+        {
+            relinkParentPointers(ch.get(), subtree_root);
+        }
+    }
+}
+
 /// Names of flattened table columns under a struct \c DataTypeNode (matches struct deserializer leaf order).
 inline void collectFlatTableColumnNames(const DataTypeNode& row_node, std::unordered_set<std::string>& out_names)
 {
@@ -263,6 +290,100 @@ inline void collectFlatTableColumnNames(const DataTypeNode& row_node, std::unord
             {
                 out_names.insert(ch->field_name);
             }
+        }
+    }
+}
+
+/// After \c std::move(root_) from a temporary \c DataTypeHierarchy into another tree, lambdas that
+/// captured \c [&node] still reference the moved-from object. Rebind writers to the final \c node.
+template <typename T>
+void reattachErasedWritersAfterSubtreeSteal(DataTypeNode& node)
+{
+    using value_t = remove_cvref_t<T>;
+    if constexpr (std::is_enum_v<value_t>)
+    {
+        node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+            const auto* value = static_cast<const value_t*>(value_void);
+            using enum_int_t = std::underlying_type_t<value_t>;
+            const auto raw = static_cast<enum_int_t>(*value);
+            const int64_t raw_i64 = static_cast<int64_t>(raw);
+            buffer.observeEnum(*value, node.type_name);
+            if (node.enum_meta)
+            {
+                std::ostringstream oss;
+                oss << *value;
+                node.enum_meta->raw_to_name.emplace(raw_i64, oss.str());
+            }
+            const std::string val_str = enum_raw_display_string(node.enum_meta->raw_to_name, raw_i64);
+            buffer.appendValue(raw, node.type_name, val_str);
+        };
+    }
+    else if constexpr (has_argos_collector_v<value_t>)
+    {
+        node.write_erased = [&node](StreamBuffer& buffer,
+                                    const void* owner_void,
+                                    FieldTraceSink* field_trace_sink) {
+            for (const auto& ch : node.children)
+            {
+                if (ch && ch->write_erased)
+                {
+                    ch->write_erased(buffer, owner_void, field_trace_sink);
+                }
+            }
+        };
+    }
+    else if constexpr (is_std_pair_product_v<value_t>)
+    {
+        reattachErasedWritersAfterSubtreeSteal<typename value_t::first_type>(*node.children[0]);
+        reattachErasedWritersAfterSubtreeSteal<typename value_t::second_type>(*node.children[1]);
+        DataTypeNode* fn = node.children[0].get();
+        DataTypeNode* sn = node.children[1].get();
+        node.write_erased = [fn, sn](StreamBuffer& buffer,
+                                     const void* pair_void,
+                                     FieldTraceSink* field_trace_sink) {
+            const auto* p = static_cast<const value_t*>(pair_void);
+            if (fn->write_erased)
+            {
+                fn->write_erased(buffer, &p->first, field_trace_sink);
+            }
+            if (sn->write_erased)
+            {
+                sn->write_erased(buffer, &p->second, field_trace_sink);
+            }
+        };
+    }
+    else if constexpr (is_pod_leaf_v<value_t>)
+    {
+        if constexpr (std::is_same_v<value_t, std::string>)
+        {
+            node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+                if (node.tiny_strings == nullptr)
+                {
+                    throw DBException("TinyStrings not set before string collection");
+                }
+                const auto* s = static_cast<const value_t*>(value_void);
+                const uint32_t id = node.tiny_strings->getStringID(*s);
+                std::ostringstream oss;
+                oss << id << ", string value " << *s;
+                buffer.appendValue(id, "string id", oss.str());
+            };
+        }
+        else if constexpr (std::is_same_v<value_t, bool>)
+        {
+            node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+                const auto* value = static_cast<const value_t*>(value_void);
+                const uint8_t v = (*value) ? 1u : 0u;
+                buffer.appendValue(v, node.type_name, (*value) ? "true" : "false");
+            };
+        }
+        else
+        {
+            node.write_erased = [&node](StreamBuffer& buffer, const void* value_void, FieldTraceSink*) {
+                const auto value = *static_cast<const value_t*>(value_void);
+                std::ostringstream oss;
+                oss << value;
+                buffer.appendValue(value, node.type_name, oss.str());
+            };
         }
     }
 }
@@ -550,6 +671,50 @@ inline std::unique_ptr<DataTypeHierarchy<detail::remove_cvref_t<T>>> createDataT
             color_key.clear();
         }
         node.effective_color_key = std::move(color_key);
+    }
+    else if constexpr (detail::is_std_pair_product_v<value_t>)
+    {
+        node.kind = NodeKind::Struct;
+
+        using first_t = typename value_t::first_type;
+        using second_t = typename value_t::second_type;
+
+        auto first_hier = createDataTypeHier<first_t>();
+        auto second_hier = createDataTypeHier<second_t>();
+
+        auto first_child = std::make_unique<DataTypeNode>();
+        *first_child = std::move(first_hier->root_);
+        first_child->field_name = "first";
+        detail::relinkParentPointers(first_child.get(), &node);
+
+        auto second_child = std::make_unique<DataTypeNode>();
+        *second_child = std::move(second_hier->root_);
+        second_child->field_name = "second";
+        detail::relinkParentPointers(second_child.get(), &node);
+
+        node.children.emplace_back(std::move(first_child));
+        node.children.emplace_back(std::move(second_child));
+
+        detail::reattachErasedWritersAfterSubtreeSteal<first_t>(*node.children[0]);
+        detail::reattachErasedWritersAfterSubtreeSteal<second_t>(*node.children[1]);
+
+        DataTypeNode* fn = node.children[0].get();
+        DataTypeNode* sn = node.children[1].get();
+        node.write_erased = [fn, sn](StreamBuffer& buffer,
+                                     const void* pair_void,
+                                     FieldTraceSink* field_trace_sink) {
+            const auto* p = static_cast<const value_t*>(pair_void);
+            if (fn->write_erased)
+            {
+                fn->write_erased(buffer, &p->first, field_trace_sink);
+            }
+            if (sn->write_erased)
+            {
+                sn->write_erased(buffer, &p->second, field_trace_sink);
+            }
+        };
+
+        node.effective_color_key.clear();
     }
     else if constexpr (detail::is_pod_leaf_v<value_t>)
     {

@@ -15,6 +15,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 /// This test shows how to use the SimDB data collection system for Argos.
@@ -2131,6 +2132,64 @@ void TestUiSmokeRejectsNonArgosDB()
     MaybeRunUiSmokeTest(&db_mgr, false);
 }
 
+void TestDirectCollectPairs()
+{
+    TEST_METHOD_INIT;
+
+    using pod_pair = std::pair<int, double>;
+    (void)simdb::collection::createDataTypeHier<pod_pair>();
+
+    uint64_t tick = 0;
+    constexpr size_t heartbeat = 3;
+    simdb::collection::Collection<uint64_t> collection(heartbeat);
+    ENABLE_BYTE_TRACER
+    collection.timestampWith(&tick);
+    collection.addCollection("root", 1);
+
+    auto pod_pair_collector = collection.collectScalarManually<pod_pair>(
+        "pod_pair", "root");
+
+    using string_pair = std::pair<int, std::string>;
+    auto string_pair_collector = collection.collectScalarManually<string_pair>(
+        "string_pair", "root");
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::collection::CollectionPipeline>();
+
+    auto& app_mgr = app_mgrs.createAppManager("test_direct_pair.db");
+    app_mgr.enableApp<simdb::collection::CollectionPipeline>();
+
+    app_mgr.parameterizeAppFactory<simdb::collection::CollectionPipeline>(&collection);
+    app_mgrs.createEnabledApps();
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    tick = 1;
+    pod_pair_collector->collect(std::make_pair(4, 5.5));
+    string_pair_collector->collect(std::make_pair(7, std::string("hello")));
+
+    EXPECT_TRUE(pod_pair_collector->traceSerializationRootTypeBytes() > 0);
+    EXPECT_TRUE(string_pair_collector->traceSerializationRootTypeBytes() > 0);
+
+    app_mgrs.postSimLoopTeardown();
+    POST_TEST_VALIDATE(app_mgr.getDatabaseManager(), collection, true, true);
+}
+
+void TestDirectCollectTuples()
+{
+    //TEST_METHOD_INIT;
+    //using test_tuple = std::tuple<int, float, InstType, std::string>;
+    //(void)simdb::collection::createDataTypeHier<test_tuple>();
+}
+
+void TestDirectCollectInstGroup()
+{
+    //TEST_METHOD_INIT;
+    //(void)simdb::collection::createDataTypeHier<InstGroup>();
+}
+
 int main(int argc, char** argv)
 {
     if (argc > 1)
@@ -2154,6 +2213,9 @@ int main(int argc, char** argv)
     TestMultiArgosCollectors();
     TestStringifiedFields();
     TestUiSmokeRejectsNonArgosDB();
+    TestDirectCollectPairs();
+    TestDirectCollectTuples();
+    TestDirectCollectInstGroup();
 
     // TODO cnyce: these tests are redundant
     GenTraceForScalarInts();
