@@ -1,5 +1,6 @@
 #pragma once
 
+#include "simdb/apps/argos/ArgosCollectionTraits.hpp"
 #include "simdb/apps/argos/EnumTraits.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/MoveOnlyFunction.hpp"
@@ -191,9 +192,6 @@ inline std::string podTypeKindToTypeName(PodTypeKind kind)
 
 namespace detail {
 
-template <typename T>
-using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
-
 /// Leaf scalars for auto/POD wiring: trivial layout types plus \c std::string (uint32 string id).
 /// Enums are \c NodeKind::Enum, not this trait.
 template <typename T>
@@ -300,15 +298,6 @@ template <typename T>
 constexpr bool supports_hex_formatter_v =
     std::is_integral_v<remove_cvref_t<T>> &&
     !std::is_same_v<remove_cvref_t<T>, bool>;
-
-template <typename T, typename = void>
-struct has_argos_collector : std::false_type {};
-
-template <typename T>
-struct has_argos_collector<T, std::void_t<typename type_traits::remove_any_pointer_t<T>::ArgosCollector>> : std::true_type {};
-
-template <typename T>
-inline constexpr bool has_argos_collector_v = has_argos_collector<T>::value;
 
 /// Root-level \c std::pair handling in \c createDataTypeHier (distinct name from \c ArgosCollect.hpp stringification traits).
 template <typename T>

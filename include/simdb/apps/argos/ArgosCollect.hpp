@@ -202,33 +202,6 @@ struct getter_traits<Getter>
     using return_t = RetT;
 };
 
-template <typename T>
-using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
-
-template <typename T, typename = void>
-struct has_nested_argos_collector : std::false_type {};
-
-template <typename T>
-struct has_nested_argos_collector<T, std::void_t<typename remove_cvref_t<T>::ArgosCollector>> : std::true_type
-{};
-
-template <typename T>
-inline constexpr bool has_nested_argos_collector_v = has_nested_argos_collector<T>::value;
-
-
-template <typename T, typename = void>
-struct has_nested_argos_container_collector : std::false_type {};
-
-template <typename T>
-struct has_nested_argos_container_collector<
-    T,
-    std::void_t<typename remove_cvref_t<T>::ArgosContainerCollector>> : std::true_type
-{};
-
-template <typename T>
-inline constexpr bool has_nested_argos_container_collector_v =
-    has_nested_argos_container_collector<T>::value;
-
 template <typename T, typename = void>
 struct has_ostream_insertion : std::false_type {};
 
