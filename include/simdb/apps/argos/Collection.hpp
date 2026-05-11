@@ -354,6 +354,19 @@ public:
         return collectable;
     }
 
+    /// \brief Mark the collectable at the given path as unsupported for collection.
+    /// The collectable will still appear in the Argos tree view, but won't be able
+    /// to be displayed as a widget, and the tree view node will use red font.
+    ///
+    /// The \p path may be arbitrary and need not correspond to a registered
+    /// collectable. May be called at any point before the app's postTeardown(),
+    /// at which time buffered paths are flushed to the \c UnsupportedCollectors
+    /// table. Duplicate calls with the same \p path are silently coalesced.
+    void markUnsupported(const std::string& path)
+    {
+        unsupported_paths_.insert(path);
+    }
+
     /// \brief Connect the collectables to the CollectorPipeline's main input queue
     void connectToPipeline(
         ConcurrentQueue<QueueCollectionData>* pipeline_head,
@@ -614,6 +627,16 @@ private:
             inserter->createRecordWithColValues(cid, sz);
         }
 
+        if (!unsupported_paths_.empty())
+        {
+            auto unsupported_inserter =
+                db_mgr->prepareINSERT(SQL_TABLE("UnsupportedCollectors"));
+            for (const auto& path : unsupported_paths_)
+            {
+                unsupported_inserter->createRecordWithColValues(path);
+            }
+        }
+
         if (enum_definitions_ == nullptr)
         {
             return;
@@ -730,6 +753,7 @@ private:
     std::map<std::string, std::unique_ptr<TimeDomainCollection<TimeT>>> collections_;
     std::map<std::string, size_t> clk_periods_;
     std::unordered_set<std::string> all_collectable_paths_;
+    std::unordered_set<std::string> unsupported_paths_;
     DataTypeInspector dtype_inspector_;
     std::shared_ptr<Timestamp<TimeT>> timestamp_;
     std::unique_ptr<PipelineStager<TimeT>> stager_;

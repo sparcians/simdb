@@ -115,6 +115,13 @@ public:
         auto& queue_max_sizes_tbl = schema.addTable("QueueMaxSizes");
         queue_max_sizes_tbl.addColumn("CollectableTreeNodeID", dt::int32_t);
         queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
+
+        // Argos UI uses this to render unsupported tree nodes in red (vs. black for supported nodes).
+        // Paths are arbitrary and need not correspond to a registered collectable.
+        auto& unsupported_tbl = schema.addTable("UnsupportedCollectors");
+        unsupported_tbl.addColumn("Path", dt::string_t);
+        unsupported_tbl.ensureUnique("Path");
+        unsupported_tbl.unsetPrimaryKey();
     }
 
     /// \brief Return the string intern table used when mapping string values to stable integer IDs for storage.
