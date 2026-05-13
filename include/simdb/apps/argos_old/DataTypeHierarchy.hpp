@@ -1,7 +1,7 @@
 #pragma once
 
-#include "simdb/apps/argos/ArgosCollectionTraits.hpp"
-#include "simdb/apps/argos/EnumTraits.hpp"
+#include "simdb/apps/argos_old/ArgosCollectionTraits.hpp"
+#include "simdb/apps/argos_old/EnumTraits.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/MoveOnlyFunction.hpp"
 #include "simdb/utils/TinyStrings.hpp"

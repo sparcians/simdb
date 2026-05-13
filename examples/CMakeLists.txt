@@ -8,7 +8,7 @@ add_subdirectory(ConcurrentApps)
 add_subdirectory(DatabaseWatchdog)
 add_subdirectory(PipelineSnoopers)
 add_subdirectory(AppFactory)
-add_subdirectory(ArgosCollector)
+add_subdirectory(ArgosCollector_old)
 
 # TODO cnyce: fix sporadic failures
 #add_subdirectory(MultiPortStages)

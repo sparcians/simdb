@@ -1,6 +1,6 @@
 #pragma once
 
-#include "simdb/apps/argos/EnumTraits.hpp"
+#include "simdb/apps/argos_old/EnumTraits.hpp"
 #include "simdb/utils/Demangle.hpp"
 
 #include <map>

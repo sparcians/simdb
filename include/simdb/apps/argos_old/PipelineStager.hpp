@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "simdb/apps/argos/Timestamps.hpp"
-#include "simdb/apps/argos/CollectedData.hpp"
-#include "simdb/apps/argos/LifecycleAction.hpp"
+#include "simdb/apps/argos_old/Timestamps.hpp"
+#include "simdb/apps/argos_old/CollectedData.hpp"
+#include "simdb/apps/argos_old/LifecycleAction.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
 #include <cstring>
 #include <queue>

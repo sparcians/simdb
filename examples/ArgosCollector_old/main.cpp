@@ -1,8 +1,8 @@
 #include "RandUtils.hpp"
 #include "SimDBTester.hpp"
 #include "simdb/apps/AppManager.hpp"
-#include "simdb/apps/argos/Collection.hpp"
-#include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos_old/Collection.hpp"
+#include "simdb/apps/argos_old/DataTypeHierarchy.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
 #include <array>

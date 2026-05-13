@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "simdb/apps/argos/DataTypeHierarchy.hpp"
-#include "simdb/apps/argos/EnumDefinitions.hpp"
-#include "simdb/apps/argos/LifecycleAction.hpp"
+#include "simdb/apps/argos_old/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos_old/EnumDefinitions.hpp"
+#include "simdb/apps/argos_old/LifecycleAction.hpp"
 
 #include <algorithm>
 #include <array>

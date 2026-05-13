@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "simdb/apps/argos/DataTypeHierarchy.hpp"
-#include "simdb/apps/argos/DataTypeInspector.hpp"
+#include "simdb/apps/argos_old/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos_old/DataTypeInspector.hpp"
 #include "simdb/sqlite/Table.hpp"
 
 namespace simdb::collection {

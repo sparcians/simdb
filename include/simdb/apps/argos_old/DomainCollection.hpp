@@ -4,10 +4,10 @@
 
 #include <memory>
 
-#include "simdb/apps/argos/Timestamps.hpp"
-#include "simdb/apps/argos/Collectables.hpp"
-#include "simdb/apps/argos/CollectionBase.hpp"
-#include "simdb/apps/argos/EnumDefinitions.hpp"
+#include "simdb/apps/argos_old/Timestamps.hpp"
+#include "simdb/apps/argos_old/Collectables.hpp"
+#include "simdb/apps/argos_old/CollectionBase.hpp"
+#include "simdb/apps/argos_old/EnumDefinitions.hpp"
 
 namespace simdb::collection {
 

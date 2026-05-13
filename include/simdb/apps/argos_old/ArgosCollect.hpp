@@ -1,6 +1,6 @@
 #pragma once
 
-#include "simdb/apps/argos/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos_old/DataTypeHierarchy.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 

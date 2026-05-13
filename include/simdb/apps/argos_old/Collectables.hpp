@@ -2,11 +2,11 @@
 
 #pragma once
 
-#include "simdb/apps/argos/DataTypeHierarchy.hpp"
-#include "simdb/apps/argos/ArgosCollect.hpp"
-#include "simdb/apps/argos/EnumDefinitions.hpp"
-#include "simdb/apps/argos/PipelineStager.hpp"
-#include "simdb/apps/argos/Minifiers.hpp"
+#include "simdb/apps/argos_old/DataTypeHierarchy.hpp"
+#include "simdb/apps/argos_old/ArgosCollect.hpp"
+#include "simdb/apps/argos_old/EnumDefinitions.hpp"
+#include "simdb/apps/argos_old/PipelineStager.hpp"
+#include "simdb/apps/argos_old/Minifiers.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/TypeTraits.hpp"
 

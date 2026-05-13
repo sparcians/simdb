@@ -1,5 +1,5 @@
 #include "SimDBTester.hpp"
-#include "simdb/apps/argos/Timestamps.hpp"
+#include "simdb/apps/argos_old/Timestamps.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
 #include <random>

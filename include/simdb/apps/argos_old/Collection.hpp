@@ -2,13 +2,13 @@
 
 #pragma once
 
-#include "simdb/apps/argos/CollectionBase.hpp"
-#include "simdb/apps/argos/DomainCollection.hpp"
-#include "simdb/apps/argos/CollectionPipeline.hpp"
-#include "simdb/apps/argos/Minifiers.hpp"
-#include "simdb/apps/argos/DataTypeInspector.hpp"
-#include "simdb/apps/argos/DataTypeSerializer.hpp"
-#include "simdb/apps/argos/EnumDefinitions.hpp"
+#include "simdb/apps/argos_old/CollectionBase.hpp"
+#include "simdb/apps/argos_old/DomainCollection.hpp"
+#include "simdb/apps/argos_old/CollectionPipeline.hpp"
+#include "simdb/apps/argos_old/Minifiers.hpp"
+#include "simdb/apps/argos_old/DataTypeInspector.hpp"
+#include "simdb/apps/argos_old/DataTypeSerializer.hpp"
+#include "simdb/apps/argos_old/EnumDefinitions.hpp"
 #include "simdb/utils/CollectionByteTrace.hpp"
 #include "simdb/utils/Tree.hpp"
 #include "simdb/utils/TypeTraits.hpp"

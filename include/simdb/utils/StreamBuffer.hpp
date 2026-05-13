@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/apps/argos/EnumDefinitions.hpp"
+#include "simdb/apps/argos_old/EnumDefinitions.hpp"
 #include "simdb/utils/CollectionByteTrace.hpp"
 
 #include <array>

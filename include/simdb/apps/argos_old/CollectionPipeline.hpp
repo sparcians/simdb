@@ -4,9 +4,9 @@
 
 #include "simdb/apps/App.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
-#include "simdb/apps/argos/CollectionBase.hpp"
-#include "simdb/apps/argos/EnumDefinitions.hpp"
-#include "simdb/apps/argos/PipelineStager.hpp"
+#include "simdb/apps/argos_old/CollectionBase.hpp"
+#include "simdb/apps/argos_old/EnumDefinitions.hpp"
+#include "simdb/apps/argos_old/PipelineStager.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include "simdb/utils/Compress.hpp"
 
