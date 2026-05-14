@@ -11,6 +11,13 @@ private:
     bool valid_ = false;
 
 public:
+    ValidValue() = default;
+
+    explicit ValidValue(const T& val)
+    {
+        *this = val;
+    }
+
     ValidValue& operator=(const T& val)
     {
         value_ = val;

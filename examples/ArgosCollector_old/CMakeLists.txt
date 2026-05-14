@@ -1,4 +1,4 @@
-simdb_test(ArgosCollector main.cpp)
+simdb_test(ArgosCollector_old main.cpp)
 
 set(ARGOS_UI_SMOKE_DEFAULT 0)
 find_package(Python3 COMPONENTS Interpreter QUIET)
