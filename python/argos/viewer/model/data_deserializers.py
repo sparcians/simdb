@@ -21,17 +21,27 @@ _INTEGRAL_DISPLAY_DTYPES = frozenset(
 
 def _make_simple_output_formatter(dtype_name, special_formatter):
     # type: (str, str) -> object
-    if special_formatter != "hex":
+    fmt = (special_formatter or "").strip().lower()
+    if fmt not in ("hex", "oct"):
         return lambda x: x
     if dtype_name not in _INTEGRAL_DISPLAY_DTYPES:
         return lambda x: x
 
-    def _fmt(val):
+    if fmt == "hex":
+
+        def _fmt_hex(val):
+            if isinstance(val, int) and not isinstance(val, bool):
+                return hex(val)
+            return val
+
+        return _fmt_hex
+
+    def _fmt_oct(val):
         if isinstance(val, int) and not isinstance(val, bool):
-            return hex(val)
+            return oct(val)
         return val
 
-    return _fmt
+    return _fmt_oct
 
 
 UNPACK_FORMATS = {

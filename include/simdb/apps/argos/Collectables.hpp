@@ -225,11 +225,7 @@ public:
         setValue_(value);
     }
 
-    /// TODO cnyce: this code will have to change when the pair collector
-    /// is available in SimDB
-    template <bool B = is_struct>
-    std::enable_if_t<B, void>
-    setBytes(const std::vector<char>& bytes)
+    void setBytes(const std::vector<char>& bytes)
     {
         sendBytes_(bytes);
     }
