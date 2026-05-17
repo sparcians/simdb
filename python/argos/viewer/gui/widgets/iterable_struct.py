@@ -76,7 +76,7 @@ class IterableStruct(wx.Panel):
                     continue
 
                 for j, field_name in enumerate(self.visible_field_names):
-                    self.grid.SetCellValue(idx, j, str(row_data[field_name]))
+                    self.grid.SetCellValue(idx, j, str(row_data[j][1]))
                     if auto_colorize_col_idx is not None:
                         color = widget_renderer.GetAutoColor(row_data[self.visible_field_names[auto_colorize_col_idx]])
                         self.grid.SetCellBackgroundColour(idx, j, color)

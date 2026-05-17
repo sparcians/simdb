@@ -82,6 +82,11 @@ public:
         unsupported_tbl.unsetPrimaryKey();
     }
 
+    void setVerbose(bool verbose = true)
+    {
+        verbose_ = verbose;
+    }
+
     void setHeartbeat(size_t heartbeat)
     {
         if (pipeline_stager_ != nullptr)
@@ -149,6 +154,13 @@ public:
     ScalarCollector<ScalarT>* createScalarCollector(const std::string& path, const std::string& clk_name)
     {
         auto collector = std::make_unique<ScalarCollector<ScalarT>>(heartbeat_, &tiny_strings_);
+        if (verbose_)
+        {
+            std::cout << "Collecting scalar:\n";
+            std::cout << "  CID  - " << collector->getID() << "\n";
+            std::cout << "  Path - " << path << "\n";
+            std::cout << "  Type - " << collector->collectableTypeNameForDb() << std::endl;
+        }
         meta_by_cid_[collector->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(collector));
         return static_cast<ScalarCollector<ScalarT>*>(collectors_.back().get());
@@ -158,6 +170,13 @@ public:
     ContainerCollector<BinT, Sparse>* createContainerCollector(const std::string& path, const std::string& clk_name, size_t capacity)
     {
         auto collector = std::make_unique<ContainerCollector<BinT, Sparse>>(heartbeat_, capacity);
+        if (verbose_)
+        {
+            std::cout << "Collecting container:\n";
+            std::cout << "  CID  - " << collector->getID() << "\n";
+            std::cout << "  Path - " << path << "\n";
+            std::cout << "  Type - " << collector->collectableTypeNameForDb() << std::endl;
+        }
         meta_by_cid_[collector->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(collector));
         return static_cast<ContainerCollector<BinT, Sparse>*>(collectors_.back().get());
@@ -251,6 +270,8 @@ public:
         {
             collector->writeMetaOnPostTeardown(db_mgr_);
         }
+
+        tiny_strings_.serialize();
     }
 
 private:
@@ -329,6 +350,7 @@ private:
     DatabaseManager *const db_mgr_;
     TinyStrings<> tiny_strings_{db_mgr_};
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
+    bool verbose_ = false;
 
     using ClockDescriptor = std::tuple<
         std::string, // clk name

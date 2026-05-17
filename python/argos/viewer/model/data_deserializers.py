@@ -316,14 +316,14 @@ class SparseContainerDeserializer:
 class StructDeserializer:
     def __init__(self, struct_name, struct_defn, inspector, tiny_strings):
         self.struct_name = struct_name
-        self._field_deserializers = OrderedDict()
+        self._field_deserializers = []
         self._flattened_field_names = []
         StructDeserializer.__RecurseFindCollectableFields(
             struct_defn, inspector, tiny_strings, self._field_deserializers, self._flattened_field_names
         )
         assert self._field_deserializers
         assert self._flattened_field_names
-        self._visible_field_names = list(self._flattened_field_names)
+        self._visible_field_names = self._flattened_field_names
 
     def GetAllFieldNames(self):
         return copy.deepcopy(self._flattened_field_names)
@@ -345,16 +345,16 @@ class StructDeserializer:
 
     def GetNumBytes(self):
         num_bytes = 0
-        for fds in self._field_deserializers.values():
-            num_bytes += fds.GetNumBytes()
+        for field_name, deserializer in self._field_deserializers:
+            num_bytes += deserializer.GetNumBytes()
         return num_bytes
 
     def Deserialize(self, data_bytes):
         buf = ByteBuffer.CreateFrom(data_bytes)
-        deserialized = OrderedDict()
+        deserialized = []
 
-        for field_name, deserializer in self._field_deserializers.items():
-            deserialized[field_name] = deserializer.Deserialize(buf)
+        for field_name, deserializer in self._field_deserializers:
+            deserialized.append((field_name, deserializer.Deserialize(buf)))
 
         return deserialized
 
@@ -363,20 +363,19 @@ class StructDeserializer:
         struct_defn, inspector, tiny_strings, field_deserializers, flattened_field_names
     ):
         for field in struct_defn.children:
-            if field.name and field.name in field_deserializers:
-                # DataType metadata keeps first field instance by name.
-                # Ignore subsequent duplicates for backward compatibility.
-                continue
             if field.name and field.kind != 'struct':
                 flattened_field_names.append(field.name)
             if field.kind == 'pod' and field.type_name != 'string':
-                field_deserializers[field.name] = SimpleDeserializer(
+                deserializer = SimpleDeserializer(
                     field.type_name, field.special_formatter or ""
                 )
+                field_deserializers.append((field.name, deserializer))
             elif field.type_name == 'string':
-                field_deserializers[field.name] = StringDeserializer(tiny_strings)
+                deserializer = StringDeserializer(tiny_strings)
+                field_deserializers.append((field.name, deserializer))
             elif field.kind == 'enum':
-                field_deserializers[field.name] = CreateDeserializer(inspector, field.type_name)
+                deserializer = CreateDeserializer(inspector, field.type_name)
+                field_deserializers.append((field.name, deserializer))
             elif field.kind == 'struct':
                 StructDeserializer.__RecurseFindCollectableFields(
                     field, inspector, tiny_strings, field_deserializers, flattened_field_names
