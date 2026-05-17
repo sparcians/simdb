@@ -79,26 +79,13 @@ class DataTypeInspector:
     def _load(self):
         # type: () -> None
         cur = self._conn.cursor()
-        try:
-            cur.execute(
-                "SELECT Id, RootTypeName, EffectiveColorKey FROM DataTypeSchemas ORDER BY Id"
-            )
-            for sid, root_name, effective_color_key in cur.fetchall():
-                sid = int(sid)
-                root_name = str(root_name)
-                key = str(effective_color_key) if effective_color_key is not None else ""
-                self._schemas[sid] = root_name
-                self._effective_color_keys_by_schema[sid] = key
-                self._effective_color_keys_by_root_type[root_name] = key
-        except sqlite3.OperationalError:
-            # Backward-compat with databases created before EffectiveColorKey existed.
-            cur.execute("SELECT Id, RootTypeName FROM DataTypeSchemas ORDER BY Id")
-            for sid, root_name in cur.fetchall():
-                sid = int(sid)
-                root_name = str(root_name)
-                self._schemas[sid] = root_name
-                self._effective_color_keys_by_schema[sid] = ""
-                self._effective_color_keys_by_root_type[root_name] = ""
+        cur.execute("SELECT Id, RootTypeName FROM DataTypeSchemas ORDER BY Id")
+        for sid, root_name in cur.fetchall():
+            sid = int(sid)
+            root_name = str(root_name)
+            self._schemas[sid] = root_name
+            self._effective_color_keys_by_schema[sid] = ""
+            self._effective_color_keys_by_root_type[root_name] = ""
 
         cur.execute(
             """
@@ -110,12 +97,12 @@ class DataTypeInspector:
         raw_rows = cur.fetchall()
 
         enum_rows = {}  # type: Dict[int, List[tuple]]
-        cur.execute(
-            "SELECT EnumNodeId, MemberName, MemberValue FROM DataTypeEnumMembers ORDER BY Id"
-        )
-        for enum_node_id, member_name, member_value in cur.fetchall():
-            eid = int(enum_node_id)
-            enum_rows.setdefault(eid, []).append((str(member_name), str(member_value)))
+        #cur.execute(
+        #    "SELECT EnumNodeId, MemberName, MemberValue FROM DataTypeEnumMembers ORDER BY Id"
+        #)
+        #for enum_node_id, member_name, member_value in cur.fetchall():
+        #    eid = int(enum_node_id)
+        #    enum_rows.setdefault(eid, []).append((str(member_name), str(member_value)))
 
         self._nodes_by_id.clear()
         self._top_by_schema = {sid: [] for sid in self._schemas}
@@ -207,7 +194,8 @@ class DataTypeInspector:
         for node in self._iter_nodes():
             if node.kind == "struct" and node.type_name == struct_name:
                 return node
-        return None
+
+        return self.GetRootDefn(struct_name)
 
     def GetEnumMap(self, enum_name):
         # type: (str) -> Optional[Dict[str, int]]

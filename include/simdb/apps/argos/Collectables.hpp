@@ -328,6 +328,7 @@ public:
             throw DBException("Container size cannot exceeed original capacity or UINT16_MAX");
         }
 
+        max_container_size_seen_ = std::max(max_container_size_seen_, (uint16_t)size);
         buf.append((uint16_t)size);
         for (uint16_t bin_idx = 0; bin_idx < (uint16_t)size; ++bin_idx)
         {
