@@ -250,6 +250,11 @@ public:
             auto sid = tiny_strings_->getStringID(val);
             setScalarValue(sid);
         }
+        else if constexpr (std::is_same_v<std::decay_t<ScalarT>, const char*>)
+        {
+            auto sid = tiny_strings_->getStringID(val);
+            setScalarValue(sid);
+        }
         else
         {
             static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
