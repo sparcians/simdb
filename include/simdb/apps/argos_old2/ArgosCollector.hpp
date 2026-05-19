@@ -151,37 +151,35 @@ public:
     }
 
     template <typename ScalarT>
-    CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name)
+    ScalarCollector<ScalarT>* createScalarCollector(const std::string& path, const std::string& clk_name)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
-        entry_point->setScalarDataType(demangle_type<ScalarT>());
+        auto collector = std::make_unique<ScalarCollector<ScalarT>>(heartbeat_, &tiny_strings_);
         if (verbose_)
         {
             std::cout << "Collecting scalar:\n";
-            std::cout << "  CID  - " << entry_point->getID() << "\n";
+            std::cout << "  CID  - " << collector->getID() << "\n";
             std::cout << "  Path - " << path << "\n";
-            std::cout << "  Type - " << entry_point->collectableTypeNameForDb() << std::endl;
+            std::cout << "  Type - " << collector->collectableTypeNameForDb() << std::endl;
         }
-        meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
-        collectors_.emplace_back(std::move(entry_point));
-        return static_cast<CollectionEntryPoint*>(collectors_.back().get());
+        meta_by_cid_[collector->getID()] = std::make_tuple(path, clk_name);
+        collectors_.emplace_back(std::move(collector));
+        return static_cast<ScalarCollector<ScalarT>*>(collectors_.back().get());
     }
 
     template <typename BinT, bool Sparse>
-    CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name, size_t capacity)
+    ContainerCollector<BinT, Sparse>* createContainerCollector(const std::string& path, const std::string& clk_name, size_t capacity)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
-        entry_point->setContainerDataType(demangle_type<BinT>(), Sparse, capacity);
+        auto collector = std::make_unique<ContainerCollector<BinT, Sparse>>(heartbeat_, capacity);
         if (verbose_)
         {
             std::cout << "Collecting container:\n";
-            std::cout << "  CID  - " << entry_point->getID() << "\n";
+            std::cout << "  CID  - " << collector->getID() << "\n";
             std::cout << "  Path - " << path << "\n";
-            std::cout << "  Type - " << entry_point->collectableTypeNameForDb() << std::endl;
+            std::cout << "  Type - " << collector->collectableTypeNameForDb() << std::endl;
         }
-        meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
-        collectors_.emplace_back(std::move(entry_point));
-        return static_cast<CollectionEntryPoint*>(collectors_.back().get());
+        meta_by_cid_[collector->getID()] = std::make_tuple(path, clk_name);
+        collectors_.emplace_back(std::move(collector));
+        return static_cast<ContainerCollector<BinT, Sparse>*>(collectors_.back().get());
     }
 
     TinyStrings<>* getTinyStrings()

@@ -232,16 +232,16 @@ void TestScalarCollection()
     while (++tick <= RUN_TICKS)
     {
         auto ival = randomInt<int32_t>();
-        int_collector->setValue(ival);
+        int_collector->setScalarValue(ival);
 
         auto sval = randomString();
-        string_collector->setValue(sval);
+        string_collector->setScalarValue(sval);
 
         auto eval = randomEnum();
-        enum_collector->setValue(eval);
+        enum_collector->setScalarValue(eval);
 
         auto bval = randomBool();
-        bool_collector->setValue(bval);
+        bool_collector->setScalarValue(bval);
 
         // TODO cnyce: This is the code that Sparta pair collection will
         // figure out today, and later we will move that code into SimDB
@@ -249,7 +249,7 @@ void TestScalarCollection()
         std::vector<char> inst_bytes;
         simdb::StreamBuffer buf(inst_bytes);
         inst->writeToBuffer(buf, tiny_strings);
-        struct_collector->setBytes(inst_bytes);
+        struct_collector->setScalarValueBytes(inst_bytes);
 
         // Note that this API call is optional, and will be automatically
         // called at the end of simulation (preTeardown). But for as long
@@ -320,19 +320,19 @@ void TestInstQueueContainerCollection()
                 queue[i]->writeToBuffer(buf, tiny_strings);
                 sparse_bin_bytes.emplace(static_cast<uint16_t>(i), std::move(bytes));
             }
-            queue_collector->setBinBytes(sparse_bin_bytes);
+            queue_collector->setSparseContainerBinBytes(sparse_bin_bytes);
         }
         else
         {
-            std::vector<std::vector<char>> queue_bin_bytes;
+            std::vector<std::vector<char>> contig_bin_bytes;
             for (size_t i = 0; i < queue.size(); ++i)
             {
-                queue_bin_bytes.emplace_back();
-                auto& bytes = queue_bin_bytes.back();
+                contig_bin_bytes.emplace_back();
+                auto& bytes = contig_bin_bytes.back();
                 simdb::StreamBuffer buf(bytes);
                 queue[i]->writeToBuffer(buf, tiny_strings);
             }
-            queue_collector->setBinBytes(queue_bin_bytes);
+            queue_collector->setContigContainerBinBytes(contig_bin_bytes);
         }
 
         // Note that this API call is optional, and will be automatically
