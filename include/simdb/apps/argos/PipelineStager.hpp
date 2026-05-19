@@ -6,7 +6,8 @@
 #include "simdb/apps/argos/CollectedData.hpp"
 #include "simdb/apps/argos/LifecycleAction.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
-#include <cstring>
+
+#include <map>
 #include <queue>
 
 namespace simdb::argos {
@@ -32,7 +33,6 @@ public:
     virtual void sendCollectedDataToPipeline() = 0;
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
     virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
-    virtual void forget(uint16_t cid) = 0;
     virtual std::string getTimeAsString() const = 0;
 };
 
@@ -122,14 +122,6 @@ public:
         }
     }
 
-    void forget(uint16_t cid) override
-    {
-        //TODO cnyce
-        (void)cid;
-        assert(false);
-        //last_sent_bytes_.erase(cid);
-    }
-
     void onQuietChanged(uint16_t cid, bool quiet) override
     {
         auto current_time = timestamp_->snapshot();
@@ -201,18 +193,16 @@ private:
             full_payload = &it->second;
         }
 
-        auto* tracer = simdb::utils::active_collection_byte_tracer();
-        simdb::utils::ScopedCollectionTraceRecord record_scope(tracer, collection_data.time_point->getTimeAsString());
         auto lifecycle = std::make_unique<CollectedData>(cid);
         auto& buf = lifecycle->getBuffer();
         const auto raw_action = static_cast<uint8_t>(action);
-        buf.appendValue(raw_action, "action", lifecycle_action_trace_value(action));
+        buf.append(raw_action);
 
         if (full_payload && !full_payload->empty())
         {
             // ENABLED/AWAKENED append only the full payload bytes. The lifecycle
             // action itself is already encoded in this record's action byte.
-            buf.append(full_payload->data(), full_payload->size(), "lifecycle payload tail");
+            buf.append(*full_payload);
         }
 
         collection_data.collection_data.emplace_back(std::move(lifecycle));
@@ -366,14 +356,12 @@ private:
                 // to the underlying buffer. Our last_sent_bytes_ also has the
                 // cid at the head of the bytes. That's why we are using the
                 // StreamBuffer::append() api below with a uint16_t offset.
-                auto* tracer = simdb::utils::active_collection_byte_tracer();
-                simdb::utils::ScopedCollectionTraceRecord record_scope(tracer, to_send.time_point->getTimeAsString());
                 auto injected_data = std::make_unique<CollectedData>(cid);
                 const auto& last_sent_bytes = last_sent_bytes_.at(cid);
                 const auto src = last_sent_bytes.data() + sizeof(uint16_t);
                 const auto src_bytes = last_sent_bytes.size() - sizeof(uint16_t);
                 auto& buffer = injected_data->getBuffer();
-                buffer.append(src, src_bytes, "heartbeat replay bytes");
+                buffer.append(src, src_bytes);
                 to_send.collection_data.emplace_back(std::move(injected_data));
                 countdowns_to_refresh_[cid] = heartbeat_;
             }
@@ -382,10 +370,6 @@ private:
         // Send everything to the pipeline
         if (!to_send.collection_data.empty())
         {
-            if (auto* tracer = simdb::utils::active_collection_byte_tracer())
-            {
-                tracer->flushThrough(to_send.time_point->getTimeAsString());
-            }
             pipeline_head_->emplace(std::move(to_send));
         }
     }
@@ -395,7 +379,6 @@ private:
     ConcurrentQueue<QueueCollectionData> *const pipeline_head_;
     std::queue<QueueCollectionData> waiting_queue_;
     CollectionTime last_stage_time_;
-    CollectionTime last_sent_time_;
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;

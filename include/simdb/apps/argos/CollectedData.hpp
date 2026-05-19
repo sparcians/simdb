@@ -16,7 +16,7 @@ public:
     explicit CollectedData(uint16_t cid)
         : cid_(cid)
     {
-        buffer_.appendValue(cid_, "cid", std::to_string(static_cast<unsigned>(cid_)));
+        buffer_.append(cid);
     }
 
     CollectedData(CollectedData&&) = default;
