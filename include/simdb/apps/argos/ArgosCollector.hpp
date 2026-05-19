@@ -154,7 +154,7 @@ public:
     CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
-        entry_point->setScalarDataType(demangle_type<ScalarT>());
+        entry_point->setScalarDataType(getScalarTypeName<ScalarT>());
         if (verbose_)
         {
             std::cout << "Collecting scalar:\n";
@@ -171,7 +171,7 @@ public:
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name, size_t capacity)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
-        entry_point->setContainerDataType(demangle_type<BinT>(), Sparse, capacity);
+        entry_point->setContainerDataType(getScalarTypeName<BinT>(), Sparse, capacity);
         if (verbose_)
         {
             std::cout << "Collecting container:\n";
@@ -182,6 +182,28 @@ public:
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
+    }
+
+    template <typename ScalarT>
+    static std::string getScalarTypeName()
+    {
+        if constexpr (std::is_same_v<ScalarT, std::string>)
+        {
+            return "string";
+        }
+        else if constexpr (std::is_same_v<std::decay_t<ScalarT>, const char*>)
+        {
+            return "string";
+        }
+        else if constexpr (std::is_enum_v<ScalarT>)
+        {
+            // TODO cnyce
+            return "string";
+        }
+        else
+        {
+            return demangle_type<ScalarT>();
+        }
     }
 
     TinyStrings<>* getTinyStrings()
