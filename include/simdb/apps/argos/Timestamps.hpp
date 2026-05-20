@@ -13,6 +13,8 @@ namespace simdb::argos {
 class TimePointBase
 {
 public:
+    virtual ~TimePointBase() = default;
+
     /// Apply the stored type-specific time value to the INSERT at column 0
     virtual void apply(PreparedINSERT* inserter) const = 0;
 
