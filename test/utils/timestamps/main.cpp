@@ -1,5 +1,5 @@
 #include "SimDBTester.hpp"
-#include "simdb/apps/argos_old/Timestamps.hpp"
+#include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
 #include <random>
@@ -46,7 +46,7 @@ template <typename TimeT> using query_time_t = typename QueryTime<TimeT>::type;
 
 template <typename TimeT> void TestTimestamps()
 {
-    using namespace simdb::collection;
+    using namespace simdb::argos;
 
     TimeT tick = 0;
     Timestamp<TimeT> timestamp(&tick);
