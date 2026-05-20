@@ -11,6 +11,49 @@ namespace simdb::argos {
 
 inline constexpr size_t DEFAULT_HEARTBEAT = 10;
 
+namespace detail {
+
+template <typename T, typename = void>
+struct has_ostream_insertion : std::false_type {};
+
+template <typename T>
+struct has_ostream_insertion<
+    T,
+    std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
+    : std::true_type {};
+
+template <typename T>
+inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
+
+template <typename T>
+struct is_pair : std::false_type {};
+
+template <typename F, typename S>
+struct is_pair<std::pair<F, S>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_pair_v = is_pair<T>::value;
+
+template <typename T>
+struct is_stl : std::false_type {};
+
+template <typename T, typename Alloc>
+struct is_stl<std::vector<T, Alloc>> : std::true_type {};
+
+template <typename T, typename Alloc>
+struct is_stl<std::deque<T, Alloc>> : std::true_type {};
+
+template <typename T, typename Alloc>
+struct is_stl<std::list<T, Alloc>> : std::true_type {};
+
+template <typename T, size_t N>
+struct is_stl<std::array<T, N>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_stl_v = is_stl<T>::value;
+
+} // namespace detail
+
 class ArgosCollector : public App
 {
 public:
@@ -154,7 +197,7 @@ public:
     CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
-        entry_point->setScalarDataType(getScalarTypeName<ScalarT>());
+        entry_point->setScalarDataType(encodeTypeName<ScalarT>());
         if (verbose_)
         {
             std::cout << "Collecting scalar:\n";
@@ -171,7 +214,7 @@ public:
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name, size_t capacity)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
-        entry_point->setContainerDataType(getScalarTypeName<BinT>(), Sparse, capacity);
+        entry_point->setContainerDataType(encodeTypeName<BinT>(), Sparse, capacity);
         if (verbose_)
         {
             std::cout << "Collecting container:\n";
@@ -184,25 +227,48 @@ public:
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
     }
 
-    template <typename ScalarT>
-    static std::string getScalarTypeName()
+    template <typename T>
+    static std::string encodeTypeName()
     {
-        if constexpr (std::is_same_v<ScalarT, std::string>)
+        if constexpr (std::is_same_v<T, std::string>)
         {
             return "string";
         }
-        else if constexpr (std::is_same_v<std::decay_t<ScalarT>, const char*>)
+        else if constexpr (std::is_same_v<std::decay_t<T>, const char*>)
         {
             return "string";
         }
-        else if constexpr (std::is_enum_v<ScalarT>)
+        else if constexpr (std::is_enum_v<T> && detail::has_ostream_insertion_v<T>)
         {
-            // TODO cnyce
+            // For now, stringifiable enums collect as strings
             return "string";
+        }
+        else if constexpr (std::is_enum_v<T>)
+        {
+            // Non-stringifiable enums collect as raw uint64_t values
+            using Underlying = std::underlying_type_t<T>;
+            static_assert(std::is_unsigned_v<Underlying>);
+            return demangle_type<uint64_t>();
+        }
+        else if constexpr (detail::is_pair_v<T>)
+        {
+            using FirstT = typename T::first_type;
+            auto first_type = encodeTypeName<FirstT>();
+
+            using SecondT = typename T::second_type;
+            auto second_type = encodeTypeName<SecondT>();
+
+            return "pair(" + first_type + "," + second_type + ")";
+        }
+        else if constexpr (detail::is_stl_v<T>)
+        {
+            using ValueT = typename T::value_type;
+            auto value_type = encodeTypeName<ValueT>();
+            return "stl(" + value_type + ")";
         }
         else
         {
-            return demangle_type<ScalarT>();
+            return demangle_type<T>();
         }
     }
 
