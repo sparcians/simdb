@@ -43,6 +43,13 @@ public:
         append(&byte, sizeof(byte));
     }
 
+    template <typename T>
+    void append(const T& val)
+    {
+        static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
+        append(&val, sizeof(T));
+    }
+
     template <typename T, typename Alloc>
     void append(const std::vector<T, Alloc>& val)
     {
