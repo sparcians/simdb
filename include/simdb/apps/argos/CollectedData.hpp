@@ -13,8 +13,8 @@ namespace simdb::argos {
 class CollectedData
 {
 public:
-    explicit CollectedData(uint16_t cid)
-        : cid_(cid)
+    explicit CollectedData(uint16_t cid) :
+        cid_(cid)
     {
         buffer_.append(cid);
     }

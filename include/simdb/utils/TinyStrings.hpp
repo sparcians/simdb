@@ -31,8 +31,7 @@ public:
             tbl.addColumn("StringValue", dt::string_t);
             tbl.addColumn("StringID", dt::uint32_t);
             db_mgr->appendSchema(append_schema);
-        }
-        else
+        } else
         {
             auto query = db_mgr->createQuery("TinyStringIDs");
 
@@ -71,16 +70,10 @@ public:
     }
 
     /// Get a string ID for the given string.
-    uint32_t getStringID(const std::unique_ptr<std::string>& s)
-    {
-        return getStringID(s.get());
-    }
+    uint32_t getStringID(const std::unique_ptr<std::string>& s) { return getStringID(s.get()); }
 
     /// Get a string ID for the given string.
-    uint32_t getStringID(const std::shared_ptr<std::string>& s)
-    {
-        return getStringID(s.get());
-    }
+    uint32_t getStringID(const std::shared_ptr<std::string>& s) { return getStringID(s.get()); }
 
     /// Get a string ID for the given string.
     uint32_t getStringID(const std::string* s)
@@ -144,7 +137,7 @@ public:
     /// called in performance critical code.
     std::string getString(const uint32_t string_id, bool must_exist = true) const
     {
-        for (const auto& [s,id] : *map_)
+        for (const auto& [s, id] : *map_)
         {
             if (id == string_id)
             {
@@ -181,7 +174,7 @@ private:
     string_map_t map_ = std::make_shared<std::unordered_map<std::string, uint32_t>>();
     unserialized_string_map_t unserialized_map_;
 
-    DatabaseManager *const db_mgr_;
+    DatabaseManager* const db_mgr_;
     mutable std::mutex mutex_;
 };
 

@@ -34,13 +34,13 @@ public:
 template <typename TimeT> class TimePoint : public TimePointBase
 {
 public:
-    explicit TimePoint(const TimeT time) : time_(time) {}
+    explicit TimePoint(const TimeT time) :
+        time_(time)
+    {
+    }
 
     /// Apply the stored type-specific time value to the INSERT at column 0
-    void apply(PreparedINSERT* inserter) const override final
-    {
-        inserter->setColumnValue(0, time_);
-    }
+    void apply(PreparedINSERT* inserter) const override final { inserter->setColumnValue(0, time_); }
 
     /// Check if the given time point is equal to ours (dynamic cast must succeed)
     bool equals(const TimePointBase* time_point, bool must_be_equal_or_less = false) const override final
@@ -50,11 +50,9 @@ public:
             if (time_ == typed_time_point->time_)
             {
                 return true;
-            }
-            else if (must_be_equal_or_less && !lessThan(typed_time_point))
+            } else if (must_be_equal_or_less && !lessThan(typed_time_point))
             {
-                throw DBException("Time comparison failure: ")
-                    << time_ << " <= " << typed_time_point->time_;
+                throw DBException("Time comparison failure: ") << time_ << " <= " << typed_time_point->time_;
             }
             return false;
         }
@@ -84,13 +82,11 @@ public:
         if constexpr (std::is_same_v<TimeT, uint64_t>)
         {
             query->addConstraintForUInt64("Timestamp", Constraints::EQUAL, time_);
-        }
-        else if constexpr (std::is_integral_v<TimeT>)
+        } else if constexpr (std::is_integral_v<TimeT>)
         {
             auto time = static_cast<int64_t>(time_);
             query->addConstraintForInt64("Timestamp", Constraints::EQUAL, time);
-        }
-        else
+        } else
         {
             static_assert(std::is_floating_point_v<TimeT>);
             query->addConstraintForDouble("Timestamp", Constraints::EQUAL, time_);
@@ -109,10 +105,7 @@ public:
     }
 
     /// Stringify the current time value
-    std::string getTimeAsString() const override final
-    {
-        return std::to_string(time_);
-    }
+    std::string getTimeAsString() const override final { return std::to_string(time_); }
 
 private:
     const TimeT time_;
@@ -169,22 +162,17 @@ public:
         if (backpointer_)
         {
             time = *backpointer_;
-        }
-        else if (cfuncpointer_)
+        } else if (cfuncpointer_)
         {
             time = cfuncpointer_();
-        }
-        else
+        } else
         {
             time = stdfunction_();
         }
         return std::make_shared<TimePoint<TimeT>>(time);
     }
 
-    std::string getTimeAsString() const
-    {
-        return snapshot()->getTimeAsString();
-    }
+    std::string getTimeAsString() const { return snapshot()->getTimeAsString(); }
 
 private:
     const TimeT* backpointer_ = nullptr;

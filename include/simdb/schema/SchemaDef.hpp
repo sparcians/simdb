@@ -169,10 +169,7 @@ public:
     }
 
     /// Check if this column should be created with the UNIQUE tag.
-    bool isUnique() const
-    {
-        return unique_col_;
-    }
+    bool isUnique() const { return unique_col_; }
 
 private:
     /// Default values are stringified. For doubles, we need maximum precision.

@@ -20,9 +20,8 @@ public:
     /// \param participate_in_byte_trace When false, this buffer never records to
     ///        \ref simdb::utils::active_collection_byte_tracer (use for scratch
     ///        buffers whose bytes are not part of the persisted collection layout).
-    StreamBuffer(std::vector<char>& out,
-                 bool clear_first = true)
-        : out_(out)
+    StreamBuffer(std::vector<char>& out, bool clear_first = true) :
+        out_(out)
     {
         if (clear_first)
         {
@@ -43,37 +42,31 @@ public:
         append(&byte, sizeof(byte));
     }
 
-    template <typename T>
-    void append(const T& val)
+    template <typename T> void append(const T& val)
     {
         static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
         append(&val, sizeof(T));
     }
 
-    template <typename T, typename Alloc>
-    void append(const std::vector<T, Alloc>& val)
+    template <typename T, typename Alloc> void append(const std::vector<T, Alloc>& val)
     {
         static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
         append(val.data(), val.size() * sizeof(T));
     }
 
-    template <typename T, size_t N>
-    void append(const T (&val)[N])
+    template <typename T, size_t N> void append(const T (&val)[N])
     {
         static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
         append(val, N * sizeof(T));
     }
 
-    template <typename T, size_t N>
-    void append(const std::array<T, N>& val)
+    template <typename T, size_t N> void append(const std::array<T, N>& val)
     {
         static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
         append(val.data(), N * sizeof(T));
     }
 
-    template <typename T>
-    std::enable_if_t<std::is_enum_v<T>, void>
-    append(const T val) = delete;
+    template <typename T> std::enable_if_t<std::is_enum_v<T>, void> append(const T val) = delete;
 
     size_t size() const { return out_.size(); }
 

@@ -228,21 +228,23 @@ template <typename T> constexpr auto is_std_list_v = is_std_list<T>::value;
 
 template <typename T>
 static constexpr bool is_collectable_stl_v =
-    type_traits::is_std_vector_v<T> ||
-    type_traits::is_std_deque_v<T>  ||
-    type_traits::is_std_list_v<T>;
+    type_traits::is_std_vector_v<T> || type_traits::is_std_deque_v<T> || type_traits::is_std_list_v<T>;
 
-template <typename T>
-struct is_std_pair : std::false_type {};
+template <typename T> struct is_std_pair : std::false_type
+{
+};
 
-template <typename A, typename B>
-struct is_std_pair<std::pair<A, B>> : std::true_type {};
+template <typename A, typename B> struct is_std_pair<std::pair<A, B>> : std::true_type
+{
+};
 
-template <typename T>
-struct is_std_tuple : std::false_type {};
+template <typename T> struct is_std_tuple : std::false_type
+{
+};
 
-template <typename... Ts>
-struct is_std_tuple<std::tuple<Ts...>> : std::true_type {};
+template <typename... Ts> struct is_std_tuple<std::tuple<Ts...>> : std::true_type
+{
+};
 
 // TypeAt<N, Ts...> gets the N-th type in the parameter pack Ts...
 template <std::size_t N, typename... Ts> struct TypeAt;
@@ -263,73 +265,113 @@ template <std::size_t N, typename T, typename... Ts> struct TypeAt<N, T, Ts...>
  *  the return type from any random function pointer.
  *  This is specialized for a couple different signatures.
  */
-template <typename T>
-struct return_type { using type = T; };
+template <typename T> struct return_type
+{
+    using type = T;
+};
 
-template <typename R, typename... Ts>
-struct return_type<std::function<R (Ts...)>> { using type = R; };
+template <typename R, typename... Ts> struct return_type<std::function<R(Ts...)>>
+{
+    using type = R;
+};
 
-template <typename R, typename... Ts>
-struct return_type<std::function<R (Ts...)> const> { using type = R; };
+template <typename R, typename... Ts> struct return_type<std::function<R(Ts...)> const>
+{
+    using type = R;
+};
 
-template <typename R, typename T, typename... Ts>
-struct return_type<std::function<R (Ts...)> T:: *> { using type = R; };
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> T::*>
+{
+    using type = R;
+};
 
-template <typename R, typename T, typename... Ts>
-struct return_type<std::function<R (Ts...)> const T:: *> { using type = R; };
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> const T::*>
+{
+    using type = R;
+};
 
-template <typename R, typename T, typename... Ts>
-struct return_type<std::function<R (Ts...)> T:: * const &> { using type = R; };
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> T::* const&>
+{
+    using type = R;
+};
 
-template <typename R, typename T, typename... Ts>
-struct return_type<std::function<R (Ts...)> const T:: * const> { using type = R; };
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> const T::* const>
+{
+    using type = R;
+};
 
-template <typename R, typename... Ts>
-struct return_type<R (*)(Ts...)> { using type = R; };
+template <typename R, typename... Ts> struct return_type<R (*)(Ts...)>
+{
+    using type = R;
+};
 
-template <typename R, typename... Ts>
-struct return_type<R& (*)(Ts...)> { using type = R; };
+template <typename R, typename... Ts> struct return_type<R& (*)(Ts...)>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<R (T:: *)() const> { using type = R; };
+template <typename R, typename T> struct return_type<R (T::*)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<R & (T:: *)() const> { using type = R; };
+template <typename R, typename T> struct return_type<R& (T::*)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<std::shared_ptr<R> (T:: *)() const> { using type = R; };
+template <typename R, typename T> struct return_type<std::shared_ptr<R> (T::*)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<std::shared_ptr<R> & (T:: *)() const> { using type = R; };
+template <typename R, typename T> struct return_type<std::shared_ptr<R>& (T::*)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<R (T:: * const)() const> { using type = R; };
+template <typename R, typename T> struct return_type<R (T::* const)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<R & (T:: * const)() const> { using type = R; };
+template <typename R, typename T> struct return_type<R& (T::* const)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<std::shared_ptr<R> (T:: * const)() const> { using type = R; };
+template <typename R, typename T> struct return_type<std::shared_ptr<R> (T::* const)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<std::shared_ptr<R> & (T:: * const)() const> { using type = R; };
+template <typename R, typename T> struct return_type<std::shared_ptr<R>& (T::* const)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<R (T:: * const &)() const> { using type = R; };
+template <typename R, typename T> struct return_type<R (T::* const&)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<R & (T:: * const &)() const> { using type = R; };
+template <typename R, typename T> struct return_type<R& (T::* const&)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<std::shared_ptr<R> (T:: * const &)() const> { using type = R; };
+template <typename R, typename T> struct return_type<std::shared_ptr<R> (T::* const&)() const>
+{
+    using type = R;
+};
 
-template <typename R, typename T>
-struct return_type<std::shared_ptr<R> & (T:: * const &)() const> { using type = R; };
+template <typename R, typename T> struct return_type<std::shared_ptr<R>& (T::* const&)() const>
+{
+    using type = R;
+};
 
-template <typename T>
-using return_type_t = typename return_type<T>::type;
+template <typename T> using return_type_t = typename return_type<T>::type;
 
-template <typename T>
-inline constexpr bool always_false_v = false;
+template <typename T> inline constexpr bool always_false_v = false;
 
 } // namespace simdb::type_traits

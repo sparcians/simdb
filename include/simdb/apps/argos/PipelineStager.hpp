@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/apps/argos/CollectedData.hpp"
 #include "simdb/apps/argos/LifecycleAction.hpp"
+#include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
 
 #include <map>
@@ -36,17 +36,15 @@ public:
     virtual std::string getTimeAsString() const = 0;
 };
 
-template <typename TimeT>
-class PipelineStager final : public PipelineStagerBase
+template <typename TimeT> class PipelineStager final : public PipelineStagerBase
 {
 public:
-    PipelineStager(size_t heartbeat,
-                   Timestamp<TimeT>* timestamp,
-                   ConcurrentQueue<QueueCollectionData>* pipeline_head)
-        : heartbeat_(heartbeat)
-        , timestamp_(timestamp)
-        , pipeline_head_(pipeline_head)
-    {}
+    PipelineStager(size_t heartbeat, Timestamp<TimeT>* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head) :
+        heartbeat_(heartbeat),
+        timestamp_(timestamp),
+        pipeline_head_(pipeline_head)
+    {
+    }
 
     void stage(CollectedData&& data) override
     {
@@ -59,12 +57,10 @@ public:
         if (!last_stage_time_)
         {
             last_stage_time_ = current_time;
-        }
-        else if (!current_time->lessThan(last_stage_time_.get()))
+        } else if (!current_time->lessThan(last_stage_time_.get()))
         {
             last_stage_time_ = current_time;
-        }
-        else
+        } else
         {
             throw DBException("Time must be monotonically increasing");
         }
@@ -73,8 +69,7 @@ public:
         {
             CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
             collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
-        }
-        else
+        } else
         {
             QueueCollectionData entry;
             entry.time_point = current_time;
@@ -98,12 +93,10 @@ public:
         if (!last_stage_time_)
         {
             last_stage_time_ = current_time;
-        }
-        else if (!current_time->lessThan(last_stage_time_.get()))
+        } else if (!current_time->lessThan(last_stage_time_.get()))
         {
             last_stage_time_ = current_time;
-        }
-        else
+        } else
         {
             throw DBException("Time must be monotonically increasing");
         }
@@ -112,8 +105,7 @@ public:
         {
             EnabledChangedAtTimePoint& changes = waiting_queue_.back().enabled_changes;
             changes.emplace_back(std::make_pair(cid, enabled));
-        }
-        else
+        } else
         {
             QueueCollectionData entry;
             entry.time_point = current_time;
@@ -128,12 +120,10 @@ public:
         if (!last_stage_time_)
         {
             last_stage_time_ = current_time;
-        }
-        else if (!current_time->lessThan(last_stage_time_.get()))
+        } else if (!current_time->lessThan(last_stage_time_.get()))
         {
             last_stage_time_ = current_time;
-        }
-        else
+        } else
         {
             throw DBException("Time must be monotonically increasing");
         }
@@ -142,8 +132,7 @@ public:
         {
             QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
             changes.emplace_back(std::make_pair(cid, quiet));
-        }
-        else
+        } else
         {
             QueueCollectionData entry;
             entry.time_point = current_time;
@@ -152,10 +141,7 @@ public:
         }
     }
 
-    std::string getTimeAsString() const override
-    {
-        return timestamp_->getTimeAsString();
-    }
+    std::string getTimeAsString() const override { return timestamp_->getTimeAsString(); }
 
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
@@ -174,11 +160,8 @@ private:
         return raw_action < static_cast<uint8_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
     }
 
-    void queueLifecycleAction_(
-        QueueCollectionData& collection_data,
-        uint16_t cid,
-        LifecycleAction action,
-        bool append_last_payload)
+    void queueLifecycleAction_(QueueCollectionData& collection_data, uint16_t cid, LifecycleAction action,
+                               bool append_last_payload)
     {
         const std::vector<char>* full_payload = nullptr;
         if (append_last_payload)
@@ -214,8 +197,8 @@ private:
         // multiple times at the same time point, only take the last collected
         // value.
         std::map<uint16_t, std::unique_ptr<CollectedData>> collected_data_by_cid;
-        for (auto rit = collection_at_time.collection_data.rbegin();
-             rit != collection_at_time.collection_data.rend(); ++rit)
+        for (auto rit = collection_at_time.collection_data.rbegin(); rit != collection_at_time.collection_data.rend();
+             ++rit)
         {
             auto cid = (*rit)->getCID();
             auto& collected_data = collected_data_by_cid[cid];
@@ -259,8 +242,7 @@ private:
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
                 queueLifecycleAction_(to_send, cid, LifecycleAction::DISABLED, false);
-            }
-            else
+            } else
             {
                 // Re-enabled CIDs are again eligible to refresh.
                 enabled_cids_.insert(cid);
@@ -279,8 +261,7 @@ private:
                 refreshable_cids_.erase(cid);
                 countdowns_to_refresh_.erase(cid);
                 queueLifecycleAction_(to_send, cid, LifecycleAction::QUIETED, false);
-            }
-            else if (enabled_cids_.find(cid) != enabled_cids_.end())
+            } else if (enabled_cids_.find(cid) != enabled_cids_.end())
             {
                 refreshable_cids_.insert(cid);
                 countdowns_to_refresh_[cid] = heartbeat_;
@@ -322,7 +303,8 @@ private:
                 if (action == kFirstMinifierAction)
                 {
                     // Persist only FULL payload bytes for lifecycle re-entry.
-                    const auto payload_begin = data_bytes.begin() + static_cast<std::ptrdiff_t>(kCidBytes + kActionBytes);
+                    const auto payload_begin =
+                        data_bytes.begin() + static_cast<std::ptrdiff_t>(kCidBytes + kActionBytes);
                     last_full_payload_bytes_[cid] = std::vector<char>(payload_begin, data_bytes.end());
                 }
             }
@@ -331,11 +313,8 @@ private:
         for (auto cid : missing_cids)
         {
             if (std::any_of(
-                    to_send.collection_data.begin(),
-                    to_send.collection_data.end(),
-                    [cid](const std::unique_ptr<CollectedData>& data) {
-                        return data && data->getCID() == cid;
-                    }))
+                    to_send.collection_data.begin(), to_send.collection_data.end(),
+                    [cid](const std::unique_ptr<CollectedData>& data) { return data && data->getCID() == cid; }))
             {
                 // This CID already emitted a record at this time point (e.g.
                 // fresh FULL data or lifecycle replay payload). Avoid emitting
@@ -375,8 +354,8 @@ private:
     }
 
     const size_t heartbeat_;
-    Timestamp<TimeT> *const timestamp_;
-    ConcurrentQueue<QueueCollectionData> *const pipeline_head_;
+    Timestamp<TimeT>* const timestamp_;
+    ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
     std::queue<QueueCollectionData> waiting_queue_;
     CollectionTime last_stage_time_;
     std::unordered_set<uint16_t> enabled_cids_;

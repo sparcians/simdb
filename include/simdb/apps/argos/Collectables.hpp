@@ -19,10 +19,7 @@ public:
     uint16_t getID() const { return cid_; }
 
     /// \brief Connect to the ArgosCollector's main input queue
-    void connectToPipeline(PipelineStagerBase* stager)
-    {
-        stager_ = stager;
-    }
+    void connectToPipeline(PipelineStagerBase* stager) { stager_ = stager; }
 
     /// Enable collection
     void enable()
@@ -86,16 +83,10 @@ public:
     }
 
     /// Check enabled
-    bool enabled() const
-    {
-        return enabled_ && stager_ != nullptr;
-    }
+    bool enabled() const { return enabled_ && stager_ != nullptr; }
 
     /// Check whether heartbeat re-emission is suppressed.
-    bool quieted() const
-    {
-        return quiet_;
-    }
+    bool quieted() const { return quiet_; }
 
     /// Demangled element type for scalars, or element demangle + \c _contig_capacityN /
     /// \c _sparse_capacityN for queues.
@@ -105,30 +96,23 @@ public:
     virtual void writeMetaOnPostTeardown(DatabaseManager*) const {}
 
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
-    static void resetCIDs()
-    {
-        nextCID_() = 0;
-    }
+    static void resetCIDs() { nextCID_() = 0; }
 
 protected:
-    explicit CollectableBase(size_t heartbeat)
-        : heartbeat_(heartbeat)
-    {}
-
-    /// Get the heartbeat value for all collection points.
-    size_t getHeartbeat_() const
+    explicit CollectableBase(size_t heartbeat) :
+        heartbeat_(heartbeat)
     {
-        return heartbeat_;
     }
 
-    template <typename T>
-    static std::string scalarTypeName_()
+    /// Get the heartbeat value for all collection points.
+    size_t getHeartbeat_() const { return heartbeat_; }
+
+    template <typename T> static std::string scalarTypeName_()
     {
         if constexpr (std::is_same_v<T, std::string>)
         {
             return "string";
-        }
-        else
+        } else
         {
             return simdb::demangle_type<T>();
         }
@@ -151,8 +135,7 @@ private:
         static uint16_t counter = 0;
         if (counter == UINT16_MAX)
         {
-            throw DBException("Max number of collectables exceeded (")
-                << UINT16_MAX << ")";
+            throw DBException("Max number of collectables exceeded (") << UINT16_MAX << ")";
         }
         ++counter;
         return counter;
@@ -186,15 +169,13 @@ private:
 class CollectionEntryPoint : public CollectableBase
 {
 public:
-    CollectionEntryPoint(size_t heartbeat, TinyStrings<>* tiny_strings)
-        : CollectableBase(heartbeat)
-        , tiny_strings_(tiny_strings)
-    {}
-
-    TinyStrings<>* getTinyStrings() const
+    CollectionEntryPoint(size_t heartbeat, TinyStrings<>* tiny_strings) :
+        CollectableBase(heartbeat),
+        tiny_strings_(tiny_strings)
     {
-        return tiny_strings_;
     }
+
+    TinyStrings<>* getTinyStrings() const { return tiny_strings_; }
 
     void setScalarDataType(const std::string& dtype)
     {
@@ -211,8 +192,7 @@ public:
         {
             collectable_type_name_ += "_sparse_capacity";
             is_sparse_container_ = true;
-        }
-        else
+        } else
         {
             collectable_type_name_ += "_contig_capacity";
             is_contig_container_ = true;
@@ -229,8 +209,7 @@ public:
         return collectable_type_name_;
     }
 
-    template <typename ScalarT>
-    void setScalarValue(const ScalarT& val)
+    template <typename ScalarT> void setScalarValue(const ScalarT& val)
     {
         if (!enabled())
         {
@@ -244,18 +223,15 @@ public:
             auto enum_str = oss.str();
             auto enum_sid = tiny_strings_->getStringID(enum_str);
             setScalarValue(enum_sid);
-        }
-        else if constexpr (std::is_same_v<ScalarT, std::string>)
+        } else if constexpr (std::is_same_v<ScalarT, std::string>)
         {
             auto sid = tiny_strings_->getStringID(val);
             setScalarValue(sid);
-        }
-        else if constexpr (std::is_same_v<std::decay_t<ScalarT>, const char*>)
+        } else if constexpr (std::is_same_v<std::decay_t<ScalarT>, const char*>)
         {
             auto sid = tiny_strings_->getStringID(val);
             setScalarValue(sid);
-        }
-        else
+        } else
         {
             static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
             std::vector<char> bytes;
@@ -290,8 +266,7 @@ public:
             if (!bytes.empty())
             {
                 ++size;
-            }
-            else
+            } else
             {
                 break;
             }

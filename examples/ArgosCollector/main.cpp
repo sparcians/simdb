@@ -1,7 +1,7 @@
 #include "RandUtils.hpp"
 #include "SimDBTester.hpp"
-#include "simdb/apps/argos/ArgosCollector.hpp"
 #include "simdb/apps/AppManager.hpp"
+#include "simdb/apps/argos/ArgosCollector.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
 #include <map>
@@ -21,13 +21,15 @@ std::mt19937_64& testRng()
 }
 
 template <typename IntT>
-IntT randomInt(const IntT min_inclusive = std::numeric_limits<IntT>::min(), const IntT max_inclusive = std::numeric_limits<IntT>::max())
+IntT randomInt(const IntT min_inclusive = std::numeric_limits<IntT>::min(),
+               const IntT max_inclusive = std::numeric_limits<IntT>::max())
 {
     std::uniform_int_distribution<IntT> dist(min_inclusive, max_inclusive);
     return dist(testRng());
 }
 
-double randomDouble(const double min_inclusive = std::numeric_limits<double>::min(), const double max_inclusive = std::numeric_limits<double>::max())
+double randomDouble(const double min_inclusive = std::numeric_limits<double>::min(),
+                    const double max_inclusive = std::numeric_limits<double>::max())
 {
     std::uniform_real_distribution<double> dist(min_inclusive, max_inclusive);
     return dist(testRng());
@@ -41,10 +43,9 @@ bool randomBool(const int denominator = 2)
 
 std::string randomString(size_t num_chars = 8)
 {
-    static constexpr char charset[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
+    static constexpr char charset[] = "0123456789"
+                                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                      "abcdefghijklmnopqrstuvwxyz";
 
     constexpr size_t charset_size = sizeof(charset) - 1; // exclude null terminator
 
@@ -59,32 +60,33 @@ std::string randomString(size_t num_chars = 8)
     return result;
 }
 
-enum InstType
-{
-    NO_OP,
-    MEM,
-    CSR,
-    ILLEGAL,
-    __N
-};
+enum InstType { NO_OP, MEM, CSR, ILLEGAL, __N };
 
 std::ostream& operator<<(std::ostream& os, const InstType type)
 {
     switch (type)
     {
-    case NO_OP:   os << "NO_OP"; break;
-    case MEM:     os << "MEM"; break;
-    case CSR:     os << "CSR"; break;
-    case ILLEGAL: os << "ILLEGAL"; break;
-    case __N:     throw simdb::DBException("Invalid enum");
+    case NO_OP:
+        os << "NO_OP";
+        break;
+    case MEM:
+        os << "MEM";
+        break;
+    case CSR:
+        os << "CSR";
+        break;
+    case ILLEGAL:
+        os << "ILLEGAL";
+        break;
+    case __N:
+        throw simdb::DBException("Invalid enum");
     }
     return os;
 }
 
 InstType randomEnum()
 {
-    return static_cast<InstType>(
-        randomInt<int>(0, static_cast<int>(InstType::__N) - 1));
+    return static_cast<InstType>(randomInt<int>(0, static_cast<int>(InstType::__N) - 1));
 }
 
 class Instruction
@@ -111,13 +113,14 @@ public:
     uint32_t getCsr() const { return csr_; }
     bool finishesSim() const { return last_inst_; }
 
-    Instruction(InstType type, uint64_t opcode, const std::string& mnemonic, uint32_t csr = 0, bool last_inst = false)
-        : type_(type)
-        , opcode_(opcode)
-        , mnemonic_(mnemonic)
-        , csr_(csr)
-        , last_inst_(last_inst)
-    {}
+    Instruction(InstType type, uint64_t opcode, const std::string& mnemonic, uint32_t csr = 0, bool last_inst = false) :
+        type_(type),
+        opcode_(opcode),
+        mnemonic_(mnemonic),
+        csr_(csr),
+        last_inst_(last_inst)
+    {
+    }
 
     Instruction(const Instruction&) = default;
     Instruction& operator=(const Instruction&) = default;
@@ -127,19 +130,14 @@ public:
         auto type = static_cast<InstType>(randomInt<int>(0, static_cast<int>(InstType::__N) - 1));
         auto opcode = randomInt<uint64_t>(0, std::numeric_limits<uint32_t>::max());
 
-        static const char* mnemonics[] = {
-            "add", "addi", "li", "b", "jlr"
-        };
+        static const char* mnemonics[] = {"add", "addi", "li", "b", "jlr"};
         auto mnemonic = mnemonics[randomInt<int>(0, 4)];
         auto csr = type == InstType::CSR ? randomInt<uint32_t>(0, 255) : 0;
         auto last_inst = randomBool(100);
         return new Instruction(type, opcode, mnemonic, csr, last_inst);
     }
 
-    static std::shared_ptr<Instruction> genRandom()
-    {
-        return std::shared_ptr<Instruction>(newRandom());
-    }
+    static std::shared_ptr<Instruction> genRandom() { return std::shared_ptr<Instruction>(newRandom()); }
 
     using InstQueue = std::vector<std::shared_ptr<Instruction>>;
 
@@ -173,10 +171,7 @@ public:
         return q;
     }
 
-    void randomize()
-    {
-        *this = *genRandom();
-    }
+    void randomize() { *this = *genRandom(); }
 
     // TODO cnyce: This should be handled by the Sparta pair collector.
     void writeToBuffer(simdb::StreamBuffer& buf, simdb::TinyStrings<>* tiny_strings) const
@@ -211,10 +206,10 @@ void TestScalarCollection()
     argos_collector->setHeartbeat(3);
 
     // TODO cnyce: This code will be called from Sparta (Collectable/IterableCollector)
-    auto int_collector    = argos_collector->createScalarCollector<int32_t>("top.int32", "root");
+    auto int_collector = argos_collector->createScalarCollector<int32_t>("top.int32", "root");
     auto string_collector = argos_collector->createScalarCollector<std::string>("top.string", "root");
-    auto enum_collector   = argos_collector->createScalarCollector<InstType>("top.inst_type", "root");
-    auto bool_collector   = argos_collector->createScalarCollector<bool>("top.bool", "root");
+    auto enum_collector = argos_collector->createScalarCollector<InstType>("top.inst_type", "root");
+    auto bool_collector = argos_collector->createScalarCollector<bool>("top.bool", "root");
     auto struct_collector = argos_collector->createScalarCollector<Instruction>("top.inst", "root");
 
     // TODO cnyce: This code will be called from Sparta (PipelineCollector)
@@ -262,8 +257,7 @@ void TestScalarCollection()
     app_mgrs.postSimLoopTeardown();
 }
 
-template <bool Sparse>
-void TestInstQueueContainerCollection()
+template <bool Sparse> void TestInstQueueContainerCollection()
 {
     TEST_METHOD_INIT;
 
@@ -271,8 +265,7 @@ void TestInstQueueContainerCollection()
     if constexpr (Sparse)
     {
         db_file = "sparse.db";
-    }
-    else
+    } else
     {
         db_file = "contig.db";
     }
@@ -289,7 +282,8 @@ void TestInstQueueContainerCollection()
 
     // TODO cnyce: This code will be called from Sparta (Collectable/IterableCollector)
     constexpr size_t capacity = 8;
-    auto queue_collector = argos_collector->createContainerCollector<Instruction, Sparse>("top.instq", "root", capacity);
+    auto queue_collector =
+        argos_collector->createContainerCollector<Instruction, Sparse>("top.instq", "root", capacity);
 
     // TODO cnyce: This code will be called from Sparta (PipelineCollector)
     uint64_t tick = 0;
@@ -321,8 +315,7 @@ void TestInstQueueContainerCollection()
                 sparse_bin_bytes.emplace(static_cast<uint16_t>(i), std::move(bytes));
             }
             queue_collector->setSparseContainerBinBytes(sparse_bin_bytes);
-        }
-        else
+        } else
         {
             std::vector<std::vector<char>> contig_bin_bytes;
             for (size_t i = 0; i < queue.size(); ++i)

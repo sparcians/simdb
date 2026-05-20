@@ -13,44 +13,49 @@ inline constexpr size_t DEFAULT_HEARTBEAT = 10;
 
 namespace detail {
 
-template <typename T, typename = void>
-struct has_ostream_insertion : std::false_type {};
+template <typename T, typename = void> struct has_ostream_insertion : std::false_type
+{
+};
 
 template <typename T>
-struct has_ostream_insertion<
-    T,
-    std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
-    : std::true_type {};
+struct has_ostream_insertion<T, std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
+    : std::true_type
+{
+};
 
-template <typename T>
-inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
+template <typename T> inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
 
-template <typename T>
-struct is_pair : std::false_type {};
+template <typename T> struct is_pair : std::false_type
+{
+};
 
-template <typename F, typename S>
-struct is_pair<std::pair<F, S>> : std::true_type {};
+template <typename F, typename S> struct is_pair<std::pair<F, S>> : std::true_type
+{
+};
 
-template <typename T>
-inline constexpr bool is_pair_v = is_pair<T>::value;
+template <typename T> inline constexpr bool is_pair_v = is_pair<T>::value;
 
-template <typename T>
-struct is_stl : std::false_type {};
+template <typename T> struct is_stl : std::false_type
+{
+};
 
-template <typename T, typename Alloc>
-struct is_stl<std::vector<T, Alloc>> : std::true_type {};
+template <typename T, typename Alloc> struct is_stl<std::vector<T, Alloc>> : std::true_type
+{
+};
 
-template <typename T, typename Alloc>
-struct is_stl<std::deque<T, Alloc>> : std::true_type {};
+template <typename T, typename Alloc> struct is_stl<std::deque<T, Alloc>> : std::true_type
+{
+};
 
-template <typename T, typename Alloc>
-struct is_stl<std::list<T, Alloc>> : std::true_type {};
+template <typename T, typename Alloc> struct is_stl<std::list<T, Alloc>> : std::true_type
+{
+};
 
-template <typename T, size_t N>
-struct is_stl<std::array<T, N>> : std::true_type {};
+template <typename T, size_t N> struct is_stl<std::array<T, N>> : std::true_type
+{
+};
 
-template <typename T>
-inline constexpr bool is_stl_v = is_stl<T>::value;
+template <typename T> inline constexpr bool is_stl_v = is_stl<T>::value;
 
 } // namespace detail
 
@@ -59,9 +64,10 @@ class ArgosCollector : public App
 public:
     static constexpr auto NAME = "argos-collector";
 
-    ArgosCollector(DatabaseManager* db_mgr)
-        : db_mgr_(db_mgr)
-    {}
+    ArgosCollector(DatabaseManager* db_mgr) :
+        db_mgr_(db_mgr)
+    {
+    }
 
     static void defineSchema(Schema& schema)
     {
@@ -125,10 +131,7 @@ public:
         unsupported_tbl.unsetPrimaryKey();
     }
 
-    void setVerbose(bool verbose = true)
-    {
-        verbose_ = verbose;
-    }
+    void setVerbose(bool verbose = true) { verbose_ = verbose; }
 
     void setHeartbeat(size_t heartbeat)
     {
@@ -143,10 +146,7 @@ public:
         heartbeat_ = heartbeat;
     }
 
-    void addClock(const std::string& clk_name, size_t period)
-    {
-        addClock(clk_name, period, 0, 0);
-    }
+    void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
 
     void addClock(const std::string& clk_name, size_t period, size_t numer, size_t denom)
     {
@@ -156,8 +156,7 @@ public:
             {
                 if (period != _period || numer != _numer || denom != _denom)
                 {
-                    throw DBException("Clock mismatch - already registered with different params: ")
-                        << clk_name;
+                    throw DBException("Clock mismatch - already registered with different params: ") << clk_name;
                 }
             }
         }
@@ -211,7 +210,8 @@ public:
     }
 
     template <typename BinT, bool Sparse>
-    CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name, size_t capacity)
+    CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
+                                                   size_t capacity)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
         entry_point->setContainerDataType(encodeTypeName<BinT>(), Sparse, capacity);
@@ -227,30 +227,25 @@ public:
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
     }
 
-    template <typename T>
-    static std::string encodeTypeName()
+    template <typename T> static std::string encodeTypeName()
     {
         if constexpr (std::is_same_v<T, std::string>)
         {
             return "string";
-        }
-        else if constexpr (std::is_same_v<std::decay_t<T>, const char*>)
+        } else if constexpr (std::is_same_v<std::decay_t<T>, const char*>)
         {
             return "string";
-        }
-        else if constexpr (std::is_enum_v<T> && detail::has_ostream_insertion_v<T>)
+        } else if constexpr (std::is_enum_v<T> && detail::has_ostream_insertion_v<T>)
         {
             // For now, stringifiable enums collect as strings
             return "string";
-        }
-        else if constexpr (std::is_enum_v<T>)
+        } else if constexpr (std::is_enum_v<T>)
         {
             // Non-stringifiable enums collect as raw uint64_t values
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        }
-        else if constexpr (detail::is_pair_v<T>)
+        } else if constexpr (detail::is_pair_v<T>)
         {
             using FirstT = typename T::first_type;
             auto first_type = encodeTypeName<FirstT>();
@@ -259,28 +254,20 @@ public:
             auto second_type = encodeTypeName<SecondT>();
 
             return "pair(" + first_type + "," + second_type + ")";
-        }
-        else if constexpr (detail::is_stl_v<T>)
+        } else if constexpr (detail::is_stl_v<T>)
         {
             using ValueT = typename T::value_type;
             auto value_type = encodeTypeName<ValueT>();
             return "stl(" + value_type + ")";
-        }
-        else
+        } else
         {
             return demangle_type<T>();
         }
     }
 
-    TinyStrings<>* getTinyStrings()
-    {
-        return &tiny_strings_;
-    }
+    TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
 
-    void markUnsupported(const std::string& collectable_path)
-    {
-        unsupported_paths_.insert(collectable_path);
-    }
+    void markUnsupported(const std::string& collectable_path) { unsupported_paths_.insert(collectable_path); }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
@@ -410,10 +397,7 @@ private:
     class Writer : public pipeline::DatabaseStage<ArgosCollector>
     {
     public:
-        Writer()
-        {
-            addInPort_<CompressedQueueCollectionData>("input_queue", input_queue_);
-        }
+        Writer() { addInPort_<CompressedQueueCollectionData>("input_queue", input_queue_); }
 
     private:
         pipeline::PipelineAction run_(bool) override
@@ -437,23 +421,21 @@ private:
         ConcurrentQueue<CompressedQueueCollectionData>* input_queue_ = nullptr;
     };
 
-    DatabaseManager *const db_mgr_;
+    DatabaseManager* const db_mgr_;
     TinyStrings<> tiny_strings_{db_mgr_};
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
     bool verbose_ = false;
 
-    using ClockDescriptor = std::tuple<
-        std::string, // clk name
-        uint32_t,    // period
-        uint32_t,    // numerator
-        uint32_t     // denominator
-    >;
+    using ClockDescriptor = std::tuple<std::string, // clk name
+                                       uint32_t,    // period
+                                       uint32_t,    // numerator
+                                       uint32_t     // denominator
+                                       >;
     std::vector<ClockDescriptor> clocks_;
 
-    using CollectableMeta = std::tuple<
-        std::string, // dot-delimited path
-        std::string  // clk name
-    >;
+    using CollectableMeta = std::tuple<std::string, // dot-delimited path
+                                       std::string  // clk name
+                                       >;
     std::map<uint16_t, CollectableMeta> meta_by_cid_;
 
     std::unique_ptr<Timestamp<uint64_t>> timestamp_;

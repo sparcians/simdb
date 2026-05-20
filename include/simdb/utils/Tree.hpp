@@ -67,8 +67,8 @@ public:
             }
             if (must_exist)
             {
-                throw DBException("Child node does not exist: ") << child_name
-                    << " under parent path '" << getPath() << "'";
+                throw DBException("Child node does not exist: ")
+                    << child_name << " under parent path '" << getPath() << "'";
             }
             return nullptr;
         }
@@ -89,8 +89,8 @@ public:
             }
             if (must_exist)
             {
-                throw DBException("Child node does not exist: ") << child_name
-                    << " under parent path '" << getPath() << "'";
+                throw DBException("Child node does not exist: ")
+                    << child_name << " under parent path '" << getPath() << "'";
             }
             return nullptr;
         }
@@ -101,22 +101,20 @@ public:
         /// \param must_exist If true, throw when child is missing or has incompatible type.
         /// \return Typed child pointer, or nullptr if the child does not exist or has a different type.
         /// \throw DBException If \a must_exist is true and the child is missing or has incompatible type.
-        template <typename NodeT>
-        NodeT* getChildAs(const std::string& child_name, bool must_exist = true)
+        template <typename NodeT> NodeT* getChildAs(const std::string& child_name, bool must_exist = true)
         {
             static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
             auto child = getChild(child_name, must_exist);
             if (!child && must_exist)
             {
-                throw DBException("Child node '") << child_name << "' does not exist under path '"
-                    << getPath() << "'";
+                throw DBException("Child node '") << child_name << "' does not exist under path '" << getPath() << "'";
             }
 
             auto typed_child = dynamic_cast<NodeT*>(child);
             if (!typed_child && must_exist)
             {
-                throw DBException("Child node exists but has incompatible type: ") << child_name
-                    << " under parent path '" << getPath() << "'";
+                throw DBException("Child node exists but has incompatible type: ")
+                    << child_name << " under parent path '" << getPath() << "'";
             }
             return typed_child;
         }
@@ -127,22 +125,20 @@ public:
         /// \param must_exist If true, throw when child is missing or has incompatible type.
         /// \return Typed child pointer, or nullptr if the child does not exist or has a different type.
         /// \throw DBException If \a must_exist is true and the child is missing or has incompatible type.
-        template <typename NodeT>
-        const NodeT* getChildAs(const std::string& child_name, bool must_exist = true) const
+        template <typename NodeT> const NodeT* getChildAs(const std::string& child_name, bool must_exist = true) const
         {
             static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
             auto child = getChild(child_name, must_exist);
             if (!child && must_exist)
             {
-                throw DBException("Child node '") << child_name << "' does not exist under path '"
-                    << getPath() << "'";
+                throw DBException("Child node '") << child_name << "' does not exist under path '" << getPath() << "'";
             }
 
             auto typed_child = dynamic_cast<const NodeT*>(child);
             if (!typed_child && must_exist)
             {
-                throw DBException("Child node exists but has incompatible type: ") << child_name
-                    << " under parent path '" << getPath() << "'";
+                throw DBException("Child node exists but has incompatible type: ")
+                    << child_name << " under parent path '" << getPath() << "'";
             }
             return typed_child;
         }
@@ -152,8 +148,7 @@ public:
         /// \param name Child name; must not contain '.'.
         /// \throw DBException If \a name contains '.', if a sibling with the same name exists
         /// but is not a \a NodeT, or if a new child cannot be added.
-        template <typename NodeT = TreeNode>
-        NodeT* addChild(const std::string& name)
+        template <typename NodeT = TreeNode> NodeT* addChild(const std::string& name)
         {
             static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
             validateName_(name);
@@ -163,8 +158,8 @@ public:
                 auto typed_existing = dynamic_cast<NodeT*>(existing);
                 if (!typed_existing)
                 {
-                    throw DBException("Child node exists but has incompatible type: ") << name
-                        << " under parent path '" << getPath() << "'";
+                    throw DBException("Child node exists but has incompatible type: ")
+                        << name << " under parent path '" << getPath() << "'";
                 }
                 return typed_existing;
             }
@@ -192,8 +187,7 @@ public:
         /// \param must_exist If true, throw when parent is missing or has incompatible type.
         /// \return Typed parent pointer, or nullptr if the parent does not exist or has a different type.
         /// \throw DBException If \a must_exist is true and the parent is missing or has incompatible type.
-        template <typename NodeT>
-        NodeT* getParentAs(bool must_exist = true)
+        template <typename NodeT> NodeT* getParentAs(bool must_exist = true)
         {
             if (!parent_ && must_exist)
             {
@@ -214,8 +208,7 @@ public:
         /// \param must_exist If true, throw when parent is missing or has incompatible type.
         /// \return Typed parent pointer, or nullptr if the parent does not exist or has a different type.
         /// \throw DBException If \a must_exist is true and the parent is missing or has incompatible type.
-        template <typename NodeT>
-        const NodeT* getParentAs(bool must_exist = true) const
+        template <typename NodeT> const NodeT* getParentAs(bool must_exist = true) const
         {
             if (!parent_ && must_exist)
             {
@@ -266,15 +259,14 @@ public:
     private:
         TreeNode() = default;
 
-        template <typename NodeT, typename... Args>
-        NodeT* createChild_(Args&&... args)
+        template <typename NodeT, typename... Args> NodeT* createChild_(Args&&... args)
         {
             static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
             auto child = std::make_unique<NodeT>(std::forward<Args>(args)...);
             if (getChild(child->getName(), false) != nullptr)
             {
-                throw DBException("Cannot add duplicate sibling tree node name: ") << child->getName()
-                    << " under parent path '" << getPath() << "'";
+                throw DBException("Cannot add duplicate sibling tree node name: ")
+                    << child->getName() << " under parent path '" << getPath() << "'";
             }
             auto raw_ptr = child.get();
             children_.emplace_back(std::move(child));
@@ -326,8 +318,7 @@ public:
     /// \tparam RootT Desired root type derived from TreeNode.
     /// \param must_exist If true, throw when root has incompatible type.
     /// \return Typed root pointer, or nullptr on incompatible type when must_exist is false.
-    template <typename RootT>
-    RootT* getRootAs(bool must_exist = true)
+    template <typename RootT> RootT* getRootAs(bool must_exist = true)
     {
         static_assert(std::is_base_of_v<TreeNode, RootT>, "RootT must derive from Tree::TreeNode");
         auto typed_root = dynamic_cast<RootT*>(getRoot());
@@ -342,8 +333,7 @@ public:
     /// \tparam RootT Desired root type derived from TreeNode.
     /// \param must_exist If true, throw when root has incompatible type.
     /// \return Typed root pointer, or nullptr on incompatible type when must_exist is false.
-    template <typename RootT>
-    const RootT* getRootAs(bool must_exist = true) const
+    template <typename RootT> const RootT* getRootAs(bool must_exist = true) const
     {
         static_assert(std::is_base_of_v<TreeNode, RootT>, "RootT must derive from Tree::TreeNode");
         auto typed_root = dynamic_cast<const RootT*>(getRoot());
@@ -405,8 +395,7 @@ public:
     /// \brief Traverse nodes of a specific type in breadth-first order.
     /// \tparam NodeT Desired node type derived from TreeNode.
     /// \param callback Called for each visited typed node; return false to stop traversal.
-    template <typename NodeT>
-    void bfsTypedNodes(std::function<bool(NodeT*)> callback)
+    template <typename NodeT> void bfsTypedNodes(std::function<bool(NodeT*)> callback)
     {
         static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
         bfs([&callback](TreeNode* node) {
@@ -422,8 +411,7 @@ public:
     /// \brief Traverse nodes of a specific type in breadth-first order (const overload).
     /// \tparam NodeT Desired node type derived from TreeNode.
     /// \param callback Called for each visited typed node; return false to stop traversal.
-    template <typename NodeT>
-    void bfsTypedNodes(std::function<bool(const NodeT*)> callback) const
+    template <typename NodeT> void bfsTypedNodes(std::function<bool(const NodeT*)> callback) const
     {
         static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
         bfs([&callback](const TreeNode* node) {
@@ -438,23 +426,16 @@ public:
 
     /// \brief Traverse the tree in depth-first pre-order.
     /// \param callback Called for each visited node; return false to stop traversal.
-    void dfs(std::function<bool(TreeNode*)> callback)
-    {
-        dfsImpl_(root_.get(), callback);
-    }
+    void dfs(std::function<bool(TreeNode*)> callback) { dfsImpl_(root_.get(), callback); }
 
     /// \brief Traverse the tree in depth-first pre-order (const overload).
     /// \param callback Called for each visited node; return false to stop traversal.
-    void dfs(std::function<bool(const TreeNode*)> callback) const
-    {
-        dfsImpl_(root_.get(), callback);
-    }
+    void dfs(std::function<bool(const TreeNode*)> callback) const { dfsImpl_(root_.get(), callback); }
 
     /// \brief Traverse nodes of a specific type in depth-first pre-order.
     /// \tparam NodeT Desired node type derived from TreeNode.
     /// \param callback Called for each visited typed node; return false to stop traversal.
-    template <typename NodeT>
-    void dfsTypedNodes(std::function<bool(NodeT*)> callback)
+    template <typename NodeT> void dfsTypedNodes(std::function<bool(NodeT*)> callback)
     {
         static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
         dfs([&callback](TreeNode* node) {
@@ -470,8 +451,7 @@ public:
     /// \brief Traverse nodes of a specific type in depth-first pre-order (const overload).
     /// \tparam NodeT Desired node type derived from TreeNode.
     /// \param callback Called for each visited typed node; return false to stop traversal.
-    template <typename NodeT>
-    void dfsTypedNodes(std::function<bool(const NodeT*)> callback) const
+    template <typename NodeT> void dfsTypedNodes(std::function<bool(const NodeT*)> callback) const
     {
         static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
         dfs([&callback](const TreeNode* node) {
@@ -491,8 +471,7 @@ public:
     /// \return Pointer to the leaf node at \a path.
     /// \throw DBException If path is empty, contains empty segments, or if an existing node
     /// has an incompatible runtime type for LeafT/IntermediateT.
-    template <typename LeafT = TreeNode, typename IntermediateT = TreeNode>
-    LeafT* createNode(const std::string& path)
+    template <typename LeafT = TreeNode, typename IntermediateT = TreeNode> LeafT* createNode(const std::string& path)
     {
         static_assert(std::is_base_of_v<TreeNode, LeafT>, "LeafT must derive from Tree::TreeNode");
         static_assert(std::is_base_of_v<TreeNode, IntermediateT>, "IntermediateT must derive from Tree::TreeNode");
@@ -525,12 +504,10 @@ public:
                     auto typed_leaf = dynamic_cast<LeafT*>(existing_child);
                     if (!typed_leaf)
                     {
-                        throw DBException("Tree node already exists at path but has incompatible type: ")
-                            << path;
+                        throw DBException("Tree node already exists at path but has incompatible type: ") << path;
                     }
                     current = typed_leaf;
-                }
-                else
+                } else
                 {
                     auto typed_intermediate = dynamic_cast<IntermediateT*>(existing_child);
                     if (!typed_intermediate)
@@ -543,9 +520,8 @@ public:
                 continue;
             }
 
-            current = is_leaf
-                ? static_cast<TreeNode*>(current->createChild_<LeafT>(token, current))
-                : static_cast<TreeNode*>(current->createChild_<IntermediateT>(token, current));
+            current = is_leaf ? static_cast<TreeNode*>(current->createChild_<LeafT>(token, current))
+                              : static_cast<TreeNode*>(current->createChild_<IntermediateT>(token, current));
         }
 
         return dynamic_cast<LeafT*>(current);
@@ -555,8 +531,7 @@ public:
     /// \tparam NodeT Node type used for all path segments.
     /// \param path Dot-delimited path, e.g. "top.mid.leaf".
     /// \return Pointer to the leaf node at \a path.
-    template <typename NodeT = TreeNode>
-    NodeT* createNodes(const std::string& path)
+    template <typename NodeT = TreeNode> NodeT* createNodes(const std::string& path)
     {
         return createNode<NodeT, NodeT>(path);
     }
@@ -566,8 +541,7 @@ public:
     /// \param path Dot-delimited path, e.g. "top.mid.leaf".
     /// \return Reference to the typed node.
     /// \throw DBException If path is invalid, missing, or has incompatible runtime type.
-    template <typename NodeT>
-    NodeT& getNode(const std::string& path)
+    template <typename NodeT> NodeT& getNode(const std::string& path)
     {
         auto node = tryGetNodeAs<NodeT>(path, true /*must_exist*/);
         return *node;
@@ -578,8 +552,7 @@ public:
     /// \param path Dot-delimited path, e.g. "top.mid.leaf".
     /// \return Const reference to the typed node.
     /// \throw DBException If path is invalid, missing, or has incompatible runtime type.
-    template <typename NodeT>
-    const NodeT& getNode(const std::string& path) const
+    template <typename NodeT> const NodeT& getNode(const std::string& path) const
     {
         auto node = tryGetNodeAs<NodeT>(path, true /*must_exist*/);
         return *node;
@@ -591,8 +564,7 @@ public:
     /// \param must_exist If true, throw when missing or type-incompatible.
     /// \return Typed node pointer, or nullptr when not found/incompatible and \a must_exist is false.
     /// \throw DBException If path is invalid, or if \a must_exist is true and node is missing/incompatible.
-    template <typename NodeT>
-    NodeT* tryGetNodeAs(const std::string& path, bool must_exist = true)
+    template <typename NodeT> NodeT* tryGetNodeAs(const std::string& path, bool must_exist = true)
     {
         static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
 
@@ -638,8 +610,7 @@ public:
     /// \param must_exist If true, throw when missing or type-incompatible.
     /// \return Typed node pointer, or nullptr when not found/incompatible and \a must_exist is false.
     /// \throw DBException If path is invalid, or if \a must_exist is true and node is missing/incompatible.
-    template <typename NodeT>
-    const NodeT* tryGetNodeAs(const std::string& path, bool must_exist = true) const
+    template <typename NodeT> const NodeT* tryGetNodeAs(const std::string& path, bool must_exist = true) const
     {
         static_assert(std::is_base_of_v<TreeNode, NodeT>, "NodeT must derive from Tree::TreeNode");
 
@@ -700,14 +671,10 @@ public:
     }
 
     /// \brief Check if there is a node at the given path
-    bool contains(const std::string& path) const
-    {
-        return tryGet(path, false) != nullptr;
-    }
+    bool contains(const std::string& path) const { return tryGet(path, false) != nullptr; }
 
 private:
-    template <typename RootT>
-    static std::unique_ptr<TreeNode> adoptRootNode_(std::unique_ptr<RootT> root)
+    template <typename RootT> static std::unique_ptr<TreeNode> adoptRootNode_(std::unique_ptr<RootT> root)
     {
         static_assert(std::is_base_of_v<TreeNode, RootT>, "RootT must derive from Tree::TreeNode");
         if (!root)

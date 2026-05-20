@@ -13,10 +13,7 @@ private:
 public:
     ValidValue() = default;
 
-    explicit ValidValue(const T& val)
-    {
-        *this = val;
-    }
+    explicit ValidValue(const T& val) { *this = val; }
 
     ValidValue& operator=(const T& val)
     {
