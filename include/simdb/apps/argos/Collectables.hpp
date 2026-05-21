@@ -349,7 +349,7 @@ template <typename ScalarT>
 class ScalarCollector : public CollectableBase
 {
 public:
-    using ValueType = type_traits::remove_any_pointer_t<ScalarT>;
+    using ValueType = MetaStruct::remove_any_pointer_t<ScalarT>;
     static constexpr auto is_string = std::is_same_v<ValueType, std::string>;
     static constexpr auto is_enum = std::is_enum_v<ValueType>;
     static constexpr auto is_struct = !std::is_trivial_v<ValueType> || !std::is_standard_layout_v<ValueType>;

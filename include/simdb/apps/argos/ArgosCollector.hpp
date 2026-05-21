@@ -6,6 +6,7 @@
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/utils/Compress.hpp"
+#include "simdb/utils/MetaStructs.hpp"
 
 namespace simdb::argos {
 
@@ -24,38 +25,6 @@ struct has_ostream_insertion<T, std::void_t<decltype(std::declval<std::ostringst
 };
 
 template <typename T> inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
-
-template <typename T> struct is_pair : std::false_type
-{
-};
-
-template <typename F, typename S> struct is_pair<std::pair<F, S>> : std::true_type
-{
-};
-
-template <typename T> inline constexpr bool is_pair_v = is_pair<T>::value;
-
-template <typename T> struct is_stl : std::false_type
-{
-};
-
-template <typename T, typename Alloc> struct is_stl<std::vector<T, Alloc>> : std::true_type
-{
-};
-
-template <typename T, typename Alloc> struct is_stl<std::deque<T, Alloc>> : std::true_type
-{
-};
-
-template <typename T, typename Alloc> struct is_stl<std::list<T, Alloc>> : std::true_type
-{
-};
-
-template <typename T, size_t N> struct is_stl<std::array<T, N>> : std::true_type
-{
-};
-
-template <typename T> inline constexpr bool is_stl_v = is_stl<T>::value;
 
 } // namespace detail
 
@@ -245,7 +214,7 @@ public:
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        } else if constexpr (detail::is_pair_v<T>)
+        } else if constexpr (MetaStruct::is_pair_v<T>)
         {
             using FirstT = typename T::first_type;
             auto first_type = encodeTypeName<FirstT>();
@@ -254,7 +223,7 @@ public:
             auto second_type = encodeTypeName<SecondT>();
 
             return "pair(" + first_type + "," + second_type + ")";
-        } else if constexpr (detail::is_stl_v<T>)
+        } else if constexpr (MetaStruct::is_stl_v<T>)
         {
             using ValueT = typename T::value_type;
             auto value_type = encodeTypeName<ValueT>();
