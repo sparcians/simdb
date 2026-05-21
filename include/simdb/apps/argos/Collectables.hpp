@@ -276,8 +276,7 @@ public:
         if (!max_container_size_seen_.isValid())
         {
             max_container_size_seen_ = size;
-        }
-        else
+        } else
         {
             max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
         }
@@ -315,8 +314,7 @@ public:
         if (!max_container_size_seen_.isValid())
         {
             max_container_size_seen_ = size;
-        }
-        else
+        } else
         {
             max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
         }
@@ -341,9 +339,7 @@ public:
     {
         if (max_container_size_seen_.isValid())
         {
-            db_mgr->INSERT(
-                SQL_TABLE("QueueMaxSizes"),
-                SQL_VALUES((int)getID(), (int)max_container_size_seen_));
+            db_mgr->INSERT(SQL_TABLE("QueueMaxSizes"), SQL_VALUES((int)getID(), (int)max_container_size_seen_));
         }
     }
 
