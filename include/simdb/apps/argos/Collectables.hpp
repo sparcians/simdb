@@ -273,6 +273,15 @@ public:
         }
 
         assert(size <= UINT16_MAX);
+        if (!max_container_size_seen_.isValid())
+        {
+            max_container_size_seen_ = size;
+        }
+        else
+        {
+            max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
+        }
+
         std::vector<char> final_bytes;
         StreamBuffer buf(final_bytes);
         buf.append((uint16_t)size);
@@ -303,6 +312,15 @@ public:
         }
 
         assert(size <= UINT16_MAX);
+        if (!max_container_size_seen_.isValid())
+        {
+            max_container_size_seen_ = size;
+        }
+        else
+        {
+            max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
+        }
+
         std::vector<char> final_bytes;
         StreamBuffer buf(final_bytes);
         buf.append((uint16_t)size);
@@ -317,6 +335,16 @@ public:
         }
 
         sendBytes_(final_bytes);
+    }
+
+    void writeMetaOnPostTeardown(DatabaseManager* db_mgr) const override final
+    {
+        if (max_container_size_seen_.isValid())
+        {
+            db_mgr->INSERT(
+                SQL_TABLE("QueueMaxSizes"),
+                SQL_VALUES((int)getID(), (int)max_container_size_seen_));
+        }
     }
 
 private:
@@ -340,6 +368,7 @@ private:
     ValidValue<bool> is_scalar_;
     ValidValue<bool> is_contig_container_;
     ValidValue<bool> is_sparse_container_;
+    ValidValue<uint16_t> max_container_size_seen_;
     TinyStrings<>* tiny_strings_ = nullptr;
 };
 
