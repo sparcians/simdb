@@ -27,6 +27,9 @@ public:
     /// Create an entry in the Timestamps table and return the rowid
     virtual int createTimestampInDatabase(DatabaseManager* db_mgr) const = 0;
 
+    /// Write the time value to the PreparedINSERT at the given column index.
+    virtual void assign(PreparedINSERT* inserter, uint32_t col_idx) const = 0;
+
     /// Stringify the current time value
     virtual std::string getTimeAsString() const = 0;
 };
@@ -106,6 +109,12 @@ public:
         return db_mgr->INSERT(SQL_TABLE("Timestamps"), SQL_VALUES(time_))->getId();
     }
 
+    /// Write the time value to the PreparedINSERT at the given column index.
+    void assign(PreparedINSERT* inserter, uint32_t col_idx) const override final
+    {
+        inserter->setColumnValue(col_idx, time_);
+    }
+
     /// Stringify the current time value
     std::string getTimeAsString() const override final { return std::to_string(time_); }
 
@@ -138,7 +147,7 @@ public:
     }
 
     /// Add the type-specific time column in the given table
-    void addTimeColumn(Table& tbl, const std::string& tbl_name = "Timestamp") const
+    void addTimeColumn(Table& tbl, const std::string& col_name = "Timestamp") const
     {
         using dt = SqlDataType;
         if constexpr (std::is_integral_v<TimeT>)
@@ -146,14 +155,14 @@ public:
             static_assert(std::is_unsigned_v<TimeT>, "Signed int timestamps not supported");
             if constexpr (std::is_same_v<TimeT, uint64_t>)
             {
-                tbl.addColumn(tbl_name, dt::uint64_t);
+                tbl.addColumn(col_name, dt::uint64_t);
             } else
             {
-                tbl.addColumn(tbl_name, dt::uint32_t);
+                tbl.addColumn(col_name, dt::uint32_t);
             }
         } else
         {
-            tbl.addColumn(tbl_name, dt::double_t);
+            tbl.addColumn(col_name, dt::double_t);
         }
     }
 

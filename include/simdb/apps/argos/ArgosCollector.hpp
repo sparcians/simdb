@@ -91,13 +91,6 @@ public:
         queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
         collectable_tns_tbl.ensureUnique("SerializationCID");
         collectable_tns_tbl.unsetPrimaryKey();
-
-        // Argos UI uses this to render unsupported tree nodes in red (vs. black for supported nodes).
-        // Paths are arbitrary and need not correspond to a registered collectable.
-        auto& unsupported_tbl = schema.addTable("UnsupportedCollectors");
-        unsupported_tbl.addColumn("Path", dt::string_t);
-        unsupported_tbl.ensureUnique("Path");
-        unsupported_tbl.unsetPrimaryKey();
     }
 
     void setVerbose(bool verbose = true) { verbose_ = verbose; }
@@ -236,8 +229,6 @@ public:
 
     TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
 
-    void markUnsupported(const std::string& collectable_path) { unsupported_paths_.insert(collectable_path); }
-
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
         if (timestamp_ == nullptr)
@@ -255,7 +246,18 @@ public:
         pipeline->noMoreBindings();
 
         auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
-        pipeline_stager_ = std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head);
+        auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
+        pipeline_stager_ = std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head);
+
+        Schema notif_schema;
+        using dt = SqlDataType;
+
+        auto& notif_tbl = notif_schema.addTable("Notifications");
+        notif_tbl.addColumn("SerializationCID", dt::int32_t);
+        notif_tbl.addColumn("NotifStr", dt::string_t);
+        notif_tbl.addColumn("NotifType", dt::int32_t);
+        timestamp_->addTimeColumn(notif_tbl);
+        db_mgr_->appendSchema(notif_schema);
 
         for (const auto& collector : collectors_)
         {
@@ -306,17 +308,10 @@ public:
 
     void postTeardown() override
     {
-        auto unsupported_inserter = db_mgr_->prepareINSERT(SQL_TABLE("UnsupportedCollectors"));
-        for (const auto& path : unsupported_paths_)
-        {
-            unsupported_inserter->createRecordWithColValues(path);
-        }
-
         for (auto& collector : collectors_)
         {
             collector->writeMetaOnPostTeardown(db_mgr_);
         }
-
         tiny_strings_.serialize();
     }
 
@@ -366,7 +361,11 @@ private:
     class Writer : public pipeline::DatabaseStage<ArgosCollector>
     {
     public:
-        Writer() { addInPort_<CompressedQueueCollectionData>("input_queue", input_queue_); }
+        Writer()
+        {
+            addInPort_<CompressedQueueCollectionData>("input_queue", input_queue_);
+            addInPort_<Notification>("notif_queue", notif_queue_);
+        }
 
     private:
         pipeline::PipelineAction run_(bool) override
@@ -384,10 +383,31 @@ private:
                 return pipeline::PipelineAction::PROCEED;
             }
 
+            Notification notification;
+            if (notif_queue_->try_pop(notification))
+            {
+                auto inserter = getTableInserter_("Notifications");
+
+                const auto cid = notification.cid;
+                const auto& notif_str = notification.notif;
+                const auto notif_type = notification.type;
+                assert(cid > 0);
+
+                inserter->setColumnValue(0, (int)cid);
+                inserter->setColumnValue(1, notif_str);
+                inserter->setColumnValue(2, (int)notif_type);
+                if (notification.time_point)
+                {
+                    notification.time_point->assign(inserter, 3);
+                }
+                inserter->createRecord();
+            }
+
             return pipeline::PipelineAction::SLEEP;
         }
 
         ConcurrentQueue<CompressedQueueCollectionData>* input_queue_ = nullptr;
+        ConcurrentQueue<Notification>* notif_queue_ = nullptr;
     };
 
     DatabaseManager* const db_mgr_;
@@ -410,7 +430,6 @@ private:
     std::unique_ptr<Timestamp<uint64_t>> timestamp_;
     std::unique_ptr<PipelineStager<uint64_t>> pipeline_stager_;
     std::vector<std::unique_ptr<CollectableBase>> collectors_;
-    std::set<std::string> unsupported_paths_;
 };
 
 } // namespace simdb::argos

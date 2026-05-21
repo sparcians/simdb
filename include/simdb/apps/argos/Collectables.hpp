@@ -88,6 +88,32 @@ public:
     /// Check whether heartbeat re-emission is suppressed.
     bool quieted() const { return quiet_; }
 
+    /// Add a timestamped warning/error/msg which applies to this collectable.
+    /// All of these will be visible in the Argos UI. These are purely for
+    /// the user's benefit; Argos doesn't do anything with them but give
+    /// a modal dialog of these notifications. These are never printed to
+    /// stdout/stderr.
+    void postNotif(const std::string& notif, NotifType type, bool timestamp = true)
+    {
+        assert(stager_ != nullptr);
+        stager_->postNotif(getID(), notif, type, timestamp);
+    }
+
+    void postWarning(const std::string& warning, bool timestamp = true)
+    {
+        postNotif(warning, NotifType::WARNING, timestamp);
+    }
+
+    void postError(const std::string& error, bool timestamp = true)
+    {
+        postNotif(error, NotifType::ERROR, timestamp);
+    }
+
+    void postMessage(const std::string& msg, bool timestamp = true)
+    {
+        postNotif(msg, NotifType::MESSAGE, timestamp);
+    }
+
     /// Demangled element type for scalars, or element demangle + \c _contig_capacityN /
     /// \c _sparse_capacityN for queues.
     virtual std::string collectableTypeNameForDb() const = 0;
