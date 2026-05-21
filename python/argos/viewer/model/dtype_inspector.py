@@ -87,6 +87,13 @@ class DataTypeInspector:
             self._effective_color_keys_by_schema[sid] = ""
             self._effective_color_keys_by_root_type[root_name] = ""
 
+        cur.execute("SELECT DISTINCT(SchemaId) FROM DataTypeNodes WHERE Name='DID'")
+        for sid in cur.fetchall():
+            sid = sid[0]
+            root_name = self._schemas[sid]
+            self._effective_color_keys_by_schema[sid] = "DID"
+            self._effective_color_keys_by_root_type[root_name] = "DID"
+
         cur.execute(
             """
             SELECT Id, SchemaId, ParentId, Kind, Name, Description, TypeName, EnumBacking, SpecialFormatters

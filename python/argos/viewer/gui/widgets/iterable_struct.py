@@ -78,7 +78,15 @@ class IterableStruct(wx.Panel):
                 for j, field_name in enumerate(self.visible_field_names):
                     self.grid.SetCellValue(idx, j, str(row_data[j][1]))
                     if auto_colorize_col_idx is not None:
-                        color = widget_renderer.GetAutoColor(row_data[self.visible_field_names[auto_colorize_col_idx]])
+                        auto_colorize_col_name = self.visible_field_names[auto_colorize_col_idx]
+                        color_keyval = None
+                        for key, keyval in row_data:
+                            if key == auto_colorize_col_name:
+                                color_keyval = keyval
+                                break
+
+                        assert color_keyval is not None
+                        color = widget_renderer.GetAutoColor(color_keyval)
                         self.grid.SetCellBackgroundColour(idx, j, color)
 
             num_rows_shown = len(queue_data['DataVals'][0])
