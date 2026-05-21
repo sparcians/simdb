@@ -1160,13 +1160,20 @@ class Rasterizer:
         assert elem_path == self.elem_path
         assert bin_idx == self.bin_idx
 
+        #import pdb; pdb.set_trace()
         auto_colorize_column = self.frame.data_retriever.GetAutoColorizeColumn(elem_path)
-        auto_colorize_key = annos[auto_colorize_column]
+        auto_colorize_key = None
+        for key, keyval in annos:
+            if key == auto_colorize_column:
+                auto_colorize_key = keyval
+                break
+
+        assert auto_colorize_key is not None
         auto_color = self.frame.widget_renderer.GetAutoColor(auto_colorize_key)
         auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key)
 
         anno = []
-        for k,v in annos.items():
+        for k,v in annos:
             anno.append('{}({})'.format(k,v))
 
         stringized_anno = ' '.join(anno)
