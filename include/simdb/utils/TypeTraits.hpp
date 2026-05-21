@@ -1,8 +1,8 @@
-// <MetaStructs.hpp> -*- C++ -*-
+// <TypeTraits.hpp> -*- C++ -*-
 
 
 /**
- * \file MetaStructs.hpp
+ * \file TypeTraits.hpp
  * \brief Contains a collection implementation of various
  * compile-time metaprogramming and Type-Detection APIs useful
  * for Template Metaprogramming.
@@ -25,7 +25,7 @@
 #include <type_traits>
 
 
-namespace MetaStruct {
+namespace simdb::type_traits {
     // If compiler is C++11 compliant, then use explicit aliases.
     #if __cplusplus == 201103L
 
@@ -640,4 +640,4 @@ namespace MetaStruct {
     template<>
     struct is_char_pointer<const char* const> : public std::true_type{};
 
-} // namespace MetaStruct
+} // namespace simdb::type_traits

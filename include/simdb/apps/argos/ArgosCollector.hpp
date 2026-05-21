@@ -6,7 +6,7 @@
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/utils/Compress.hpp"
-#include "simdb/utils/MetaStructs.hpp"
+#include "simdb/utils/TypeTraits.hpp"
 
 namespace simdb::argos {
 
@@ -214,7 +214,7 @@ public:
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        } else if constexpr (MetaStruct::is_pair_v<T>)
+        } else if constexpr (type_traits::is_pair_v<T>)
         {
             using FirstT = typename T::first_type;
             auto first_type = encodeTypeName<FirstT>();
@@ -223,7 +223,7 @@ public:
             auto second_type = encodeTypeName<SecondT>();
 
             return "pair(" + first_type + "," + second_type + ")";
-        } else if constexpr (MetaStruct::is_stl_v<T>)
+        } else if constexpr (type_traits::is_stl_v<T>)
         {
             using ValueT = typename T::value_type;
             auto value_type = encodeTypeName<ValueT>();
