@@ -105,11 +105,8 @@ public:
 
     void postMessage(const std::string& msg) { postNotif(msg, NotifType::MESSAGE); }
 
-    /// Demangled element type for scalars, or element demangle + \c _contig_capacityN /
-    /// \c _sparse_capacityN for queues.
-    virtual std::string collectableTypeNameForDb() const = 0;
+    virtual std::string encodeTypeName() const = 0;
 
-    /// Write any final metadata during the ArgosCollector::postTeardown() phase.
     virtual void writeMetaOnPostTeardown(DatabaseManager*) const {}
 
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
@@ -123,17 +120,6 @@ protected:
 
     /// Get the heartbeat value for all collection points.
     size_t getHeartbeat_() const { return heartbeat_; }
-
-    template <typename T> static std::string scalarTypeName_()
-    {
-        if constexpr (std::is_same_v<T, std::string>)
-        {
-            return "string";
-        } else
-        {
-            return simdb::demangle_type<T>();
-        }
-    }
 
     /// Stage collected bytes for pipeline processing.
     void stage_(CollectedData&& data)
@@ -172,7 +158,7 @@ private:
     /// Enabled flag
     bool enabled_ = true;
 
-    /// Suppress heartbeat re-emission while true.
+    /// Suppress heartbeat re-emission while true
     bool quiet_ = false;
 
     /// Main entry point into the pipeline
@@ -181,8 +167,9 @@ private:
 
 /// TODO cnyce: This non-template class is only being used here
 /// to help get past all the compiler errors related to templates.
-/// This is not the design's final form; the ScalarCollector and
-/// ContainerCollector classes should be used once the dust settles.
+/// This is not the design's final form; we will fully use template
+/// classes once Sparta's IterableCollector/Collectable/SpartaKeyPairs
+/// are moved to SimDB.
 class CollectionEntryPoint : public CollectableBase
 {
 public:
@@ -217,7 +204,7 @@ public:
         collectable_type_name_ += std::to_string(capacity);
     }
 
-    std::string collectableTypeNameForDb() const override final
+    std::string encodeTypeName() const override final
     {
         if (collectable_type_name_.empty())
         {
@@ -235,6 +222,9 @@ public:
 
         if constexpr (std::is_enum_v<ScalarT>)
         {
+            // TODO cnyce: Enums should be written as their underlying int type, and
+            // a string-int mapping should be put in the database. For now, just rely
+            // on TinyStrings and treat enums as strings instead of ints.
             std::ostringstream oss;
             oss << val;
             auto enum_str = oss.str();
@@ -375,6 +365,14 @@ private:
         buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
         buf.append(bytes);
         stage_(std::move(collected));
+
+        // This code was working with the previous collector design for Minifiers.hpp
+        // to save a ton on disk space:
+        // https://github.com/sparcians/simdb/pull/185/changes/5988aa743d015c1f0fa6f16fe9f6b517b191b679#diff-2315254eec5b0d00f82ecc99fd169ee680eaca658a10a54f0f2f5e914131b4a4
+        //
+        // We'll port the minifier code to the latest design when the non-optimized
+        // Argos collector has settled a bit. For now, we'll accept lots of waste by
+        // doing full byte dumps each time (FULL_ACTION_FLAG).
     }
 
     std::string collectable_type_name_;
@@ -384,219 +382,5 @@ private:
     ValidValue<uint16_t> max_container_size_seen_;
     TinyStrings<>* tiny_strings_ = nullptr;
 };
-
-#if 0
-/// Template class for all scalar types (POD, struct-like, string, enum, bool)
-template <typename ScalarT>
-class ScalarCollector : public CollectableBase
-{
-public:
-    using ValueType = type_traits::remove_any_pointer_t<ScalarT>;
-    static constexpr auto is_string = std::is_same_v<ValueType, std::string>;
-    static constexpr auto is_enum = std::is_enum_v<ValueType>;
-    static constexpr auto is_struct = !std::is_trivial_v<ValueType> || !std::is_standard_layout_v<ValueType>;
-    static constexpr auto is_simple_pod = !is_string && !is_enum && !is_struct;
-
-    ScalarCollector(size_t heartbeat, TinyStrings<>* tiny_strings)
-        : CollectableBase(heartbeat)
-        , tiny_strings_(tiny_strings)
-    {}
-
-    std::string collectableTypeNameForDb() const override final
-    {
-        return scalarTypeName_<ValueType>();
-    }
-
-    template <bool B = is_enum || is_string>
-    std::enable_if_t<B, void>
-    setValue(const ValueType& value)
-    {
-        uint32_t string_id = 0;
-        if constexpr (is_enum)
-        {
-            std::ostringstream oss;
-            oss << value;
-            string_id = tiny_strings_->getStringID(oss.str());
-        }
-        else
-        {
-            string_id = tiny_strings_->getStringID(value);
-        }
-        setValue_(string_id);
-    }
-
-    template <bool B = is_simple_pod>
-    std::enable_if_t<B, void>
-    setValue(const ValueType value)
-    {
-        setValue_(value);
-    }
-
-    void setBytes(const std::vector<char>& bytes)
-    {
-        sendBytes_(bytes);
-    }
-
-private:
-    template <typename RawT>
-    void setValue_(const RawT value)
-    {
-        static_assert(std::is_trivial_v<RawT> && std::is_standard_layout_v<RawT> && !std::is_enum_v<RawT>);
-        std::vector<char> bytes;
-        StreamBuffer buf(bytes);
-        buf.append(value);
-        sendBytes_(bytes);
-    }
-
-    void sendBytes_(const std::vector<char>& bytes)
-    {
-        // TODO cnyce: refactor so we don't perform the serialization
-        // first, only to ignore the bytes because we are not enabled
-        if (!enabled())
-        {
-            return;
-        }
-
-        if (quieted())
-        {
-            awaken();
-        }
-
-        CollectedData collected(getID());
-        auto& buf = collected.getBuffer();
-        buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
-        buf.append(bytes);
-        stage_(std::move(collected));
-    }
-
-    TinyStrings<> *const tiny_strings_;
-};
-
-template <typename BinT, bool Sparse>
-class ContainerCollector : public CollectableBase
-{
-public:
-    ContainerCollector(size_t heartbeat, size_t capacity)
-        : CollectableBase(heartbeat)
-        , capacity_(capacity)
-    {
-        assert(capacity_ <= UINT16_MAX);
-        assert(capacity_ > 0);
-    }
-
-    std::string collectableTypeNameForDb() const override final
-    {
-        auto type_name = scalarTypeName_<BinT>();
-        if constexpr (Sparse)
-        {
-            type_name += "_sparse_capacity";
-        }
-        else
-        {
-            type_name += "_contig_capacity";
-        }
-        type_name += std::to_string(capacity_);
-        return type_name;
-    }
-
-    template <bool sparse = Sparse>
-    std::enable_if_t<!sparse, void>
-    setBinBytes(const std::vector<std::vector<char>>& bin_bytes)
-    {
-        if (!enabled())
-        {
-            return;
-        }
-
-        if (quieted())
-        {
-            awaken();
-        }
-
-        CollectedData collected(getID());
-        auto& buf = collected.getBuffer();
-        buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
-
-        uint64_t size = 0;
-        for (auto& bytes : bin_bytes)
-        {
-            if (!bytes.empty())
-            {
-                ++size;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        if (size > UINT16_MAX || size > capacity_)
-        {
-            throw DBException("Container size cannot exceeed original capacity or UINT16_MAX");
-        }
-
-        max_container_size_seen_ = std::max(max_container_size_seen_, (uint16_t)size);
-        buf.append((uint16_t)size);
-        for (uint16_t bin_idx = 0; bin_idx < (uint16_t)size; ++bin_idx)
-        {
-            buf.append(bin_bytes[bin_idx]);
-        }
-        stage_(std::move(collected));
-    }
-
-    template <bool sparse = Sparse>
-    std::enable_if_t<sparse, void>
-    setBinBytes(const std::map<uint16_t, std::vector<char>>& bin_bytes)
-    {
-        if (!enabled())
-        {
-            return;
-        }
-
-        if (quieted())
-        {
-            awaken();
-        }
-
-        CollectedData collected(getID());
-        auto& buf = collected.getBuffer();
-        buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
-
-        uint64_t size = 0;
-        for (const auto& [cid, bytes] : bin_bytes)
-        {
-            if (!bytes.empty())
-            {
-                ++size;
-            }
-        }
-
-        if (size > UINT16_MAX || size > capacity_)
-        {
-            throw DBException("Container size cannot exceeed original capacity or UINT16_MAX");
-        }
-
-        max_container_size_seen_ = std::max(max_container_size_seen_, (uint16_t)size);
-        buf.append((uint16_t)size);
-        for (const auto& [cid, bytes] : bin_bytes)
-        {
-            buf.append(cid);
-            buf.append(bytes);
-        }
-        stage_(std::move(collected));
-    }
-
-    void writeMetaOnPostTeardown(DatabaseManager* db_mgr) const override final
-    {
-        db_mgr->INSERT(
-            SQL_TABLE("QueueMaxSizes"),
-            SQL_VALUES((int)getID(), (int)max_container_size_seen_));
-    }
-
-private:
-    const size_t capacity_;
-    uint16_t max_container_size_seen_ = 0;
-};
-#endif
 
 } // namespace simdb::argos

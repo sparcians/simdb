@@ -7,13 +7,23 @@ namespace simdb {
 template <typename T> class ValidValue
 {
 private:
-    T value_;
+    T value_{};
     bool valid_ = false;
 
 public:
     ValidValue() = default;
 
-    explicit ValidValue(const T& val) { *this = val; }
+    explicit ValidValue(const T& val) :
+        value_(val),
+        valid_(true)
+    {
+    }
+
+    explicit ValidValue(T&& val) :
+        value_(std::move(val)),
+        valid_(true)
+    {
+    }
 
     ValidValue& operator=(const T& val)
     {

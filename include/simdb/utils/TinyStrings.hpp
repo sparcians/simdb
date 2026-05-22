@@ -45,7 +45,7 @@ public:
             while (results.getNextRecord())
             {
                 assert(map_->find(str) == map_->end());
-                (*map_)[str] = id;
+                map_->emplace(str, id);
             }
         }
     }
@@ -69,23 +69,7 @@ public:
         }
     }
 
-    /// Get a string ID for the given string.
-    uint32_t getStringID(const std::unique_ptr<std::string>& s) { return getStringID(s.get()); }
-
-    /// Get a string ID for the given string.
-    uint32_t getStringID(const std::shared_ptr<std::string>& s) { return getStringID(s.get()); }
-
-    /// Get a string ID for the given string.
-    uint32_t getStringID(const std::string* s)
-    {
-        if (s)
-        {
-            return getStringID(*s);
-        }
-        return BAD_STRING_ID;
-    }
-
-    /// std::string overload
+    /// Get a string ID for the given string
     uint32_t getStringID(const std::string& s)
     {
         if (s.empty())
@@ -100,6 +84,16 @@ public:
         }
 
         return getStringID_(s);
+    }
+
+    /// Get a string ID for the given string (pointer version)
+    template <typename S> type_traits::enable_if_t<type_traits::is_any_pointer_v<S>, uint32_t> getStringID(const S& s)
+    {
+        if (s)
+        {
+            return getStringID(*s);
+        }
+        return BAD_STRING_ID;
     }
 
     /// Serialize the current string map to the database.
@@ -120,36 +114,6 @@ public:
 
             unserialized_map_.clear();
         });
-    }
-
-    /// Check how many unserialized strings we have.
-    uint32_t getUnserializedCount() const noexcept
-    {
-        DeferredLock<std::mutex> lock(mutex_);
-        if constexpr (MutexProtect)
-        {
-            lock.lock();
-        }
-        return unserialized_map_.size();
-    }
-
-    /// Get a string for a given ID. Not intended to be
-    /// called in performance critical code.
-    std::string getString(const uint32_t string_id, bool must_exist = true) const
-    {
-        for (const auto& [s, id] : *map_)
-        {
-            if (id == string_id)
-            {
-                return s;
-            }
-        }
-
-        if (must_exist)
-        {
-            throw simdb::DBException("String ID not in TinyStrings: ") << string_id;
-        }
-        return "";
     }
 
 private:

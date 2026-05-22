@@ -2,8 +2,7 @@
 """
 Per-collectable replay of Argos collection-record payloads (CID prefix is stripped by caller).
 
-Mirrors C++ minifier layouts in include/simdb/apps/argos/Minifiers.hpp. Used by dump.py tests;
-not wired into the viewer UI.
+Mirrors C++ minifier layouts in include/simdb/apps/argos/Minifiers.hpp
 """
 from __future__ import annotations
 

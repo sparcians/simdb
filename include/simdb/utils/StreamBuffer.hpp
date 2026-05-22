@@ -17,9 +17,6 @@ namespace simdb {
 class StreamBuffer
 {
 public:
-    /// \param participate_in_byte_trace When false, this buffer never records to
-    ///        \ref simdb::utils::active_collection_byte_tracer (use for scratch
-    ///        buffers whose bytes are not part of the persisted collection layout).
     StreamBuffer(std::vector<char>& out, bool clear_first = true) :
         out_(out)
     {
@@ -35,12 +32,7 @@ public:
         out_.insert(out_.end(), bytes, bytes + num_bytes);
     }
 
-    void append(const bool val)
-    {
-        using bool_type = typename StreamBuffer::bool_type;
-        const bool_type byte = val ? bool_type{1} : bool_type{0};
-        append(&byte, sizeof(byte));
-    }
+    void append(const bool val) { append(static_cast<uint8_t>(val)); }
 
     template <typename T> void append(const T& val)
     {
@@ -69,8 +61,6 @@ public:
     template <typename T> std::enable_if_t<std::is_enum_v<T>, void> append(const T val) = delete;
 
     size_t size() const { return out_.size(); }
-
-    using bool_type = uint8_t;
 
     bool operator==(const StreamBuffer& other) const { return out_ == other.out_; }
 

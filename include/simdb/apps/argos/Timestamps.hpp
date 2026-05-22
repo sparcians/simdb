@@ -15,9 +15,6 @@ class TimePointBase
 public:
     virtual ~TimePointBase() = default;
 
-    /// Apply the stored type-specific time value to the INSERT at column 0
-    virtual void apply(PreparedINSERT* inserter) const = 0;
-
     /// Check if the given time point is equal to ours (dynamic cast must succeed)
     virtual bool equals(const TimePointBase* time_point, bool must_be_equal_or_less = false) const = 0;
 
@@ -29,9 +26,6 @@ public:
 
     /// Write the time value to the PreparedINSERT at the given column index.
     virtual void assign(PreparedINSERT* inserter, uint32_t col_idx) const = 0;
-
-    /// Stringify the current time value
-    virtual std::string getTimeAsString() const = 0;
 };
 
 /// \class TimePoint
@@ -43,9 +37,6 @@ public:
         time_(time)
     {
     }
-
-    /// Apply the stored type-specific time value to the INSERT at column 0
-    void apply(PreparedINSERT* inserter) const override final { inserter->setColumnValue(0, time_); }
 
     /// Check if the given time point is equal to ours (dynamic cast must succeed)
     bool equals(const TimePointBase* time_point, bool must_be_equal_or_less = false) const override final
@@ -115,9 +106,6 @@ public:
         inserter->setColumnValue(col_idx, time_);
     }
 
-    /// Stringify the current time value
-    std::string getTimeAsString() const override final { return std::to_string(time_); }
-
 private:
     const TimeT time_;
 };
@@ -132,18 +120,21 @@ public:
     Timestamp(const TimeT* backpointer) :
         backpointer_(backpointer)
     {
+        assert(backpointer);
     }
 
     /// \brief Construct with a C-style function pointer to get the current time value
     Timestamp(TimeT (*fn)()) :
         cfuncpointer_(fn)
     {
+        assert(fn);
     }
 
     /// \brief Construct with a std::function to get the current time value
     Timestamp(std::function<TimeT()> fn) :
         stdfunction_(fn)
     {
+        assert(fn);
     }
 
     /// Add the type-specific time column in the given table
@@ -183,13 +174,10 @@ public:
         return std::make_shared<TimePoint<TimeT>>(time);
     }
 
-    std::string getTimeAsString() const { return snapshot()->getTimeAsString(); }
-
 private:
     const TimeT* backpointer_ = nullptr;
     TimeT (*cfuncpointer_)() = nullptr;
     std::function<TimeT()> stdfunction_ = nullptr;
-    mutable ValidValue<TimeT> time_;
 };
 
 } // namespace simdb::argos

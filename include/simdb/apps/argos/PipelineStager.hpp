@@ -55,7 +55,6 @@ public:
     virtual void sendCollectedDataToPipeline() = 0;
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
     virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
-    virtual std::string getTimeAsString() const = 0;
     virtual void postNotif(uint16_t cid, const std::string& notif, NotifType type) = 0;
 };
 
@@ -78,26 +77,16 @@ public:
         enabled_cids_.insert(cid);
         refreshable_cids_.insert(cid);
 
-        auto current_time = timestamp_->snapshot();
-        if (!last_stage_time_)
-        {
-            last_stage_time_ = current_time;
-        } else if (!current_time->lessThan(last_stage_time_.get()))
-        {
-            last_stage_time_ = current_time;
-        } else
-        {
-            throw DBException("Time must be monotonically increasing");
-        }
+        advanceStageTime_();
 
-        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(current_time.get(), true))
+        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
         {
             CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
             collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = current_time;
+            entry.time_point = last_stage_time_;
             entry.collection_data.emplace_back(std::make_unique<CollectedData>(std::move(data)));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -114,26 +103,16 @@ public:
 
     void onEnabledChanged(uint16_t cid, bool enabled) override
     {
-        auto current_time = timestamp_->snapshot();
-        if (!last_stage_time_)
-        {
-            last_stage_time_ = current_time;
-        } else if (!current_time->lessThan(last_stage_time_.get()))
-        {
-            last_stage_time_ = current_time;
-        } else
-        {
-            throw DBException("Time must be monotonically increasing");
-        }
+        advanceStageTime_();
 
-        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(current_time.get(), true))
+        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
         {
             EnabledChangedAtTimePoint& changes = waiting_queue_.back().enabled_changes;
             changes.emplace_back(std::make_pair(cid, enabled));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = current_time;
+            entry.time_point = last_stage_time_;
             entry.enabled_changes.emplace_back(std::make_pair(cid, enabled));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -141,32 +120,20 @@ public:
 
     void onQuietChanged(uint16_t cid, bool quiet) override
     {
-        auto current_time = timestamp_->snapshot();
-        if (!last_stage_time_)
-        {
-            last_stage_time_ = current_time;
-        } else if (!current_time->lessThan(last_stage_time_.get()))
-        {
-            last_stage_time_ = current_time;
-        } else
-        {
-            throw DBException("Time must be monotonically increasing");
-        }
+        advanceStageTime_();
 
-        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(current_time.get(), true))
+        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
         {
             QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
             changes.emplace_back(std::make_pair(cid, quiet));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = current_time;
+            entry.time_point = last_stage_time_;
             entry.quiet_changes.emplace_back(std::make_pair(cid, quiet));
             waiting_queue_.emplace(std::move(entry));
         }
     }
-
-    std::string getTimeAsString() const override { return timestamp_->getTimeAsString(); }
 
     void postNotif(uint16_t cid, const std::string& notif, NotifType type) override
     {
@@ -177,7 +144,7 @@ public:
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
     static constexpr auto kActionBytes = sizeof(uint8_t);
-    static constexpr auto kFirstMinifierAction = static_cast<uint8_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
+    static constexpr auto kFirstMinifierAction = FULL_ACTION_FLAG;
 
     static bool isLifecycleAction_(const std::vector<char>& data)
     {
@@ -187,8 +154,8 @@ private:
         }
 
         uint8_t raw_action = 0;
-        std::memcpy(&raw_action, data.data() + kCidBytes, kActionBytes);
-        return raw_action < static_cast<uint8_t>(LifecycleAction::__FIRST_MINIFIER_ACTION);
+        memcpy(&raw_action, data.data() + kCidBytes, kActionBytes);
+        return raw_action < FULL_ACTION_FLAG;
     }
 
     void queueLifecycleAction_(QueueCollectionData& collection_data, uint16_t cid, LifecycleAction action,
@@ -220,6 +187,18 @@ private:
         }
 
         collection_data.collection_data.emplace_back(std::move(lifecycle));
+    }
+
+    void advanceStageTime_()
+    {
+        auto current_time = timestamp_->snapshot();
+        if (!last_stage_time_ || !current_time->lessThan(last_stage_time_.get()))
+        {
+            last_stage_time_ = current_time;
+        } else
+        {
+            throw DBException("Time must be monotonically increasing");
+        }
     }
 
     void sendToPipeline_(QueueCollectionData& collection_at_time)
@@ -300,8 +279,8 @@ private:
             }
         }
 
-        // Periodically dump "last seen bytes" for any CIDs not
-        // encountered at this time point (enabled+awake but not collected)
+        // Periodically dump "last seen bytes" for any CIDs not encountered
+        // at this time point (enabled+awake but not collected)
         auto missing_cids = refreshable_cids_;
         for (const auto& data : collection_at_time.collection_data)
         {
@@ -330,7 +309,7 @@ private:
             if (data_bytes.size() >= kCidBytes + kActionBytes)
             {
                 uint8_t action = 0;
-                std::memcpy(&action, data_bytes.data() + kCidBytes, kActionBytes);
+                memcpy(&action, data_bytes.data() + kCidBytes, kActionBytes);
                 if (action == kFirstMinifierAction)
                 {
                     // Persist only FULL payload bytes for lifecycle re-entry.

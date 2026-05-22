@@ -2,9 +2,7 @@
 
 /**
  * \file TypeTraits.hpp
- * \brief Contains a collection implementation of various
- * compile-time metaprogramming and Type-Detection APIs useful
- * for Template Metaprogramming.
+ * \brief Contains various helpers that are useful for template meta-programming.
  */
 
 #pragma once

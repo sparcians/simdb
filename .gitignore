@@ -13,6 +13,4 @@ __pycache__/
 build/
 **/*.avf
 **/*.db
-**/*.trace
-**/*.trace.meta
 .cursor/

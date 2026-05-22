@@ -81,7 +81,7 @@ template <typename TimeT> void TestTimestamps()
         auto inserter = db_mgr.prepareINSERT(SQL_TABLE("DataBlobs"));
         while (++tick <= 100)
         {
-            timestamp.snapshot()->apply(inserter.get());
+            timestamp.snapshot()->assign(inserter.get(), 0);
             inserter->setColumnValue(1, step_values.at(tick - 1));
             inserter->createRecord();
         }

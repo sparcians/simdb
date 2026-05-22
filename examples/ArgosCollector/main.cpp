@@ -141,9 +141,6 @@ public:
 
     using InstQueue = std::vector<std::shared_ptr<Instruction>>;
 
-    /// \param sparse If false, returns a dense queue of length in \c [0, capacity] (all non-null).
-    ///                 If true, returns a vector of size \c capacity; empty slots are null, non-empty
-    ///                 slots hold a random instruction (random subset of slots, same count draw as dense).
     static InstQueue genRandomQueue(size_t capacity, bool sparse)
     {
         const size_t target_size = randomInt<size_t>() % (capacity + 1);
@@ -171,15 +168,13 @@ public:
         return q;
     }
 
-    void randomize() { *this = *genRandom(); }
-
-    // TODO cnyce: This should be handled by the Sparta pair collector.
     void writeToBuffer(simdb::StreamBuffer& buf, simdb::TinyStrings<>* tiny_strings) const
     {
         buf.append(getUID());
 
         // TODO cnyce: Enums should be written as their underlying int type, and
-        // a string-int mapping should be put in the database.
+        // a string-int mapping should be put in the database. For now, just rely
+        // on TinyStrings and treat enums as strings instead of ints.
         std::ostringstream oss;
         oss << getType();
         buf.append(tiny_strings->getStringID(oss.str()));
@@ -205,14 +200,12 @@ void TestScalarCollection()
     auto argos_collector = app_mgr.getApp<simdb::argos::ArgosCollector>();
     argos_collector->setHeartbeat(3);
 
-    // TODO cnyce: This code will be called from Sparta (Collectable/IterableCollector)
     auto int_collector = argos_collector->createScalarCollector<int32_t>("top.int32", "root");
     auto string_collector = argos_collector->createScalarCollector<std::string>("top.string", "root");
     auto enum_collector = argos_collector->createScalarCollector<InstType>("top.inst_type", "root");
     auto bool_collector = argos_collector->createScalarCollector<bool>("top.bool", "root");
     auto struct_collector = argos_collector->createScalarCollector<Instruction>("top.inst", "root");
 
-    // TODO cnyce: This code will be called from Sparta (PipelineCollector)
     uint64_t tick = 0;
     argos_collector->timestampWith(&tick);
     argos_collector->addClock("root", 1);
@@ -238,8 +231,6 @@ void TestScalarCollection()
         auto bval = randomBool();
         bool_collector->setScalarValue(bval);
 
-        // TODO cnyce: This is the code that Sparta pair collection will
-        // figure out today, and later we will move that code into SimDB
         auto inst = Instruction::genRandom();
         std::vector<char> inst_bytes;
         simdb::StreamBuffer buf(inst_bytes);
@@ -280,12 +271,10 @@ template <bool Sparse> void TestInstQueueContainerCollection()
     auto argos_collector = app_mgr.getApp<simdb::argos::ArgosCollector>();
     argos_collector->setHeartbeat(3);
 
-    // TODO cnyce: This code will be called from Sparta (Collectable/IterableCollector)
     constexpr size_t capacity = 8;
     auto queue_collector =
         argos_collector->createContainerCollector<Instruction, Sparse>("top.instq", "root", capacity);
 
-    // TODO cnyce: This code will be called from Sparta (PipelineCollector)
     uint64_t tick = 0;
     argos_collector->timestampWith(&tick);
     argos_collector->addClock("root", 1);

@@ -3,8 +3,6 @@ from typing import Dict, Iterator, List, Optional
 from viewer.model.tiny_strings import TinyStrings
 
 class DataTypeInspector:
-    """Loads Argos data-type metadata written by CollectionPipeline / DataTypeSerializer."""
-
     class DataTypeNode:
         __slots__ = (
             "node_id",
@@ -96,7 +94,7 @@ class DataTypeInspector:
 
         cur.execute(
             """
-            SELECT Id, SchemaId, ParentId, Kind, Name, Description, TypeName, EnumBacking, SpecialFormatters
+            SELECT Id, SchemaId, ParentId, Kind, Name, Description, TypeName, EnumBacking, FormatStr
             FROM DataTypeNodes
             ORDER BY Id
             """
@@ -226,7 +224,7 @@ class DataTypeInspector:
 
     def GetSimpleTypeSpecialFormatter(self, type_name):
         # type: (str) -> str
-        """First ``Kind == 'pod'`` node whose ``TypeName`` matches *type_name* with non-empty ``SpecialFormatters``."""
+        """First ``Kind == 'pod'`` node whose ``TypeName`` matches *type_name* with non-empty ``FormatStr``."""
         for node in self._iter_nodes():
             if node.kind != "pod":
                 continue

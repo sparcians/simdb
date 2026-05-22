@@ -1160,7 +1160,6 @@ class Rasterizer:
         assert elem_path == self.elem_path
         assert bin_idx == self.bin_idx
 
-        #import pdb; pdb.set_trace()
         auto_colorize_column = self.frame.data_retriever.GetAutoColorizeColumn(elem_path)
         auto_colorize_key = None
         for key, keyval in annos:

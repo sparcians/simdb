@@ -7,27 +7,16 @@ class SimHierarchy:
         metas_by_path = {}
 
         cursor = db.cursor()
-        try:
-            cursor.execute(
-                'SELECT FullPath,SerializationCID,ClockID,TypeName,ArgosDefaultHiddenColumns FROM CollectableTreeNodes'
-            )
-            rows = cursor.fetchall()
-        except sqlite3.OperationalError:
-            cursor.execute('SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes')
-            rows = [(r[0], r[1], r[2], r[3], '') for r in cursor.fetchall()]
+        cursor.execute('SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes')
+        rows = [(r[0], r[1], r[2], r[3], '') for r in cursor.fetchall()]
 
-        for row in rows:
-            if len(row) == 5:
-                full_path, cid, clk_id, type_name, hidden_cols = row
-            else:
-                full_path, cid, clk_id, type_name = row
-                hidden_cols = ''
+        for full_path, cid, clk_id, type_name in rows:
             full_paths.append(full_path)
             metas_by_path[full_path] = {
                 'CID': cid,
                 'ClkID': clk_id,
                 'TypeName': type_name,
-                'ArgosDefaultHiddenColumns': hidden_cols or '',
+                'ArgosDefaultHiddenColumns': ''
             }
 
         self._simhier_tree = SimHierTree()

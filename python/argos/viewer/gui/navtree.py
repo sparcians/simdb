@@ -63,7 +63,7 @@ class NavTree(wx.TreeCtrl):
     def ExpandAll(self):
         self.Unbind(wx.EVT_TREE_ITEM_EXPANDED)
         super(NavTree, self).ExpandAll()
-        self.UpdateUtilizBitmaps() # TODO cnyce
+        self.UpdateUtilizBitmaps()
         self.Bind(wx.EVT_TREE_ITEM_EXPANDED, self.__OnItemExpanded)
 
     def GetItemElemPath(self, item):

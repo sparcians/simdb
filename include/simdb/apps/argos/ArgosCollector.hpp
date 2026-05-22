@@ -14,17 +14,18 @@ inline constexpr size_t DEFAULT_HEARTBEAT = 10;
 
 namespace detail {
 
-template <typename T, typename = void> struct has_ostream_insertion : std::false_type
+// TODO cnyce: reuse Sparta's has_ostream_operator utility once it gets moved to SimDB.
+template <typename T, typename = void> struct has_ostream_operator : std::false_type
 {
 };
 
 template <typename T>
-struct has_ostream_insertion<T, std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
+struct has_ostream_operator<T, std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
     : std::true_type
 {
 };
 
-template <typename T> inline constexpr bool has_ostream_insertion_v = has_ostream_insertion<T>::value;
+template <typename T> inline constexpr bool has_ostream_operator_v = has_ostream_operator<T>::value;
 
 } // namespace detail
 
@@ -74,7 +75,7 @@ public:
         dtype_nodes_tbl.addColumn("Description", dt::string_t);
         dtype_nodes_tbl.addColumn("TypeName", dt::string_t);
         dtype_nodes_tbl.addColumn("EnumBacking", dt::string_t);
-        dtype_nodes_tbl.addColumn("SpecialFormatters", dt::string_t);
+        dtype_nodes_tbl.addColumn("FormatStr", dt::string_t);
 
         // TODO cnyce: floating-point timestamp support
         auto& timestamps_tbl = schema.addTable("Timestamps");
@@ -84,6 +85,7 @@ public:
         auto& collection_records_tbl = schema.addTable("CollectionRecords");
         collection_records_tbl.addColumn("TimestampID", dt::int32_t);
         collection_records_tbl.addColumn("Records", dt::blob_t);
+        collection_records_tbl.ensureUnique("TimestampID");
         collection_records_tbl.unsetPrimaryKey();
 
         auto& queue_max_sizes_tbl = schema.addTable("QueueMaxSizes");
@@ -99,8 +101,6 @@ public:
         notif_tbl.addColumn("NotifType", dt::int32_t);
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
     }
-
-    void setVerbose(bool verbose = true) { verbose_ = verbose; }
 
     void setHeartbeat(size_t heartbeat)
     {
@@ -134,6 +134,7 @@ public:
         clocks_.emplace_back(std::move(clk_desc));
     }
 
+    // TODO cnyce: floating-point timestamp support
     void timestampWith(const uint64_t* backpointer)
     {
         if (pipeline_stager_ != nullptr)
@@ -143,6 +144,7 @@ public:
         timestamp_ = std::make_unique<Timestamp<uint64_t>>(backpointer);
     }
 
+    // TODO cnyce: floating-point timestamp support
     void timestampWith(uint64_t (*fn)())
     {
         if (pipeline_stager_ != nullptr)
@@ -152,6 +154,7 @@ public:
         timestamp_ = std::make_unique<Timestamp<uint64_t>>(fn);
     }
 
+    // TODO cnyce: floating-point timestamp support
     void timestampWith(std::function<uint64_t()> fn)
     {
         if (pipeline_stager_ != nullptr)
@@ -166,13 +169,6 @@ public:
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
         entry_point->setScalarDataType(encodeTypeName<ScalarT>());
-        if (verbose_)
-        {
-            std::cout << "Collecting scalar:\n";
-            std::cout << "  CID  - " << entry_point->getID() << "\n";
-            std::cout << "  Path - " << path << "\n";
-            std::cout << "  Type - " << entry_point->collectableTypeNameForDb() << std::endl;
-        }
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
@@ -184,13 +180,6 @@ public:
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
         entry_point->setContainerDataType(encodeTypeName<BinT>(), Sparse, capacity);
-        if (verbose_)
-        {
-            std::cout << "Collecting container:\n";
-            std::cout << "  CID  - " << entry_point->getID() << "\n";
-            std::cout << "  Path - " << path << "\n";
-            std::cout << "  Type - " << entry_point->collectableTypeNameForDb() << std::endl;
-        }
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
@@ -204,9 +193,9 @@ public:
         } else if constexpr (std::is_same_v<std::decay_t<T>, const char*>)
         {
             return "string";
-        } else if constexpr (std::is_enum_v<T> && detail::has_ostream_insertion_v<T>)
+        } else if constexpr (std::is_enum_v<T> && detail::has_ostream_operator_v<T>)
         {
-            // For now, stringifiable enums collect as strings
+            // TODO cnyce: For now, stringifiable enums collect as strings
             return "string";
         } else if constexpr (std::is_enum_v<T>)
         {
@@ -214,12 +203,12 @@ public:
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        } else if constexpr (type_traits::is_pod_v<T> || !detail::has_ostream_insertion_v<T>)
+        } else if constexpr (type_traits::is_pod_v<T> || !detail::has_ostream_operator_v<T>)
         {
             return demangle_type<T>();
         } else
         {
-            static_assert(detail::has_ostream_insertion_v<T>);
+            static_assert(detail::has_ostream_operator_v<T>);
             return "string";
         }
     }
@@ -272,7 +261,7 @@ public:
             const auto& full_path = std::get<0>(meta_by_cid_.at(cid));
             const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
             const auto clk_id = clk_ids.at(clk_name);
-            const auto dtype_name = collector->collectableTypeNameForDb();
+            const auto dtype_name = collector->encodeTypeName();
             ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
         }
     }
@@ -358,6 +347,9 @@ private:
     private:
         pipeline::PipelineAction run_(bool) override
         {
+            // If anything is ready for collection, process one of them and PROCEED.
+            auto action = pipeline::PipelineAction::SLEEP;
+
             CompressedQueueCollectionData collection_at_time;
             if (input_queue_->try_pop(collection_at_time))
             {
@@ -368,11 +360,17 @@ private:
                 const auto& bytes = collection_at_time.compressed_collection_data;
                 inserter->createRecordWithColValues(id, bytes);
 
-                return pipeline::PipelineAction::PROCEED;
+                action = pipeline::PipelineAction::PROCEED;
             }
 
+            // Notifications are expected to be "sporadic" / one-off. Flush all
+            // of the notifs now, and do not consider "notification-only" to mean
+            // "keep greedily processing / keep threads running". This is the
+            // reason why we use WHILE here instead of IF like above, and the
+            // returned action is not set to PROCEED based on the availability
+            // of new notifications.
             Notification notification;
-            if (notif_queue_->try_pop(notification))
+            while (notif_queue_->try_pop(notification))
             {
                 auto inserter = getTableInserter_("Notifications");
 
@@ -391,7 +389,7 @@ private:
                 inserter->createRecord();
             }
 
-            return pipeline::PipelineAction::SLEEP;
+            return action;
         }
 
         ConcurrentQueue<CompressedQueueCollectionData>* input_queue_ = nullptr;
@@ -401,7 +399,6 @@ private:
     DatabaseManager* const db_mgr_;
     TinyStrings<> tiny_strings_{db_mgr_};
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
-    bool verbose_ = false;
 
     using ClockDescriptor = std::tuple<std::string, // clk name
                                        uint32_t,    // period
