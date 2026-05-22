@@ -781,4 +781,41 @@ template <> struct is_char_pointer<const char* const> : public std::true_type
 
 template <typename T> inline constexpr bool is_char_pointer_v = is_char_pointer<T>::value;
 
+/**
+ * \brief Templated struct for detecting "operator POD() const"
+ */
+template <typename T> struct pod_convertible
+{
+private:
+    using U = std::decay_t<T>;
+
+    // clang-format off
+    using detected_type =
+        std::conditional_t<std::is_convertible_v<U, bool>,     bool,
+        std::conditional_t<std::is_convertible_v<U, int8_t>,   int8_t,
+        std::conditional_t<std::is_convertible_v<U, uint8_t>,  uint8_t,
+        std::conditional_t<std::is_convertible_v<U, int16_t>,  int16_t,
+        std::conditional_t<std::is_convertible_v<U, uint16_t>, uint16_t,
+        std::conditional_t<std::is_convertible_v<U, int32_t>,  int32_t,
+        std::conditional_t<std::is_convertible_v<U, uint32_t>, uint32_t,
+        std::conditional_t<std::is_convertible_v<U, int64_t>,  int64_t,
+        std::conditional_t<std::is_convertible_v<U, uint64_t>, uint64_t,
+        std::conditional_t<std::is_convertible_v<U, double>,   double,
+        std::conditional_t<std::is_convertible_v<U, float>,    float,
+        void>>>>>>>>>>>;
+    // clang-format on
+
+public:
+    static constexpr bool value = !std::is_same_v<detected_type, void>;
+
+    static_assert(value, "pod_convertible_t<T>: T is not POD-convertible. "
+                         "Check is_pod_convertible_v<T> first.");
+
+    using type = detected_type;
+};
+
+template <typename T> constexpr bool is_pod_convertible_v = pod_convertible<T>::value;
+
+template <typename T> using pod_convertible_t = typename pod_convertible<T>::type;
+
 } // namespace simdb::type_traits
