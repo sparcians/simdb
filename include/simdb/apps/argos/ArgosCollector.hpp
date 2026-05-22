@@ -91,6 +91,13 @@ public:
         queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
         collectable_tns_tbl.ensureUnique("SerializationCID");
         collectable_tns_tbl.unsetPrimaryKey();
+
+        // TODO cnyce: floating-point timestamp support
+        auto& notif_tbl = schema.addTable("Notifications");
+        notif_tbl.addColumn("SerializationCID", dt::int32_t);
+        notif_tbl.addColumn("NotifStr", dt::string_t);
+        notif_tbl.addColumn("NotifType", dt::int32_t);
+        notif_tbl.addColumn("Timestamp", dt::uint64_t);
     }
 
     void setVerbose(bool verbose = true) { verbose_ = verbose; }
@@ -239,16 +246,6 @@ public:
         auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
         pipeline_stager_ =
             std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head);
-
-        Schema notif_schema;
-        using dt = SqlDataType;
-
-        auto& notif_tbl = notif_schema.addTable("Notifications");
-        notif_tbl.addColumn("SerializationCID", dt::int32_t);
-        notif_tbl.addColumn("NotifStr", dt::string_t);
-        notif_tbl.addColumn("NotifType", dt::int32_t);
-        timestamp_->addTimeColumn(notif_tbl);
-        db_mgr_->appendSchema(notif_schema);
 
         for (const auto& collector : collectors_)
         {

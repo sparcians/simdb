@@ -806,16 +806,11 @@ private:
     // clang-format on
 
 public:
-    static constexpr bool value = !std::is_same_v<detected_type, void>;
-
-    static_assert(value, "pod_convertible_t<T>: T is not POD-convertible. "
-                         "Check is_pod_convertible_v<T> first.");
-
     using type = detected_type;
 };
 
-template <typename T> constexpr bool is_pod_convertible_v = pod_convertible<T>::value;
-
 template <typename T> using pod_convertible_t = typename pod_convertible<T>::type;
+
+template <typename T> constexpr bool is_pod_convertible_v = !std::is_same_v<pod_convertible_t<T>, void>;
 
 } // namespace simdb::type_traits
