@@ -86,8 +86,18 @@ public:
         return getStringID_(s);
     }
 
-    /// Get a string ID for the given string (pointer version)
-    template <typename S> type_traits::enable_if_t<type_traits::is_any_pointer_v<S>, uint32_t> getStringID(const S& s)
+    /// Get a string ID for the given string
+    uint32_t getStringID(const char* s)
+    {
+        assert(s != nullptr);
+        return getStringID(std::string(s));
+    }
+
+    /// Get a string ID for the given string (shared/unique_ptr<std::string>,
+    /// std::string*)
+    template <typename S>
+    type_traits::enable_if_t<!type_traits::is_char_pointer_v<S> && type_traits::is_any_pointer_v<S>, uint32_t>
+    getStringID(const S& s)
     {
         if (s)
         {
