@@ -207,23 +207,13 @@ public:
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        } else if constexpr (type_traits::is_pair_v<T>)
-        {
-            using FirstT = typename T::first_type;
-            auto first_type = encodeTypeName<FirstT>();
-
-            using SecondT = typename T::second_type;
-            auto second_type = encodeTypeName<SecondT>();
-
-            return "pair(" + first_type + "," + second_type + ")";
-        } else if constexpr (type_traits::is_stl_v<T>)
-        {
-            using ValueT = typename T::value_type;
-            auto value_type = encodeTypeName<ValueT>();
-            return "stl(" + value_type + ")";
-        } else
+        } else if constexpr (type_traits::is_pod_v<T> || !detail::has_ostream_insertion_v<T>)
         {
             return demangle_type<T>();
+        } else
+        {
+            static_assert(detail::has_ostream_insertion_v<T>);
+            return "string";
         }
     }
 
@@ -247,7 +237,8 @@ public:
 
         auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
         auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
-        pipeline_stager_ = std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head);
+        pipeline_stager_ =
+            std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head);
 
         Schema notif_schema;
         using dt = SqlDataType;

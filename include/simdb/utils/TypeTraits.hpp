@@ -284,6 +284,8 @@ template <typename T> struct is_any_pointer<std::weak_ptr<T> const&> : public st
 {
 };
 
+template <typename T> inline constexpr bool is_any_pointer_v = is_any_pointer<T>::value;
+
 /*!
  * \brief Template type helper that removes any pointer.
  * A modeler may call certain APIs with shared pointers to the
@@ -673,6 +675,8 @@ struct is_pod : std::integral_constant<bool, std::is_trivial<T>::value && std::i
 {
 };
 
+template <typename T> inline constexpr bool is_pod_v = is_pod<T>::value;
+
 /**
  * \brief Templated struct for detecting Boolean Type.
  */
@@ -695,6 +699,8 @@ template <> struct is_bool<bool const&> : public std::true_type
 template <> struct is_bool<bool const> : public std::true_type
 {
 };
+
+template <typename T> inline constexpr bool is_bool_v = is_bool<T>::value;
 
 /**
  * \brief This templated struct lets us know about
@@ -748,6 +754,8 @@ template <> struct is_string<std::string const> : public std::true_type
 {
 };
 
+template <typename T> inline constexpr bool is_string_v = is_string<T>::value;
+
 /**
  * \brief Templated struct for detecting char pointer type.
  */
@@ -770,5 +778,7 @@ template <> struct is_char_pointer<char* const> : public std::true_type
 template <> struct is_char_pointer<const char* const> : public std::true_type
 {
 };
+
+template <typename T> inline constexpr bool is_char_pointer_v = is_char_pointer<T>::value;
 
 } // namespace simdb::type_traits

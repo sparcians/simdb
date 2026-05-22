@@ -93,26 +93,17 @@ public:
     /// the user's benefit; Argos doesn't do anything with them but give
     /// a modal dialog of these notifications. These are never printed to
     /// stdout/stderr.
-    void postNotif(const std::string& notif, NotifType type, bool timestamp = true)
+    void postNotif(const std::string& notif, NotifType type)
     {
         assert(stager_ != nullptr);
-        stager_->postNotif(getID(), notif, type, timestamp);
+        stager_->postNotif(getID(), notif, type);
     }
 
-    void postWarning(const std::string& warning, bool timestamp = true)
-    {
-        postNotif(warning, NotifType::WARNING, timestamp);
-    }
+    void postWarning(const std::string& warning) { postNotif(warning, NotifType::WARNING); }
 
-    void postError(const std::string& error, bool timestamp = true)
-    {
-        postNotif(error, NotifType::ERROR, timestamp);
-    }
+    void postError(const std::string& error) { postNotif(error, NotifType::ERROR); }
 
-    void postMessage(const std::string& msg, bool timestamp = true)
-    {
-        postNotif(msg, NotifType::MESSAGE, timestamp);
-    }
+    void postMessage(const std::string& msg) { postNotif(msg, NotifType::MESSAGE); }
 
     /// Demangled element type for scalars, or element demangle + \c _contig_capacityN /
     /// \c _sparse_capacityN for queues.

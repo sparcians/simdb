@@ -34,15 +34,14 @@ struct Notification
     NotifType type = NotifType::__INVALID__;
     std::shared_ptr<TimePointBase> time_point;
 
-    Notification(uint16_t cid,
-                 const std::string& notif,
-                 const NotifType type,
-                 std::shared_ptr<TimePointBase> && time_point)
-        : cid(cid)
-        , notif(notif)
-        , type(type)
-        , time_point(time_point)
-    {}
+    Notification(uint16_t cid, const std::string& notif, const NotifType type,
+                 std::shared_ptr<TimePointBase>&& time_point) :
+        cid(cid),
+        notif(notif),
+        type(type),
+        time_point(time_point)
+    {
+    }
 
     // Default ctor needed for ConcurrentQueue::try_pop
     Notification() = default;
@@ -57,20 +56,18 @@ public:
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
     virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
     virtual std::string getTimeAsString() const = 0;
-    virtual void postNotif(uint16_t cid, const std::string& notif, NotifType type, bool timestamp = true) = 0;
+    virtual void postNotif(uint16_t cid, const std::string& notif, NotifType type) = 0;
 };
 
 template <typename TimeT> class PipelineStager final : public PipelineStagerBase
 {
 public:
-    PipelineStager(size_t heartbeat,
-                   Timestamp<TimeT>* timestamp,
-                   ConcurrentQueue<QueueCollectionData>* pipeline_head,
-                   ConcurrentQueue<Notification>* notif_head)
-        : heartbeat_(heartbeat)
-        , timestamp_(timestamp)
-        , pipeline_head_(pipeline_head)
-        , notif_head_(notif_head)
+    PipelineStager(size_t heartbeat, Timestamp<TimeT>* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
+                   ConcurrentQueue<Notification>* notif_head) :
+        heartbeat_(heartbeat),
+        timestamp_(timestamp),
+        pipeline_head_(pipeline_head),
+        notif_head_(notif_head)
     {
     }
 
@@ -171,9 +168,9 @@ public:
 
     std::string getTimeAsString() const override { return timestamp_->getTimeAsString(); }
 
-    void postNotif(uint16_t cid, const std::string& notif, NotifType type, bool timestamp = true) override
+    void postNotif(uint16_t cid, const std::string& notif, NotifType type) override
     {
-        Notification notification(cid, notif, type, timestamp ? timestamp_->snapshot() : nullptr);
+        Notification notification(cid, notif, type, timestamp_ ? timestamp_->snapshot() : nullptr);
         notif_head_->emplace(std::move(notification));
     }
 
