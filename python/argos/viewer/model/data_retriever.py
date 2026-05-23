@@ -109,15 +109,13 @@ class DataRetriever:
                 continue
 
             all_columns = struct_deserializer.GetAllFieldNames()
-            #hidden_csv = self.simhier.GetMetaAtPath(elem_path, 'ArgosDefaultHiddenColumns') or ''
-            #hidden_set = {x.strip() for x in hidden_csv.split(',') if x.strip()}
-            #visible = [c for c in all_columns if c not in hidden_set]
-            #if not visible:
-            #    visible = all_columns
-            #struct_deserializer.SetVisibleFieldNames(visible)
-            #self._displayed_columns_by_elem_path[elem_path] = list(visible)
-            struct_deserializer.SetVisibleFieldNames(all_columns)
-            self._displayed_columns_by_elem_path[elem_path] = list(all_columns)
+            hidden_csv = self.simhier.GetMetaAtPath(elem_path, 'ArgosDefaultHiddenColumns') or ''
+            hidden_set = {x.strip() for x in hidden_csv.split(',') if x.strip()}
+            visible = [c for c in all_columns if c not in hidden_set]
+            if not visible:
+                visible = all_columns
+            struct_deserializer.SetVisibleFieldNames(visible)
+            self._displayed_columns_by_elem_path[elem_path] = list(visible)
 
             default_color_col = self.dtype_inspector.GetEffectiveColorKey(struct_name)
             if default_color_col not in visible:
