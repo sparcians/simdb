@@ -186,6 +186,17 @@ public:
     }
 };
 
+std::ostream& operator<<(std::ostream& os, const Instruction& inst)
+{
+    os << "uid(" << inst.getUID() << ") "
+       << "type(" << inst.getType() << ") "
+       << "opcode(" << inst.getOpcode() << ") "
+       << "mnemonic(" << inst.getMnemonic() << ") "
+       << "csr(" << inst.getCsr() << ") "
+       << "finishesSim(" << std::boolalpha << inst.finishesSim() << ")";
+    return os;
+}
+
 void TestScalarCollection()
 {
     TEST_METHOD_INIT;

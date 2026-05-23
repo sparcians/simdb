@@ -27,6 +27,18 @@ struct has_ostream_operator<T, std::void_t<decltype(std::declval<std::ostringstr
 
 template <typename T> inline constexpr bool has_ostream_operator_v = has_ostream_operator<T>::value;
 
+template <typename T, typename = void> struct has_sparta_pair_definition_type : std::false_type
+{
+};
+
+template <typename T>
+struct has_sparta_pair_definition_type<T, std::void_t<typename T::SpartaPairDefinitionType>> : std::true_type
+{
+};
+
+template <typename T>
+inline constexpr bool has_sparta_pair_definition_type_v = has_sparta_pair_definition_type<T>::value;
+
 } // namespace detail
 
 class ArgosCollector : public App
@@ -203,7 +215,7 @@ public:
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        } else if constexpr (type_traits::is_pod_v<T> || !detail::has_ostream_operator_v<T>)
+        } else if constexpr (type_traits::is_pod_v<T> || detail::has_sparta_pair_definition_type_v<T>)
         {
             return demangle_type<T>();
         } else

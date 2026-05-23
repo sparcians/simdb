@@ -8,7 +8,7 @@ class SimHierarchy:
 
         cursor = db.cursor()
         cursor.execute('SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes')
-        rows = [(r[0], r[1], r[2], r[3], '') for r in cursor.fetchall()]
+        rows = [(r[0], r[1], r[2], r[3]) for r in cursor.fetchall()]
 
         for full_path, cid, clk_id, type_name in rows:
             full_paths.append(full_path)
