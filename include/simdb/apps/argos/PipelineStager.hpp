@@ -40,14 +40,14 @@ public:
         advanceStageTime_();
 
         if (!waiting_queue_.empty() &&
-            sameSimulationTick_(waiting_queue_.back().time_point, last_stage_time_.getValue(), true))
+            sameSimulationTick_(waiting_queue_.back().sim_time, last_stage_time_.getValue(), true))
         {
             CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
             collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = last_stage_time_.getValue();
+            entry.sim_time = last_stage_time_.getValue();
             entry.collection_data.emplace_back(std::make_unique<CollectedData>(std::move(data)));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -68,14 +68,14 @@ public:
         advanceStageTime_();
 
         if (!waiting_queue_.empty() &&
-            sameSimulationTick_(waiting_queue_.back().time_point, last_stage_time_.getValue(), true))
+            sameSimulationTick_(waiting_queue_.back().sim_time, last_stage_time_.getValue(), true))
         {
             EnabledChangedAtTimePoint& changes = waiting_queue_.back().enabled_changes;
             changes.emplace_back(std::make_pair(cid, enabled));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = last_stage_time_.getValue();
+            entry.sim_time = last_stage_time_.getValue();
             entry.enabled_changes.emplace_back(std::make_pair(cid, enabled));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -87,14 +87,14 @@ public:
         advanceStageTime_();
 
         if (!waiting_queue_.empty() &&
-            sameSimulationTick_(waiting_queue_.back().time_point, last_stage_time_.getValue(), true))
+            sameSimulationTick_(waiting_queue_.back().sim_time, last_stage_time_.getValue(), true))
         {
             QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
             changes.emplace_back(std::make_pair(cid, quiet));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = last_stage_time_.getValue();
+            entry.sim_time = last_stage_time_.getValue();
             entry.quiet_changes.emplace_back(std::make_pair(cid, quiet));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -103,12 +103,12 @@ public:
     void postNotif(uint16_t cid, const std::string& notif, NotifType type)
     {
         throwIfBadID_(cid);
-        ValidValue<uint64_t> time_point;
+        ValidValue<uint64_t> sim_time;
         if (timestamp_)
         {
-            time_point = timestamp_->getTime();
+            sim_time = timestamp_->getTime();
         }
-        Notification notification(cid, notif, type, time_point);
+        Notification notification(cid, notif, type, sim_time);
         notif_head_->emplace(std::move(notification));
     }
 
@@ -218,7 +218,7 @@ private:
         }
 
         QueueCollectionData to_send;
-        to_send.time_point = collection_at_time.time_point;
+        to_send.sim_time = collection_at_time.sim_time;
 
         // Take into account whether the collected data has changed
         for (auto& data : collection_at_time.collection_data)

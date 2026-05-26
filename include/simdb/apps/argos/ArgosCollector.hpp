@@ -375,7 +375,7 @@ private:
 
                 CompressedQueueCollectionData compressed;
                 compressData(uncompressed, compressed.compressed_collection_data);
-                compressed.time_point = collection_at_time.time_point;
+                compressed.sim_time = collection_at_time.sim_time;
                 output_queue_->emplace(std::move(compressed));
                 return pipeline::PipelineAction::PROCEED;
             }
@@ -407,7 +407,7 @@ private:
             if (input_queue_->try_pop(collection_at_time))
             {
                 auto db_mgr = getDatabaseManager_();
-                auto id = createTimestampInDatabase(db_mgr, collection_at_time.time_point);
+                auto id = createTimestampInDatabase(db_mgr, collection_at_time.sim_time);
 
                 auto inserter = getTableInserter_("CollectionRecords");
                 const auto& bytes = collection_at_time.compressed_collection_data;
@@ -435,9 +435,9 @@ private:
                 inserter->setColumnValue(0, (int)cid);
                 inserter->setColumnValue(1, notif_str);
                 inserter->setColumnValue(2, (int)notif_type);
-                if (notification.time_point.isValid())
+                if (notification.sim_time.isValid())
                 {
-                    inserter->setColumnValue(3, notification.time_point.getValue());
+                    inserter->setColumnValue(3, notification.sim_time.getValue());
                 }
                 inserter->createRecord();
             }
@@ -486,7 +486,7 @@ private:
                 inserter->setColumnValue(0, (int)cid);
                 inserter->setColumnValue(1, concat_field_types.str());
 
-                inserter->setColumnValue(2, dyn_field_changes.time_point);
+                inserter->setColumnValue(2, dyn_field_changes.sim_time);
                 inserter->createRecord();
 
                 action = pipeline::PipelineAction::PROCEED;

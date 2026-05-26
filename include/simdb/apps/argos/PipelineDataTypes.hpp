@@ -20,7 +20,7 @@ using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 
 struct QueueCollectionData
 {
-    uint64_t time_point = 0;
+    uint64_t sim_time = 0; // TODO XXX: ValidValue
     CollectionDataAtTimePoint collection_data;
     EnabledChangedAtTimePoint enabled_changes;
     QuietChangedAtTimePoint quiet_changes;
@@ -28,7 +28,7 @@ struct QueueCollectionData
 
 struct CompressedQueueCollectionData
 {
-    uint64_t time_point = 0;
+    uint64_t sim_time = 0; // TODO XXX: ValidValue
     std::vector<char> compressed_collection_data;
 };
 
@@ -39,13 +39,16 @@ struct Notification
     uint16_t cid = 0;
     std::string notif;
     NotifType type = NotifType::__INVALID__;
-    ValidValue<uint64_t> time_point;
+    ValidValue<uint64_t> sim_time;
 
-    Notification(uint16_t cid, const std::string& notif, const NotifType type, ValidValue<uint64_t> time_point) :
+    // TODO XXX: ValidValue does not have a copy ctor - this would throw:
+    //   ValidValue<uint64_t> no_time;
+    //   Notification notif(_, _, _, no_time); // "operator uint64_t" -> THROWS!
+    Notification(uint16_t cid, const std::string& notif, const NotifType type, ValidValue<uint64_t> sim_time) :
         cid(cid),
         notif(notif),
         type(type),
-        time_point(time_point)
+        sim_time(sim_time)
     {
     }
 
@@ -105,14 +108,14 @@ struct DynamicFieldChanges
     uint16_t cid = 0;
     std::vector<std::string> field_names;
     std::vector<MinimalType> field_types;
-    uint64_t time_point = 0;
+    uint64_t sim_time = 0;
 
     DynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
-                        const std::vector<MinimalType>& field_types, uint64_t time_point) :
+                        const std::vector<MinimalType>& field_types, uint64_t sim_time) :
         cid(cid),
         field_names(field_names),
         field_types(field_types),
-        time_point(time_point)
+        sim_time(sim_time)
     {
     }
 
