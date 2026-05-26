@@ -429,10 +429,6 @@ private:
             DynamicFieldChanges dyn_field_changes;
             while (dyn_field_queue_->try_pop(dyn_field_changes))
             {
-                // TODO cnyce, TODO XXX:
-                // We need a separate table for the CID dynamic field names
-                // and not pile them into the same table as the field types
-
                 const auto cid = dyn_field_changes.cid;
                 const auto& field_names = dyn_field_changes.field_names;
                 const auto& field_types = dyn_field_changes.field_types;
