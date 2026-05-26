@@ -19,7 +19,14 @@ public:
     uint16_t getID() const { return cid_; }
 
     /// \brief Connect to the ArgosCollector's main input queue
-    void connectToPipeline(PipelineStagerBase* stager) { stager_ = stager; }
+    void connectToPipeline(PipelineStagerBase* stager)
+    {
+        stager_ = stager;
+        if (throw_on_any_activity_)
+        {
+            stager_->throwOnAnyActivity(getID());
+        }
+    }
 
     /// Enable collection
     void enable()
@@ -87,6 +94,19 @@ public:
 
     /// Check whether heartbeat re-emission is suppressed.
     bool quieted() const { return quiet_; }
+
+    /// Legacy collectors in unit tests often cannot be collected
+    /// and seem to only exist to check that compilation succeeds.
+    /// If anything touches the PipelineStager with our CID, the
+    /// simulation will immediately throw.
+    void throwOnAnyActivity()
+    {
+        throw_on_any_activity_ = true;
+        if (stager_)
+        {
+            stager_->throwOnAnyActivity(getID());
+        }
+    }
 
     /// Add a timestamped warning/error/msg which applies to this collectable.
     /// All of these will be visible in the Argos UI. These are purely for
@@ -160,6 +180,9 @@ private:
 
     /// Suppress heartbeat re-emission while true
     bool quiet_ = false;
+
+    /// Throw if this collectable attempts to access the PipelineStager.
+    bool throw_on_any_activity_ = false;
 
     /// Main entry point into the pipeline
     PipelineStagerBase* stager_ = nullptr;

@@ -119,6 +119,7 @@ class PipelineStagerBase
 {
 public:
     virtual ~PipelineStagerBase() = default;
+    virtual void throwOnAnyActivity(uint16_t cid) = 0;
     virtual void stage(CollectedData&& data) = 0;
     virtual void sendCollectedDataToPipeline() = 0;
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
@@ -141,10 +142,13 @@ public:
     {
     }
 
+    void throwOnAnyActivity(uint16_t cid) override { throw_on_any_activity_.insert(cid); }
+
     void stage(CollectedData&& data) override
     {
         auto cid = data.getCID();
         assert(cid != 0);
+        throwIfBadID_(cid);
         enabled_cids_.insert(cid);
         refreshable_cids_.insert(cid);
 
@@ -174,6 +178,7 @@ public:
 
     void onEnabledChanged(uint16_t cid, bool enabled) override
     {
+        throwIfBadID_(cid);
         advanceStageTime_();
 
         if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
@@ -191,6 +196,7 @@ public:
 
     void onQuietChanged(uint16_t cid, bool quiet) override
     {
+        throwIfBadID_(cid);
         advanceStageTime_();
 
         if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
@@ -208,6 +214,7 @@ public:
 
     void postNotif(uint16_t cid, const std::string& notif, NotifType type) override
     {
+        throwIfBadID_(cid);
         Notification notification(cid, notif, type, timestamp_ ? timestamp_->snapshot() : nullptr);
         notif_head_->emplace(std::move(notification));
     }
@@ -215,6 +222,7 @@ public:
     void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
                                  const std::vector<MinimalType>& field_types) override
     {
+        throwIfBadID_(cid);
         assert(timestamp_ != nullptr);
         DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->snapshot());
         dyn_field_head_->emplace(std::move(changes));
@@ -442,6 +450,14 @@ private:
         }
     }
 
+    void throwIfBadID_(uint16_t cid) const
+    {
+        if (throw_on_any_activity_.count(cid) > 0)
+        {
+            throw DBException("Collectable with ID ") << cid << " is not allowed to perform any collection activity.";
+        }
+    }
+
     const size_t heartbeat_;
     Timestamp<TimeT>* const timestamp_;
     ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
@@ -454,6 +470,7 @@ private:
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;
     std::unordered_map<uint16_t, std::vector<char>> last_sent_bytes_;
     std::unordered_map<uint16_t, std::vector<char>> last_full_payload_bytes_;
+    std::unordered_set<uint16_t> throw_on_any_activity_;
 };
 
 } // namespace simdb::argos

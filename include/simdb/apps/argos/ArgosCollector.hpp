@@ -199,6 +199,12 @@ public:
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
         entry_point->setScalarDataType(encodeTypeName<ScalarT>());
+
+        std::cout << "Created SimDB collection entry point:\n";
+        std::cout << "  - path:  " << path << "\n";
+        std::cout << "  - clock: " << clk_name << "\n";
+        std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
+
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
@@ -210,6 +216,12 @@ public:
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
         entry_point->setContainerDataType(encodeTypeName<BinT>(), Sparse, capacity);
+
+        std::cout << "Created SimDB collection entry point:\n";
+        std::cout << "  - path:  " << path << "\n";
+        std::cout << "  - clock: " << clk_name << "\n";
+        std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
+
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return static_cast<CollectionEntryPoint*>(collectors_.back().get());
@@ -239,10 +251,12 @@ public:
         } else if constexpr (detail::is_dynamic_type_v<T>)
         {
             return "dynamic";
+        } else if constexpr (detail::has_ostream_operator_v<T>)
+        {
+            return "string";
         } else
         {
-            static_assert(detail::has_ostream_operator_v<T>);
-            return "string";
+            return "UNCOLLECTABLE";
         }
     }
 
@@ -298,7 +312,14 @@ public:
             const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
             const auto clk_id = clk_ids.at(clk_name);
             const auto dtype_name = collector->encodeTypeName();
-            ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
+
+            if (dtype_name == "UNCOLLECTABLE")
+            {
+                collector->throwOnAnyActivity();
+            } else
+            {
+                ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
+            }
         }
     }
 
