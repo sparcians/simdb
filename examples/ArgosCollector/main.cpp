@@ -10,7 +10,7 @@
 TEST_INIT;
 
 /// Call once per test function.
-#define TEST_METHOD_INIT simdb::argos::CollectableBase::resetCIDs()
+#define TEST_METHOD_INIT simdb::argos::CollectionEntryPoint::resetCIDs()
 
 constexpr size_t RUN_TICKS = 1000;
 

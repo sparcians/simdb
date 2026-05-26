@@ -208,7 +208,7 @@ public:
 
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
-        return static_cast<CollectionEntryPoint*>(collectors_.back().get());
+        return collectors_.back().get();
     }
 
     template <typename BinT, bool Sparse>
@@ -225,7 +225,7 @@ public:
 
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
-        return static_cast<CollectionEntryPoint*>(collectors_.back().get());
+        return collectors_.back().get();
     }
 
     template <typename T> static std::string encodeTypeName()
@@ -520,7 +520,7 @@ private:
 
     std::unique_ptr<Timestamp<uint64_t>> timestamp_;
     std::unique_ptr<PipelineStager<uint64_t>> pipeline_stager_;
-    std::vector<std::unique_ptr<CollectableBase>> collectors_;
+    std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;
 };
 
 } // namespace simdb::argos

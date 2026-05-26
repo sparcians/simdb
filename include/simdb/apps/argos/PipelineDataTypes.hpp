@@ -2,9 +2,9 @@
 
 #pragma once
 
+#include "simdb/Exceptions.hpp"
 #include "simdb/apps/argos/CollectedData.hpp"
 #include "simdb/apps/argos/Timestamps.hpp"
-#include "simdb/Exceptions.hpp"
 #include "simdb/utils/Demangle.hpp"
 
 #include <iostream>
@@ -44,11 +44,11 @@ struct Notification
     std::shared_ptr<TimePointBase> time_point;
 
     Notification(uint16_t cid, const std::string& notif, const NotifType type,
-                 std::shared_ptr<TimePointBase>&& time_point)
-        : cid(cid)
-        , notif(notif)
-        , type(type)
-        , time_point(time_point)
+                 std::shared_ptr<TimePointBase>&& time_point) :
+        cid(cid),
+        notif(notif),
+        type(type),
+        time_point(time_point)
     {
     }
 
@@ -111,16 +111,16 @@ struct DynamicFieldChanges
     std::shared_ptr<TimePointBase> time_point;
 
     DynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
-                        const std::vector<MinimalType>& field_types, std::shared_ptr<TimePointBase> time_point)
-        : cid(cid)
-        , field_names(field_names)
-        , field_types(field_types)
-        , time_point(time_point)
+                        const std::vector<MinimalType>& field_types, std::shared_ptr<TimePointBase> time_point) :
+        cid(cid),
+        field_names(field_names),
+        field_types(field_types),
+        time_point(time_point)
     {
     }
 
     // Default ctor needed for ConcurrentQueue::try_pop
     DynamicFieldChanges() = default;
-};    
+};
 
 } // namespace simdb::argos

@@ -10,11 +10,14 @@
 
 namespace simdb::argos {
 
-/// Base class for all collectables.
-class CollectableBase
+class CollectionEntryPoint
 {
 public:
-    virtual ~CollectableBase() = default;
+    CollectionEntryPoint(size_t heartbeat, TinyStrings<>* tiny_strings) :
+        heartbeat_(heartbeat),
+        tiny_strings_(tiny_strings)
+    {
+    }
 
     /// Get the unique ID for this collection point.
     uint16_t getID() const { return cid_; }
@@ -126,82 +129,8 @@ public:
 
     void postMessage(const std::string& msg) { postNotif(msg, NotifType::MESSAGE); }
 
-    virtual std::string encodeTypeName() const = 0;
-
-    virtual void writeMetaOnPostTeardown(DatabaseManager*) const {}
-
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs() { nextCID_() = 0; }
-
-protected:
-    explicit CollectableBase(size_t heartbeat) :
-        heartbeat_(heartbeat)
-    {
-    }
-
-    /// Get the heartbeat value for all collection points.
-    size_t getHeartbeat_() const { return heartbeat_; }
-
-    /// Stage collected bytes for pipeline processing.
-    void stage_(CollectedData&& data)
-    {
-        if (!stager_) [[unlikely]]
-        {
-            throw DBException("Pipeline was never opened!");
-        }
-        stager_->stage(std::move(data));
-    }
-
-private:
-    /// Unique ID generator.
-    static uint16_t& nextCID_()
-    {
-        static uint16_t counter = 0;
-        if (counter == UINT16_MAX)
-        {
-            throw DBException("Max number of collectables exceeded (") << UINT16_MAX << ")";
-        }
-        ++counter;
-        return counter;
-    }
-
-    /// Unique collectable ID
-    const uint16_t cid_{nextCID_()};
-
-    /// Heartbeat value for this collection point. This is the
-    /// maximum number of cycles SimDB will attempt to perform
-    /// "minification" on the data before it is forced to write
-    /// the whole un-minified value to the database again. Note
-    /// that minification is simply an implementation detail
-    /// for performance.
-    const size_t heartbeat_;
-
-    /// Enabled flag
-    bool enabled_ = true;
-
-    /// Suppress heartbeat re-emission while true
-    bool quiet_ = false;
-
-    /// Throw if this collectable attempts to access the PipelineStager.
-    bool throw_on_any_activity_ = false;
-
-    /// Main entry point into the pipeline
-    PipelineStagerBase* stager_ = nullptr;
-};
-
-/// TODO cnyce: This non-template class is only being used here
-/// to help get past all the compiler errors related to templates.
-/// This is not the design's final form; we will fully use template
-/// classes once Sparta's IterableCollector/Collectable/SpartaKeyPairs
-/// are moved to SimDB.
-class CollectionEntryPoint : public CollectableBase
-{
-public:
-    CollectionEntryPoint(size_t heartbeat, TinyStrings<>* tiny_strings) :
-        CollectableBase(heartbeat),
-        tiny_strings_(tiny_strings)
-    {
-    }
 
     TinyStrings<>* getTinyStrings() const { return tiny_strings_; }
 
@@ -228,7 +157,7 @@ public:
         collectable_type_name_ += std::to_string(capacity);
     }
 
-    std::string encodeTypeName() const override final
+    std::string encodeTypeName() const
     {
         if (collectable_type_name_.empty())
         {
@@ -366,7 +295,7 @@ public:
         sendBytes_(final_bytes);
     }
 
-    void writeMetaOnPostTeardown(DatabaseManager* db_mgr) const override final
+    void writeMetaOnPostTeardown(DatabaseManager* db_mgr) const
     {
         if (max_container_size_seen_.isValid())
         {
@@ -375,6 +304,28 @@ public:
     }
 
 private:
+    /// Unique ID generator.
+    static uint16_t& nextCID_()
+    {
+        static uint16_t counter = 0;
+        if (counter == UINT16_MAX)
+        {
+            throw DBException("Max number of collectables exceeded (") << UINT16_MAX << ")";
+        }
+        ++counter;
+        return counter;
+    }
+
+    /// Stage collected bytes for pipeline processing.
+    void stage_(CollectedData&& data)
+    {
+        if (!stager_) [[unlikely]]
+        {
+            throw DBException("Pipeline was never opened!");
+        }
+        stager_->stage(std::move(data));
+    }
+
     void sendBytes_(const std::vector<char>& bytes)
     {
         assert(enabled());
@@ -398,6 +349,29 @@ private:
         // Argos collector has settled a bit. For now, we'll accept lots of waste by
         // doing full byte dumps each time (FULL_ACTION_FLAG).
     }
+
+    /// Unique collectable ID
+    const uint16_t cid_{nextCID_()};
+
+    /// Heartbeat value for this collection point. This is the
+    /// maximum number of cycles SimDB will attempt to perform
+    /// "minification" on the data before it is forced to write
+    /// the whole un-minified value to the database again. Note
+    /// that minification is simply an implementation detail
+    /// for performance.
+    const size_t heartbeat_;
+
+    /// Enabled flag
+    bool enabled_ = true;
+
+    /// Suppress heartbeat re-emission while true
+    bool quiet_ = false;
+
+    /// Throw if this collectable attempts to access the PipelineStager.
+    bool throw_on_any_activity_ = false;
+
+    /// Main entry point into the pipeline
+    PipelineStagerBase* stager_ = nullptr;
 
     std::string collectable_type_name_;
     ValidValue<bool> is_scalar_;
