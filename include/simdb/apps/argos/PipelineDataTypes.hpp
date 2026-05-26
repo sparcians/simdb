@@ -4,11 +4,10 @@
 
 #include "simdb/Exceptions.hpp"
 #include "simdb/apps/argos/CollectedData.hpp"
-#include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/utils/Demangle.hpp"
+#include "simdb/utils/ValidValue.hpp"
 
 #include <iostream>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,11 +17,10 @@ namespace simdb::argos {
 using CollectionDataAtTimePoint = std::vector<std::unique_ptr<CollectedData>>;
 using EnabledChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
-using CollectionTime = std::shared_ptr<TimePoint>;
 
 struct QueueCollectionData
 {
-    CollectionTime time_point;
+    uint64_t time_point = 0;
     CollectionDataAtTimePoint collection_data;
     EnabledChangedAtTimePoint enabled_changes;
     QuietChangedAtTimePoint quiet_changes;
@@ -30,7 +28,7 @@ struct QueueCollectionData
 
 struct CompressedQueueCollectionData
 {
-    CollectionTime time_point;
+    uint64_t time_point = 0;
     std::vector<char> compressed_collection_data;
 };
 
@@ -41,10 +39,9 @@ struct Notification
     uint16_t cid = 0;
     std::string notif;
     NotifType type = NotifType::__INVALID__;
-    std::shared_ptr<TimePoint> time_point;
+    ValidValue<uint64_t> time_point;
 
-    Notification(uint16_t cid, const std::string& notif, const NotifType type,
-                 std::shared_ptr<TimePoint>&& time_point) :
+    Notification(uint16_t cid, const std::string& notif, const NotifType type, ValidValue<uint64_t> time_point) :
         cid(cid),
         notif(notif),
         type(type),
@@ -108,10 +105,10 @@ struct DynamicFieldChanges
     uint16_t cid = 0;
     std::vector<std::string> field_names;
     std::vector<MinimalType> field_types;
-    std::shared_ptr<TimePoint> time_point;
+    uint64_t time_point = 0;
 
     DynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
-                        const std::vector<MinimalType>& field_types, std::shared_ptr<TimePoint> time_point) :
+                        const std::vector<MinimalType>& field_types, uint64_t time_point) :
         cid(cid),
         field_names(field_names),
         field_types(field_types),

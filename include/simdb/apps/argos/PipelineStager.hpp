@@ -39,14 +39,15 @@ public:
 
         advanceStageTime_();
 
-        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
+        if (!waiting_queue_.empty() &&
+            sameSimulationTick_(waiting_queue_.back().time_point, last_stage_time_.getValue(), true))
         {
             CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
             collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = last_stage_time_;
+            entry.time_point = last_stage_time_.getValue();
             entry.collection_data.emplace_back(std::make_unique<CollectedData>(std::move(data)));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -66,14 +67,15 @@ public:
         throwIfBadID_(cid);
         advanceStageTime_();
 
-        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
+        if (!waiting_queue_.empty() &&
+            sameSimulationTick_(waiting_queue_.back().time_point, last_stage_time_.getValue(), true))
         {
             EnabledChangedAtTimePoint& changes = waiting_queue_.back().enabled_changes;
             changes.emplace_back(std::make_pair(cid, enabled));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = last_stage_time_;
+            entry.time_point = last_stage_time_.getValue();
             entry.enabled_changes.emplace_back(std::make_pair(cid, enabled));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -84,14 +86,15 @@ public:
         throwIfBadID_(cid);
         advanceStageTime_();
 
-        if (!waiting_queue_.empty() && waiting_queue_.back().time_point->equals(last_stage_time_.get(), true))
+        if (!waiting_queue_.empty() &&
+            sameSimulationTick_(waiting_queue_.back().time_point, last_stage_time_.getValue(), true))
         {
             QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
             changes.emplace_back(std::make_pair(cid, quiet));
         } else
         {
             QueueCollectionData entry;
-            entry.time_point = last_stage_time_;
+            entry.time_point = last_stage_time_.getValue();
             entry.quiet_changes.emplace_back(std::make_pair(cid, quiet));
             waiting_queue_.emplace(std::move(entry));
         }
@@ -100,7 +103,12 @@ public:
     void postNotif(uint16_t cid, const std::string& notif, NotifType type)
     {
         throwIfBadID_(cid);
-        Notification notification(cid, notif, type, timestamp_ ? timestamp_->snapshot() : nullptr);
+        ValidValue<uint64_t> time_point;
+        if (timestamp_)
+        {
+            time_point = timestamp_->getTime();
+        }
+        Notification notification(cid, notif, type, time_point);
         notif_head_->emplace(std::move(notification));
     }
 
@@ -109,7 +117,7 @@ public:
     {
         throwIfBadID_(cid);
         assert(timestamp_ != nullptr);
-        DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->snapshot());
+        DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->getTime());
         dyn_field_head_->emplace(std::move(changes));
     }
 
@@ -161,10 +169,23 @@ private:
         collection_data.collection_data.emplace_back(std::move(lifecycle));
     }
 
+    static bool sameSimulationTick_(uint64_t queued, uint64_t stage, bool must_be_equal_or_less)
+    {
+        if (queued == stage)
+        {
+            return true;
+        }
+        if (must_be_equal_or_less && queued > stage)
+        {
+            throw DBException("Time comparison failure: ") << queued << " <= " << stage;
+        }
+        return false;
+    }
+
     void advanceStageTime_()
     {
-        auto current_time = timestamp_->snapshot();
-        if (!last_stage_time_ || !current_time->lessThan(last_stage_time_.get()))
+        const uint64_t current_time = timestamp_->getTime();
+        if (!last_stage_time_.isValid() || current_time >= last_stage_time_.getValue())
         {
             last_stage_time_ = current_time;
         } else
@@ -349,7 +370,7 @@ private:
     ConcurrentQueue<Notification>* const notif_head_;
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
     std::queue<QueueCollectionData> waiting_queue_;
-    CollectionTime last_stage_time_;
+    ValidValue<uint64_t> last_stage_time_;
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;

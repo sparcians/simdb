@@ -22,7 +22,7 @@ void TestTimestamps()
     using dt = simdb::SqlDataType;
 
     auto& tbl = schema.addTable("DataBlobs");
-    timestamp.addTimeColumn(tbl, "Tick");
+    tbl.addColumn("Tick", dt::uint64_t);
     tbl.addColumn("DataBlob", dt::blob_t);
 
     db_mgr.appendSchema(schema);
@@ -46,7 +46,7 @@ void TestTimestamps()
         auto inserter = db_mgr.prepareINSERT(SQL_TABLE("DataBlobs"));
         while (++tick <= 100)
         {
-            timestamp.snapshot()->assign(inserter.get(), 0);
+            inserter->setColumnValue(0, timestamp.getTime());
             inserter->setColumnValue(1, step_values.at(tick - 1));
             inserter->createRecord();
         }

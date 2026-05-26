@@ -407,7 +407,7 @@ private:
             if (input_queue_->try_pop(collection_at_time))
             {
                 auto db_mgr = getDatabaseManager_();
-                auto id = collection_at_time.time_point->createTimestampInDatabase(db_mgr);
+                auto id = createTimestampInDatabase(db_mgr, collection_at_time.time_point);
 
                 auto inserter = getTableInserter_("CollectionRecords");
                 const auto& bytes = collection_at_time.compressed_collection_data;
@@ -435,9 +435,9 @@ private:
                 inserter->setColumnValue(0, (int)cid);
                 inserter->setColumnValue(1, notif_str);
                 inserter->setColumnValue(2, (int)notif_type);
-                if (notification.time_point)
+                if (notification.time_point.isValid())
                 {
-                    notification.time_point->assign(inserter, 3);
+                    inserter->setColumnValue(3, notification.time_point.getValue());
                 }
                 inserter->createRecord();
             }
@@ -486,8 +486,7 @@ private:
                 inserter->setColumnValue(0, (int)cid);
                 inserter->setColumnValue(1, concat_field_types.str());
 
-                assert(dyn_field_changes.time_point != nullptr);
-                dyn_field_changes.time_point->assign(inserter, 2);
+                inserter->setColumnValue(2, dyn_field_changes.time_point);
                 inserter->createRecord();
 
                 action = pipeline::PipelineAction::PROCEED;
