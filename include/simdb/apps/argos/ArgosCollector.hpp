@@ -264,8 +264,8 @@ public:
         auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
         auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
         auto dyn_field_head = pipeline->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-        pipeline_stager_ =
-            std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head, dyn_field_head);
+        pipeline_stager_ = std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head,
+                                                                      notif_head, dyn_field_head);
 
         for (const auto& collector : collectors_)
         {

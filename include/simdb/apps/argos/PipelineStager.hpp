@@ -67,18 +67,30 @@ inline std::ostream& operator<<(std::ostream& os, const MinimalType min_type)
 {
     switch (min_type)
     {
-        case MinimalType::bool_t:   return os << demangle_type<bool>();
-        case MinimalType::int8_t:   return os << demangle_type<int8_t>();
-        case MinimalType::int16_t:  return os << demangle_type<int16_t>();
-        case MinimalType::int32_t:  return os << demangle_type<int32_t>();
-        case MinimalType::int64_t:  return os << demangle_type<int64_t>();
-        case MinimalType::uint8_t:  return os << demangle_type<uint8_t>();
-        case MinimalType::uint16_t: return os << demangle_type<uint16_t>();
-        case MinimalType::uint32_t: return os << demangle_type<uint32_t>();
-        case MinimalType::uint64_t: return os << demangle_type<uint64_t>();
-        case MinimalType::float_t:  return os << demangle_type<float>();
-        case MinimalType::double_t: return os << demangle_type<double>();
-        case MinimalType::string_t: return os << "string";
+    case MinimalType::bool_t:
+        return os << demangle_type<bool>();
+    case MinimalType::int8_t:
+        return os << demangle_type<int8_t>();
+    case MinimalType::int16_t:
+        return os << demangle_type<int16_t>();
+    case MinimalType::int32_t:
+        return os << demangle_type<int32_t>();
+    case MinimalType::int64_t:
+        return os << demangle_type<int64_t>();
+    case MinimalType::uint8_t:
+        return os << demangle_type<uint8_t>();
+    case MinimalType::uint16_t:
+        return os << demangle_type<uint16_t>();
+    case MinimalType::uint32_t:
+        return os << demangle_type<uint32_t>();
+    case MinimalType::uint64_t:
+        return os << demangle_type<uint64_t>();
+    case MinimalType::float_t:
+        return os << demangle_type<float>();
+    case MinimalType::double_t:
+        return os << demangle_type<double>();
+    case MinimalType::string_t:
+        return os << "string";
     }
     throw DBException("Invalid MinimalType");
 }
@@ -90,15 +102,14 @@ struct DynamicFieldChanges
     std::vector<MinimalType> field_types;
     std::shared_ptr<TimePointBase> time_point;
 
-    DynamicFieldChanges(uint16_t cid,
-                        const std::vector<std::string>& field_names,
-                        const std::vector<MinimalType>& field_types,
-                        std::shared_ptr<TimePointBase> time_point)
-        : cid(cid)
-        , field_names(field_names)
-        , field_types(field_types)
-        , time_point(time_point)
-    {}
+    DynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
+                        const std::vector<MinimalType>& field_types, std::shared_ptr<TimePointBase> time_point) :
+        cid(cid),
+        field_names(field_names),
+        field_types(field_types),
+        time_point(time_point)
+    {
+    }
 
     // Default ctor needed for ConcurrentQueue::try_pop
     DynamicFieldChanges() = default;
@@ -113,20 +124,15 @@ public:
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
     virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
     virtual void postNotif(uint16_t cid, const std::string& notif, NotifType type) = 0;
-    virtual void postDynamicFieldChanges(
-        uint16_t cid,
-        const std::vector<std::string>& field_names,
-        const std::vector<MinimalType>& field_types) = 0;
+    virtual void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
+                                         const std::vector<MinimalType>& field_types) = 0;
 };
 
 template <typename TimeT> class PipelineStager final : public PipelineStagerBase
 {
 public:
-    PipelineStager(size_t heartbeat,
-                   Timestamp<TimeT>* timestamp,
-                   ConcurrentQueue<QueueCollectionData>* pipeline_head,
-                   ConcurrentQueue<Notification>* notif_head,
-                   ConcurrentQueue<DynamicFieldChanges>* dyn_field_head) :
+    PipelineStager(size_t heartbeat, Timestamp<TimeT>* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
+                   ConcurrentQueue<Notification>* notif_head, ConcurrentQueue<DynamicFieldChanges>* dyn_field_head) :
         heartbeat_(heartbeat),
         timestamp_(timestamp),
         pipeline_head_(pipeline_head),
@@ -206,10 +212,8 @@ public:
         notif_head_->emplace(std::move(notification));
     }
 
-    void postDynamicFieldChanges(
-        uint16_t cid,
-        const std::vector<std::string>& field_names,
-        const std::vector<MinimalType>& field_types) override
+    void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
+                                 const std::vector<MinimalType>& field_types) override
     {
         assert(timestamp_ != nullptr);
         DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->snapshot());
