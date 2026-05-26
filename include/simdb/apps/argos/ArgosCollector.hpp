@@ -120,11 +120,16 @@ public:
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
 
         // TODO cnyce: floating-point timestamp support
-        auto& dyn_field_changes_tbl = schema.addTable("DynamicFieldChanges");
-        dyn_field_changes_tbl.addColumn("SerializationCID", dt::int32_t);
-        dyn_field_changes_tbl.addColumn("FieldNames", dt::string_t);
-        dyn_field_changes_tbl.addColumn("FieldTypes", dt::string_t);
-        dyn_field_changes_tbl.addColumn("Timestamp", dt::uint64_t);
+        auto& dyn_field_type_changes_tbl = schema.addTable("DynamicFieldTypeChanges");
+        dyn_field_type_changes_tbl.addColumn("SerializationCID", dt::int32_t);
+        dyn_field_type_changes_tbl.addColumn("FieldTypes", dt::string_t);
+        dyn_field_type_changes_tbl.addColumn("Timestamp", dt::uint64_t);
+        dyn_field_type_changes_tbl.createCompoundIndexOn({"SerializationCID", "Timestamp"});
+
+        auto& dyn_field_names_tbl = schema.addTable("DynamicFieldNames");
+        dyn_field_names_tbl.addColumn("SerializationCID", dt::int32_t);
+        dyn_field_names_tbl.addColumn("FieldNames", dt::string_t);
+        dyn_field_names_tbl.createIndexOn("SerializationCID");
     }
 
     void setHeartbeat(size_t heartbeat)
@@ -435,19 +440,25 @@ private:
                 assert(!field_names.empty());
                 assert(cid > 0);
 
-                bool comma = false;
-                std::ostringstream concat_field_names;
-                for (const auto& field_name : field_names)
+                if (serialized_dyn_field_cids_.insert(cid).second)
                 {
-                    if (comma)
+                    bool comma = false;
+                    std::ostringstream concat_field_names;
+                    for (const auto& field_name : field_names)
                     {
-                        concat_field_names << ",";
+                        if (comma)
+                        {
+                            concat_field_names << ",";
+                        }
+                        comma = true;
+                        concat_field_names << field_name;
                     }
-                    comma = true;
-                    concat_field_names << field_name;
+
+                    auto inserter = getTableInserter_("DynamicFieldNames");
+                    inserter->createRecordWithColValues((int)cid, concat_field_names.str());
                 }
 
-                comma = false;
+                bool comma = false;
                 std::ostringstream concat_field_types;
                 for (const auto field_type : field_types)
                 {
@@ -459,13 +470,12 @@ private:
                     concat_field_types << field_type;
                 }
 
-                auto inserter = getTableInserter_("DynamicFieldChanges");
+                auto inserter = getTableInserter_("DynamicFieldTypeChanges");
                 inserter->setColumnValue(0, (int)cid);
-                inserter->setColumnValue(1, concat_field_names.str());
-                inserter->setColumnValue(2, concat_field_types.str());
+                inserter->setColumnValue(1, concat_field_types.str());
 
                 assert(dyn_field_changes.time_point != nullptr);
-                dyn_field_changes.time_point->assign(inserter, 3);
+                dyn_field_changes.time_point->assign(inserter, 2);
                 inserter->createRecord();
 
                 action = pipeline::PipelineAction::PROCEED;
@@ -477,6 +487,7 @@ private:
         ConcurrentQueue<CompressedQueueCollectionData>* input_queue_ = nullptr;
         ConcurrentQueue<Notification>* notif_queue_ = nullptr;
         ConcurrentQueue<DynamicFieldChanges>* dyn_field_queue_ = nullptr;
+        std::unordered_set<uint16_t> serialized_dyn_field_cids_;
     };
 
     DatabaseManager* const db_mgr_;
