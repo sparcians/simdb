@@ -4,6 +4,7 @@
 
 #include "simdb/apps/App.hpp"
 #include "simdb/apps/argos/Collectables.hpp"
+#include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/utils/Compress.hpp"
 #include "simdb/utils/TypeTraits.hpp"
@@ -350,12 +351,6 @@ public:
     }
 
 private:
-    struct CompressedQueueCollectionData
-    {
-        CollectionTime time_point;
-        std::vector<char> compressed_collection_data;
-    };
-
     class Compressor : public pipeline::Stage
     {
     public:

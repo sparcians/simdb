@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/TinyStrings.hpp"
