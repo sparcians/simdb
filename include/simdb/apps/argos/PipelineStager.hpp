@@ -14,24 +14,10 @@
 
 namespace simdb::argos {
 
-class PipelineStagerBase
+class PipelineStager
 {
 public:
-    virtual ~PipelineStagerBase() = default;
-    virtual void throwOnAnyActivity(uint16_t cid) = 0;
-    virtual void stage(CollectedData&& data) = 0;
-    virtual void sendCollectedDataToPipeline() = 0;
-    virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
-    virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
-    virtual void postNotif(uint16_t cid, const std::string& notif, NotifType type) = 0;
-    virtual void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
-                                         const std::vector<MinimalType>& field_types) = 0;
-};
-
-template <typename TimeT> class PipelineStager final : public PipelineStagerBase
-{
-public:
-    PipelineStager(size_t heartbeat, Timestamp<TimeT>* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
+    PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
                    ConcurrentQueue<Notification>* notif_head, ConcurrentQueue<DynamicFieldChanges>* dyn_field_head) :
         heartbeat_(heartbeat),
         timestamp_(timestamp),
@@ -41,9 +27,9 @@ public:
     {
     }
 
-    void throwOnAnyActivity(uint16_t cid) override { throw_on_any_activity_.insert(cid); }
+    void throwOnAnyActivity(uint16_t cid) { throw_on_any_activity_.insert(cid); }
 
-    void stage(CollectedData&& data) override
+    void stage(CollectedData&& data)
     {
         auto cid = data.getCID();
         assert(cid != 0);
@@ -66,7 +52,7 @@ public:
         }
     }
 
-    void sendCollectedDataToPipeline() override
+    void sendCollectedDataToPipeline()
     {
         while (!waiting_queue_.empty())
         {
@@ -75,7 +61,7 @@ public:
         }
     }
 
-    void onEnabledChanged(uint16_t cid, bool enabled) override
+    void onEnabledChanged(uint16_t cid, bool enabled)
     {
         throwIfBadID_(cid);
         advanceStageTime_();
@@ -93,7 +79,7 @@ public:
         }
     }
 
-    void onQuietChanged(uint16_t cid, bool quiet) override
+    void onQuietChanged(uint16_t cid, bool quiet)
     {
         throwIfBadID_(cid);
         advanceStageTime_();
@@ -111,7 +97,7 @@ public:
         }
     }
 
-    void postNotif(uint16_t cid, const std::string& notif, NotifType type) override
+    void postNotif(uint16_t cid, const std::string& notif, NotifType type)
     {
         throwIfBadID_(cid);
         Notification notification(cid, notif, type, timestamp_ ? timestamp_->snapshot() : nullptr);
@@ -119,7 +105,7 @@ public:
     }
 
     void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
-                                 const std::vector<MinimalType>& field_types) override
+                                 const std::vector<MinimalType>& field_types)
     {
         throwIfBadID_(cid);
         assert(timestamp_ != nullptr);
@@ -358,7 +344,7 @@ private:
     }
 
     const size_t heartbeat_;
-    Timestamp<TimeT>* const timestamp_;
+    Timestamp* const timestamp_;
     ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
     ConcurrentQueue<Notification>* const notif_head_;
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;

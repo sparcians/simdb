@@ -9,47 +9,12 @@ std::mt19937 gen(rd()); // mersenne_twister_engine
 /// This test covers basic functionality of the Timestamp utility.
 TEST_INIT;
 
-struct QueryTimeFltPt
-{
-    using type = double;
-};
-
-struct QueryTimeNotUInt64
-{
-    using type = uint32_t;
-};
-
-struct QueryTimeUInt64
-{
-    using type = uint64_t;
-};
-
-template <typename TimeT> struct QueryTime;
-
-template <> struct QueryTime<uint32_t> : QueryTimeNotUInt64
-{
-};
-
-template <> struct QueryTime<uint64_t> : QueryTimeUInt64
-{
-};
-
-template <> struct QueryTime<float> : QueryTimeFltPt
-{
-};
-
-template <> struct QueryTime<double> : QueryTimeFltPt
-{
-};
-
-template <typename TimeT> using query_time_t = typename QueryTime<TimeT>::type;
-
-template <typename TimeT> void TestTimestamps()
+void TestTimestamps()
 {
     using namespace simdb::argos;
 
-    TimeT tick = 0;
-    Timestamp<TimeT> timestamp(&tick);
+    uint64_t tick = 0;
+    Timestamp timestamp(&tick);
 
     simdb::DatabaseManager db_mgr("test.db", true /*new file*/);
 
@@ -90,7 +55,7 @@ template <typename TimeT> void TestTimestamps()
     auto query = db_mgr.createQuery("DataBlobs");
     EXPECT_EQUAL(query->count(), num_steps);
 
-    query_time_t<TimeT> actual_time;
+    uint64_t actual_time;
     query->select("Tick", actual_time);
 
     std::vector<size_t> actual_values;
@@ -102,7 +67,7 @@ template <typename TimeT> void TestTimestamps()
     {
         EXPECT_TRUE(results.getNextRecord());
 
-        const TimeT expected_time = num_steps - step_values.size() + 1;
+        const uint64_t expected_time = num_steps - step_values.size() + 1;
         EXPECT_EQUAL(expected_time, actual_time);
 
         const auto& expected_values = step_values.back();
@@ -115,14 +80,9 @@ template <typename TimeT> void TestTimestamps()
     EXPECT_FALSE(results.getNextRecord());
 }
 
-template <typename... TimeTs> void TestTimestampsFor()
-{
-    (TestTimestamps<TimeTs>(), ...);
-}
-
 int main()
 {
-    TestTimestampsFor<uint32_t, uint64_t, float, double>();
+    TestTimestamps();
 
     REPORT_ERROR;
     return ERROR_CODE;

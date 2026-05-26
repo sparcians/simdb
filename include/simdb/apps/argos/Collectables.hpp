@@ -23,7 +23,7 @@ public:
     uint16_t getID() const { return cid_; }
 
     /// \brief Connect to the ArgosCollector's main input queue
-    void connectToPipeline(PipelineStagerBase* stager)
+    void connectToPipeline(PipelineStager* stager)
     {
         stager_ = stager;
         if (throw_on_any_activity_)
@@ -371,7 +371,7 @@ private:
     bool throw_on_any_activity_ = false;
 
     /// Main entry point into the pipeline
-    PipelineStagerBase* stager_ = nullptr;
+    PipelineStager* stager_ = nullptr;
 
     std::string collectable_type_name_;
     ValidValue<bool> is_scalar_;

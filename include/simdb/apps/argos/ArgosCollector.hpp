@@ -172,7 +172,7 @@ public:
         {
             throw DBException("Cannot change timestamp object after calling AppManagers::initializePipelines()");
         }
-        timestamp_ = std::make_unique<Timestamp<uint64_t>>(backpointer);
+        timestamp_ = std::make_unique<Timestamp>(backpointer);
     }
 
     // TODO cnyce: floating-point timestamp support
@@ -182,7 +182,7 @@ public:
         {
             throw DBException("Cannot change timestamp object after calling AppManagers::initializePipelines()");
         }
-        timestamp_ = std::make_unique<Timestamp<uint64_t>>(fn);
+        timestamp_ = std::make_unique<Timestamp>(fn);
     }
 
     // TODO cnyce: floating-point timestamp support
@@ -192,7 +192,7 @@ public:
         {
             throw DBException("Cannot change timestamp object after calling AppManagers::initializePipelines()");
         }
-        timestamp_ = std::make_unique<Timestamp<uint64_t>>(fn);
+        timestamp_ = std::make_unique<Timestamp>(fn);
     }
 
     template <typename ScalarT>
@@ -263,7 +263,7 @@ public:
 
     TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
 
-    PipelineStagerBase* getStager() const { return pipeline_stager_.get(); }
+    PipelineStager* getStager() const { return pipeline_stager_.get(); }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
@@ -284,8 +284,8 @@ public:
         auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
         auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
         auto dyn_field_head = pipeline->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-        pipeline_stager_ = std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head,
-                                                                      notif_head, dyn_field_head);
+        pipeline_stager_ =
+            std::make_unique<PipelineStager>(heartbeat_, timestamp_.get(), pipeline_head, notif_head, dyn_field_head);
 
         for (const auto& collector : collectors_)
         {
@@ -518,8 +518,8 @@ private:
                                        >;
     std::map<uint16_t, CollectableMeta> meta_by_cid_;
 
-    std::unique_ptr<Timestamp<uint64_t>> timestamp_;
-    std::unique_ptr<PipelineStager<uint64_t>> pipeline_stager_;
+    std::unique_ptr<Timestamp> timestamp_;
+    std::unique_ptr<PipelineStager> pipeline_stager_;
     std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;
 };
 

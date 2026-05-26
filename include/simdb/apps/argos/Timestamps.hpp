@@ -6,67 +6,51 @@
 #include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/utils/ValidValue.hpp"
 
+#include <functional>
+#include <memory>
+
 namespace simdb::argos {
 
-/// \class TimePointBase
-/// \brief Type-agnostic base class which holds onto timestamp snapshots
-class TimePointBase
-{
-public:
-    virtual ~TimePointBase() = default;
-
-    /// Check if the given time point is equal to ours (dynamic cast must succeed)
-    virtual bool equals(const TimePointBase* time_point, bool must_be_equal_or_less = false) const = 0;
-
-    /// Check if our time is less than the given time point (dynamic cast must succeed)
-    virtual bool lessThan(const TimePointBase* time_point) const = 0;
-
-    /// Create an entry in the Timestamps table and return the rowid
-    virtual int createTimestampInDatabase(DatabaseManager* db_mgr) const = 0;
-
-    /// Write the time value to the PreparedINSERT at the given column index.
-    virtual void assign(PreparedINSERT* inserter, uint32_t col_idx) const = 0;
-};
-
 /// \class TimePoint
-/// \brief Type-specific timestamp snapshot
-template <typename TimeT> class TimePoint : public TimePointBase
+/// \brief Timestamp snapshot (uint64_t simulation time)
+class TimePoint
 {
 public:
-    explicit TimePoint(const TimeT time) :
+    explicit TimePoint(uint64_t time) :
         time_(time)
     {
     }
 
-    /// Check if the given time point is equal to ours (dynamic cast must succeed)
-    bool equals(const TimePointBase* time_point, bool must_be_equal_or_less = false) const override final
+    /// Check if the given time point is equal to ours
+    bool equals(const TimePoint* time_point, bool must_be_equal_or_less = false) const
     {
-        if (auto typed_time_point = dynamic_cast<const TimePoint<TimeT>*>(time_point))
+        if (!time_point)
         {
-            if (time_ == typed_time_point->time_)
-            {
-                return true;
-            } else if (must_be_equal_or_less && !lessThan(typed_time_point))
-            {
-                throw DBException("Time comparison failure: ") << time_ << " <= " << typed_time_point->time_;
-            }
-            return false;
+            throw DBException("Null time point");
         }
-        throw DBException("Dynamic cast failed");
+        if (time_ == time_point->time_)
+        {
+            return true;
+        }
+        if (must_be_equal_or_less && !lessThan(time_point))
+        {
+            throw DBException("Time comparison failure: ") << time_ << " <= " << time_point->time_;
+        }
+        return false;
     }
 
-    /// Check if our time is less than the given time point (dynamic cast must succeed)
-    bool lessThan(const TimePointBase* time_point) const override final
+    /// Check if our time is less than the given time point
+    bool lessThan(const TimePoint* time_point) const
     {
-        if (auto typed_time_point = dynamic_cast<const TimePoint<TimeT>*>(time_point))
+        if (!time_point)
         {
-            return time_ < typed_time_point->time_;
+            throw DBException("Null time point");
         }
-        throw DBException("Dynamic cast failed");
+        return time_ < time_point->time_;
     }
 
     /// Create an entry in the Timestamps table and return the rowid
-    int createTimestampInDatabase(DatabaseManager* db_mgr) const override final
+    int createTimestampInDatabase(DatabaseManager* db_mgr) const
     {
         // Ensure we don't create multiple entries in the Timestamps table
         // that have the same Timestamp column value (it will throw; must
@@ -75,18 +59,7 @@ public:
         // Note that this is called on the DB thread and it is not a big
         // performance issue to query alongside the INSERT.
         auto query = db_mgr->createQuery("Timestamps");
-        if constexpr (std::is_same_v<TimeT, uint64_t>)
-        {
-            query->addConstraintForUInt64("Timestamp", Constraints::EQUAL, time_);
-        } else if constexpr (std::is_integral_v<TimeT>)
-        {
-            auto time = static_cast<int64_t>(time_);
-            query->addConstraintForInt64("Timestamp", Constraints::EQUAL, time);
-        } else
-        {
-            static_assert(std::is_floating_point_v<TimeT>);
-            query->addConstraintForDouble("Timestamp", Constraints::EQUAL, time_);
-        }
+        query->addConstraintForUInt64("Timestamp", Constraints::EQUAL, time_);
 
         int id;
         query->select("Id", id);
@@ -101,66 +74,49 @@ public:
     }
 
     /// Write the time value to the PreparedINSERT at the given column index.
-    void assign(PreparedINSERT* inserter, uint32_t col_idx) const override final
-    {
-        inserter->setColumnValue(col_idx, time_);
-    }
+    void assign(PreparedINSERT* inserter, uint32_t col_idx) const { inserter->setColumnValue(col_idx, time_); }
 
 private:
-    const TimeT time_;
+    const uint64_t time_;
 };
 
 /// \class Timestamp
-/// \brief Type-specific timestamp that can get current time values via
-/// a backpointer, C-style function, or a std::function
-template <typename TimeT> class Timestamp
+/// \brief Timestamp that can get current time values via a backpointer,
+/// C-style function, or a std::function
+class Timestamp
 {
 public:
     /// \brief Construct with a backpointer to get the current time value
-    Timestamp(const TimeT* backpointer) :
+    Timestamp(const uint64_t* backpointer) :
         backpointer_(backpointer)
     {
         assert(backpointer);
     }
 
     /// \brief Construct with a C-style function pointer to get the current time value
-    Timestamp(TimeT (*fn)()) :
+    Timestamp(uint64_t (*fn)()) :
         cfuncpointer_(fn)
     {
         assert(fn);
     }
 
     /// \brief Construct with a std::function to get the current time value
-    Timestamp(std::function<TimeT()> fn) :
+    Timestamp(std::function<uint64_t()> fn) :
         stdfunction_(fn)
     {
         assert(fn);
     }
 
-    /// Add the type-specific time column in the given table
+    /// Add the time column in the given table
     void addTimeColumn(Table& tbl, const std::string& col_name = "Timestamp") const
     {
-        using dt = SqlDataType;
-        if constexpr (std::is_integral_v<TimeT>)
-        {
-            static_assert(std::is_unsigned_v<TimeT>, "Signed int timestamps not supported");
-            if constexpr (std::is_same_v<TimeT, uint64_t>)
-            {
-                tbl.addColumn(col_name, dt::uint64_t);
-            } else
-            {
-                tbl.addColumn(col_name, dt::uint32_t);
-            }
-        } else
-        {
-            tbl.addColumn(col_name, dt::double_t);
-        }
+        tbl.addColumn(col_name, SqlDataType::uint64_t);
     }
 
-    /// Store the current type-specific time value
-    std::shared_ptr<TimePointBase> snapshot() const
+    /// Store the current time value
+    std::shared_ptr<TimePoint> snapshot() const
     {
-        TimeT time = 0;
+        uint64_t time = 0;
         if (backpointer_)
         {
             time = *backpointer_;
@@ -171,13 +127,13 @@ public:
         {
             time = stdfunction_();
         }
-        return std::make_shared<TimePoint<TimeT>>(time);
+        return std::make_shared<TimePoint>(time);
     }
 
 private:
-    const TimeT* backpointer_ = nullptr;
-    TimeT (*cfuncpointer_)() = nullptr;
-    std::function<TimeT()> stdfunction_ = nullptr;
+    const uint64_t* backpointer_ = nullptr;
+    uint64_t (*cfuncpointer_)() = nullptr;
+    std::function<uint64_t()> stdfunction_ = nullptr;
 };
 
 } // namespace simdb::argos

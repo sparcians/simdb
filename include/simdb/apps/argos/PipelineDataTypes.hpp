@@ -18,7 +18,7 @@ namespace simdb::argos {
 using CollectionDataAtTimePoint = std::vector<std::unique_ptr<CollectedData>>;
 using EnabledChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
-using CollectionTime = std::shared_ptr<TimePointBase>;
+using CollectionTime = std::shared_ptr<TimePoint>;
 
 struct QueueCollectionData
 {
@@ -41,10 +41,10 @@ struct Notification
     uint16_t cid = 0;
     std::string notif;
     NotifType type = NotifType::__INVALID__;
-    std::shared_ptr<TimePointBase> time_point;
+    std::shared_ptr<TimePoint> time_point;
 
     Notification(uint16_t cid, const std::string& notif, const NotifType type,
-                 std::shared_ptr<TimePointBase>&& time_point) :
+                 std::shared_ptr<TimePoint>&& time_point) :
         cid(cid),
         notif(notif),
         type(type),
@@ -108,10 +108,10 @@ struct DynamicFieldChanges
     uint16_t cid = 0;
     std::vector<std::string> field_names;
     std::vector<MinimalType> field_types;
-    std::shared_ptr<TimePointBase> time_point;
+    std::shared_ptr<TimePoint> time_point;
 
     DynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
-                        const std::vector<MinimalType>& field_types, std::shared_ptr<TimePointBase> time_point) :
+                        const std::vector<MinimalType>& field_types, std::shared_ptr<TimePoint> time_point) :
         cid(cid),
         field_names(field_names),
         field_types(field_types),
