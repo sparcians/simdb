@@ -37,19 +37,16 @@ public:
         enabled_cids_.insert(cid);
         refreshable_cids_.insert(cid);
 
-        advanceStageTime_();
-
-        if (!waiting_queue_.empty() &&
-            sameSimulationTick_(waiting_queue_.back().sim_time, last_stage_time_.getValue(), true))
-        {
-            CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
-            collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
-        } else
+        if (advanceStageTime_())
         {
             QueueCollectionData entry;
             entry.sim_time = last_stage_time_.getValue();
             entry.collection_data.emplace_back(std::make_unique<CollectedData>(std::move(data)));
             waiting_queue_.emplace(std::move(entry));
+        } else
+        {
+            CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
+            collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
         }
     }
 
@@ -65,38 +62,32 @@ public:
     void onEnabledChanged(uint16_t cid, bool enabled)
     {
         throwIfBadID_(cid);
-        advanceStageTime_();
-
-        if (!waiting_queue_.empty() &&
-            sameSimulationTick_(waiting_queue_.back().sim_time, last_stage_time_.getValue(), true))
-        {
-            EnabledChangedAtTimePoint& changes = waiting_queue_.back().enabled_changes;
-            changes.emplace_back(std::make_pair(cid, enabled));
-        } else
+        if (advanceStageTime_())
         {
             QueueCollectionData entry;
             entry.sim_time = last_stage_time_.getValue();
             entry.enabled_changes.emplace_back(std::make_pair(cid, enabled));
             waiting_queue_.emplace(std::move(entry));
+        } else
+        {
+            EnabledChangedAtTimePoint& changes = waiting_queue_.back().enabled_changes;
+            changes.emplace_back(std::make_pair(cid, enabled));
         }
     }
 
     void onQuietChanged(uint16_t cid, bool quiet)
     {
         throwIfBadID_(cid);
-        advanceStageTime_();
-
-        if (!waiting_queue_.empty() &&
-            sameSimulationTick_(waiting_queue_.back().sim_time, last_stage_time_.getValue(), true))
-        {
-            QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
-            changes.emplace_back(std::make_pair(cid, quiet));
-        } else
+        if (advanceStageTime_())
         {
             QueueCollectionData entry;
             entry.sim_time = last_stage_time_.getValue();
             entry.quiet_changes.emplace_back(std::make_pair(cid, quiet));
             waiting_queue_.emplace(std::move(entry));
+        } else
+        {
+            QuietChangedAtTimePoint& changes = waiting_queue_.back().quiet_changes;
+            changes.emplace_back(std::make_pair(cid, quiet));
         }
     }
 
@@ -169,20 +160,7 @@ private:
         collection_data.collection_data.emplace_back(std::move(lifecycle));
     }
 
-    static bool sameSimulationTick_(uint64_t queued, uint64_t stage, bool must_be_equal_or_less)
-    {
-        if (queued == stage)
-        {
-            return true;
-        }
-        if (must_be_equal_or_less && queued > stage)
-        {
-            throw DBException("Time comparison failure: ") << queued << " <= " << stage;
-        }
-        return false;
-    }
-
-    void advanceStageTime_()
+    bool advanceStageTime_()
     {
         const uint64_t current_time = timestamp_->getTime();
         if (!last_stage_time_.isValid() || current_time >= last_stage_time_.getValue())
@@ -192,6 +170,23 @@ private:
         {
             throw DBException("Time must be monotonically increasing");
         }
+
+        // Tell the call site whether we should start a brand new "slot" in the waiting queue.
+        if (waiting_queue_.empty())
+        {
+            return true;
+        }
+
+        auto prev_slot_time = waiting_queue_.back().sim_time;
+        if (current_time == prev_slot_time)
+        {
+            return false;
+        } else if (current_time < prev_slot_time)
+        {
+            throw DBException("Time must be monotonically increasing");
+        }
+
+        return true;
     }
 
     void sendToPipeline_(QueueCollectionData& collection_at_time)
