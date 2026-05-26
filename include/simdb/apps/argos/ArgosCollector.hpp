@@ -39,6 +39,12 @@ struct has_sparta_pair_definition_type<T, std::void_t<typename T::SpartaPairDefi
 template <typename T>
 inline constexpr bool has_sparta_pair_definition_type_v = has_sparta_pair_definition_type<T>::value;
 
+template <typename T> struct is_dynamic_type : std::false_type
+{
+};
+
+template <typename T> inline constexpr bool is_dynamic_type_v = is_dynamic_type<T>::value;
+
 } // namespace detail
 
 class ArgosCollector : public App
@@ -218,6 +224,9 @@ public:
         } else if constexpr (type_traits::is_pod_v<T> || detail::has_sparta_pair_definition_type_v<T>)
         {
             return demangle_type<T>();
+        } else if constexpr (detail::is_dynamic_type_v<T>)
+        {
+            return "dynamic";
         } else
         {
             static_assert(detail::has_ostream_operator_v<T>);
