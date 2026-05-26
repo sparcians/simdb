@@ -14,9 +14,10 @@ class CollectionEntryPoint
 {
 public:
     CollectionEntryPoint(size_t heartbeat, TinyStrings<>* tiny_strings) :
-        heartbeat_(heartbeat),
         tiny_strings_(tiny_strings)
     {
+        // TODO cnyce: heartbeat is for the Minifiers once they get added back
+        (void)heartbeat;
     }
 
     /// Get the unique ID for this collection point.
@@ -352,14 +353,6 @@ private:
 
     /// Unique collectable ID
     const uint16_t cid_{nextCID_()};
-
-    /// Heartbeat value for this collection point. This is the
-    /// maximum number of cycles SimDB will attempt to perform
-    /// "minification" on the data before it is forced to write
-    /// the whole un-minified value to the database again. Note
-    /// that minification is simply an implementation detail
-    /// for performance.
-    const size_t heartbeat_;
 
     /// Enabled flag
     bool enabled_ = true;
