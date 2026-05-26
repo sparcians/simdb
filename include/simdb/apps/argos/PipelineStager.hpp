@@ -6,6 +6,7 @@
 #include "simdb/apps/argos/LifecycleAction.hpp"
 #include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
+#include "simdb/utils/Demangle.hpp"
 
 #include <map>
 #include <queue>
@@ -47,6 +48,62 @@ struct Notification
     Notification() = default;
 };
 
+enum class MinimalType {
+    bool_t,
+    int8_t,
+    int16_t,
+    int32_t,
+    int64_t,
+    uint8_t,
+    uint16_t,
+    uint32_t,
+    uint64_t,
+    float_t,
+    double_t,
+    string_t
+};
+
+inline std::ostream& operator<<(std::ostream& os, const MinimalType min_type)
+{
+    switch (min_type)
+    {
+        case MinimalType::bool_t:   return os << demangle_type<bool>();
+        case MinimalType::int8_t:   return os << demangle_type<int8_t>();
+        case MinimalType::int16_t:  return os << demangle_type<int16_t>();
+        case MinimalType::int32_t:  return os << demangle_type<int32_t>();
+        case MinimalType::int64_t:  return os << demangle_type<int64_t>();
+        case MinimalType::uint8_t:  return os << demangle_type<uint8_t>();
+        case MinimalType::uint16_t: return os << demangle_type<uint16_t>();
+        case MinimalType::uint32_t: return os << demangle_type<uint32_t>();
+        case MinimalType::uint64_t: return os << demangle_type<uint64_t>();
+        case MinimalType::float_t:  return os << demangle_type<float>();
+        case MinimalType::double_t: return os << demangle_type<double>();
+        case MinimalType::string_t: return os << "string";
+    }
+    throw DBException("Invalid MinimalType");
+}
+
+struct DynamicFieldChanges
+{
+    uint16_t cid = 0;
+    std::vector<std::string> field_names;
+    std::vector<MinimalType> field_types;
+    std::shared_ptr<TimePointBase> time_point;
+
+    DynamicFieldChanges(uint16_t cid,
+                        const std::vector<std::string>& field_names,
+                        const std::vector<MinimalType>& field_types,
+                        std::shared_ptr<TimePointBase> time_point)
+        : cid(cid)
+        , field_names(field_names)
+        , field_types(field_types)
+        , time_point(time_point)
+    {}
+
+    // Default ctor needed for ConcurrentQueue::try_pop
+    DynamicFieldChanges() = default;
+};
+
 class PipelineStagerBase
 {
 public:
@@ -56,17 +113,25 @@ public:
     virtual void onEnabledChanged(uint16_t cid, bool enabled) = 0;
     virtual void onQuietChanged(uint16_t cid, bool quiet) = 0;
     virtual void postNotif(uint16_t cid, const std::string& notif, NotifType type) = 0;
+    virtual void postDynamicFieldChanges(
+        uint16_t cid,
+        const std::vector<std::string>& field_names,
+        const std::vector<MinimalType>& field_types) = 0;
 };
 
 template <typename TimeT> class PipelineStager final : public PipelineStagerBase
 {
 public:
-    PipelineStager(size_t heartbeat, Timestamp<TimeT>* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
-                   ConcurrentQueue<Notification>* notif_head) :
+    PipelineStager(size_t heartbeat,
+                   Timestamp<TimeT>* timestamp,
+                   ConcurrentQueue<QueueCollectionData>* pipeline_head,
+                   ConcurrentQueue<Notification>* notif_head,
+                   ConcurrentQueue<DynamicFieldChanges>* dyn_field_head) :
         heartbeat_(heartbeat),
         timestamp_(timestamp),
         pipeline_head_(pipeline_head),
-        notif_head_(notif_head)
+        notif_head_(notif_head),
+        dyn_field_head_(dyn_field_head)
     {
     }
 
@@ -139,6 +204,16 @@ public:
     {
         Notification notification(cid, notif, type, timestamp_ ? timestamp_->snapshot() : nullptr);
         notif_head_->emplace(std::move(notification));
+    }
+
+    void postDynamicFieldChanges(
+        uint16_t cid,
+        const std::vector<std::string>& field_names,
+        const std::vector<MinimalType>& field_types) override
+    {
+        assert(timestamp_ != nullptr);
+        DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->snapshot());
+        dyn_field_head_->emplace(std::move(changes));
     }
 
 private:
@@ -367,6 +442,7 @@ private:
     Timestamp<TimeT>* const timestamp_;
     ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
     ConcurrentQueue<Notification>* const notif_head_;
+    ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
     std::queue<QueueCollectionData> waiting_queue_;
     CollectionTime last_stage_time_;
     std::unordered_set<uint16_t> enabled_cids_;

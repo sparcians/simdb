@@ -118,6 +118,13 @@ public:
         notif_tbl.addColumn("NotifStr", dt::string_t);
         notif_tbl.addColumn("NotifType", dt::int32_t);
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
+
+        // TODO cnyce: floating-point timestamp support
+        auto& dyn_field_changes_tbl = schema.addTable("DynamicFieldChanges");
+        dyn_field_changes_tbl.addColumn("SerializationCID", dt::int32_t);
+        dyn_field_changes_tbl.addColumn("FieldNames", dt::string_t);
+        dyn_field_changes_tbl.addColumn("FieldTypes", dt::string_t);
+        dyn_field_changes_tbl.addColumn("Timestamp", dt::uint64_t);
     }
 
     void setHeartbeat(size_t heartbeat)
@@ -236,6 +243,8 @@ public:
 
     TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
 
+    PipelineStagerBase* getStager() const { return pipeline_stager_.get(); }
+
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
         if (timestamp_ == nullptr)
@@ -254,8 +263,9 @@ public:
 
         auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
         auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
+        auto dyn_field_head = pipeline->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
         pipeline_stager_ =
-            std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head);
+            std::make_unique<PipelineStager<uint64_t>>(heartbeat_, timestamp_.get(), pipeline_head, notif_head, dyn_field_head);
 
         for (const auto& collector : collectors_)
         {
@@ -363,6 +373,7 @@ private:
         {
             addInPort_<CompressedQueueCollectionData>("input_queue", input_queue_);
             addInPort_<Notification>("notif_queue", notif_queue_);
+            addInPort_<DynamicFieldChanges>("dyn_field_queue", dyn_field_queue_);
         }
 
     private:
@@ -410,11 +421,62 @@ private:
                 inserter->createRecord();
             }
 
+            DynamicFieldChanges dyn_field_changes;
+            while (dyn_field_queue_->try_pop(dyn_field_changes))
+            {
+                // TODO cnyce, TODO XXX:
+                // We need a separate table for the CID dynamic field names
+                // and not pile them into the same table as the field types
+
+                const auto cid = dyn_field_changes.cid;
+                const auto& field_names = dyn_field_changes.field_names;
+                const auto& field_types = dyn_field_changes.field_types;
+                assert(field_names.size() == field_types.size());
+                assert(!field_names.empty());
+                assert(cid > 0);
+
+                bool comma = false;
+                std::ostringstream concat_field_names;
+                for (const auto& field_name : field_names)
+                {
+                    if (comma)
+                    {
+                        concat_field_names << ",";
+                    }
+                    comma = true;
+                    concat_field_names << field_name;
+                }
+
+                comma = false;
+                std::ostringstream concat_field_types;
+                for (const auto field_type : field_types)
+                {
+                    if (comma)
+                    {
+                        concat_field_types << ",";
+                    }
+                    comma = true;
+                    concat_field_types << field_type;
+                }
+
+                auto inserter = getTableInserter_("DynamicFieldChanges");
+                inserter->setColumnValue(0, (int)cid);
+                inserter->setColumnValue(1, concat_field_names.str());
+                inserter->setColumnValue(2, concat_field_types.str());
+
+                assert(dyn_field_changes.time_point != nullptr);
+                dyn_field_changes.time_point->assign(inserter, 3);
+                inserter->createRecord();
+
+                action = pipeline::PipelineAction::PROCEED;
+            }
+
             return action;
         }
 
         ConcurrentQueue<CompressedQueueCollectionData>* input_queue_ = nullptr;
         ConcurrentQueue<Notification>* notif_queue_ = nullptr;
+        ConcurrentQueue<DynamicFieldChanges>* dyn_field_queue_ = nullptr;
     };
 
     DatabaseManager* const db_mgr_;
