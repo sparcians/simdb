@@ -20,7 +20,7 @@ using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 
 struct QueueCollectionData
 {
-    uint64_t sim_time = 0; // TODO XXX: ValidValue
+    ValidValue<uint64_t> sim_time;
     CollectionDataAtTimePoint collection_data;
     EnabledChangedAtTimePoint enabled_changes;
     QuietChangedAtTimePoint quiet_changes;
@@ -28,7 +28,7 @@ struct QueueCollectionData
 
 struct CompressedQueueCollectionData
 {
-    uint64_t sim_time = 0; // TODO XXX: ValidValue
+    ValidValue<uint64_t> sim_time;
     std::vector<char> compressed_collection_data;
 };
 
@@ -36,7 +36,7 @@ enum class NotifType { WARNING, ERROR, MESSAGE, __INVALID__ };
 
 struct Notification
 {
-    uint16_t cid = 0;
+    ValidValue<uint16_t> cid;
     std::string notif;
     NotifType type = NotifType::__INVALID__;
     ValidValue<uint64_t> sim_time;
@@ -105,10 +105,10 @@ inline std::ostream& operator<<(std::ostream& os, const MinimalType min_type)
 
 struct DynamicFieldChanges
 {
-    uint16_t cid = 0;
+    ValidValue<uint16_t> cid;
     std::vector<std::string> field_names;
     std::vector<MinimalType> field_types;
-    uint64_t sim_time = 0;
+    ValidValue<uint64_t> sim_time;
 
     DynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
                         const std::vector<MinimalType>& field_types, uint64_t sim_time) :
