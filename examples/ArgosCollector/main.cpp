@@ -168,7 +168,7 @@ public:
         return q;
     }
 
-    void writeToBuffer(simdb::StreamBuffer& buf, simdb::TinyStrings<>* tiny_strings) const
+    void writeToBuffer(simdb::StreamBuffer& buf) const
     {
         buf.append(getUID());
 
@@ -177,10 +177,9 @@ public:
         // on TinyStrings and treat enums as strings instead of ints.
         std::ostringstream oss;
         oss << getType();
-        buf.append(tiny_strings->getStringID(oss.str()));
-
+        buf.append(oss.str());
         buf.append(getOpcode());
-        buf.append(tiny_strings->getStringID(getMnemonic()));
+        buf.append(getMnemonic());
         buf.append(getCsr());
         buf.append(finishesSim());
     }
@@ -244,8 +243,8 @@ void TestScalarCollection()
 
         auto inst = Instruction::genRandom();
         std::vector<char> inst_bytes;
-        simdb::StreamBuffer buf(inst_bytes);
-        inst->writeToBuffer(buf, tiny_strings);
+        simdb::StreamBuffer buf(inst_bytes, tiny_strings);
+        inst->writeToBuffer(buf);
         struct_collector->setScalarValueBytes(inst_bytes);
 
         // Note that this API call is optional, and will be automatically
@@ -310,8 +309,8 @@ template <bool Sparse> void TestInstQueueContainerCollection()
                     continue;
                 }
                 std::vector<char> bytes;
-                simdb::StreamBuffer buf(bytes);
-                queue[i]->writeToBuffer(buf, tiny_strings);
+                simdb::StreamBuffer buf(bytes, tiny_strings);
+                queue[i]->writeToBuffer(buf);
                 sparse_bin_bytes.emplace(static_cast<uint16_t>(i), std::move(bytes));
             }
             queue_collector->setSparseContainerBinBytes(sparse_bin_bytes);
@@ -322,8 +321,8 @@ template <bool Sparse> void TestInstQueueContainerCollection()
             {
                 contig_bin_bytes.emplace_back();
                 auto& bytes = contig_bin_bytes.back();
-                simdb::StreamBuffer buf(bytes);
-                queue[i]->writeToBuffer(buf, tiny_strings);
+                simdb::StreamBuffer buf(bytes, tiny_strings);
+                queue[i]->writeToBuffer(buf);
             }
             queue_collector->setContigContainerBinBytes(contig_bin_bytes);
         }

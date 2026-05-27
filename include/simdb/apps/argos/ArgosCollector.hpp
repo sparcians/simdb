@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/apps/App.hpp"
+#include "simdb/apps/argos/ArgosResources.hpp"
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
@@ -56,6 +57,8 @@ public:
     ArgosCollector(DatabaseManager* db_mgr) :
         db_mgr_(db_mgr)
     {
+        resources_.setDatabase(db_mgr);
+        resources_.setHeartbeat(DEFAULT_HEARTBEAT);
     }
 
     static void defineSchema(Schema& schema)
@@ -135,15 +138,12 @@ public:
 
     void setHeartbeat(size_t heartbeat)
     {
-        if (pipeline_stager_ != nullptr)
-        {
-            throw DBException("Cannot reset heartbeat once pipeline is created");
-        }
         if (heartbeat == 0)
         {
             throw DBException("Cannot use 0 for Argos collector heartbeat");
         }
         heartbeat_ = heartbeat;
+        resources_.setHeartbeat(heartbeat);
     }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
@@ -168,43 +168,46 @@ public:
     // TODO cnyce: floating-point timestamp support
     void timestampWith(const uint64_t* backpointer)
     {
-        if (pipeline_stager_ != nullptr)
+        if (timestamp_ != nullptr)
         {
-            throw DBException("Cannot change timestamp object after calling AppManagers::initializePipelines()");
+            throw DBException("Cannot change timestamp object once created!");
         }
         timestamp_ = std::make_unique<Timestamp>(backpointer);
+        resources_.setTimestamp(timestamp_.get());
     }
 
     // TODO cnyce: floating-point timestamp support
     void timestampWith(uint64_t (*fn)())
     {
-        if (pipeline_stager_ != nullptr)
+        if (timestamp_ != nullptr)
         {
-            throw DBException("Cannot change timestamp object after calling AppManagers::initializePipelines()");
+            throw DBException("Cannot change timestamp object once created!");
         }
         timestamp_ = std::make_unique<Timestamp>(fn);
+        resources_.setTimestamp(timestamp_.get());
     }
 
     // TODO cnyce: floating-point timestamp support
     void timestampWith(std::function<uint64_t()> fn)
     {
-        if (pipeline_stager_ != nullptr)
+        if (timestamp_ != nullptr)
         {
-            throw DBException("Cannot change timestamp object after calling AppManagers::initializePipelines()");
+            throw DBException("Cannot change timestamp object once created!");
         }
         timestamp_ = std::make_unique<Timestamp>(fn);
+        resources_.setTimestamp(timestamp_.get());
     }
 
     template <typename ScalarT>
     CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
+        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
         entry_point->setScalarDataType(encodeTypeName<ScalarT>());
 
-        std::cout << "Created SimDB collection entry point:\n";
-        std::cout << "  - path:  " << path << "\n";
-        std::cout << "  - clock: " << clk_name << "\n";
-        std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
+        // std::cout << "Created SimDB collection entry point:\n";
+        // std::cout << "  - path:  " << path << "\n";
+        // std::cout << "  - clock: " << clk_name << "\n";
+        // std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
 
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
@@ -215,13 +218,13 @@ public:
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
                                                    size_t capacity)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(heartbeat_, &tiny_strings_);
+        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
         entry_point->setContainerDataType(encodeTypeName<BinT>(), Sparse, capacity);
 
-        std::cout << "Created SimDB collection entry point:\n";
-        std::cout << "  - path:  " << path << "\n";
-        std::cout << "  - clock: " << clk_name << "\n";
-        std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
+        // std::cout << "Created SimDB collection entry point:\n";
+        // std::cout << "  - path:  " << path << "\n";
+        // std::cout << "  - clock: " << clk_name << "\n";
+        // std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
 
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
@@ -261,17 +264,12 @@ public:
         }
     }
 
-    TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
+    TinyStrings<>* getTinyStrings() { return resources_.getTinyStrings(); }
 
-    PipelineStager* getStager() const { return pipeline_stager_.get(); }
+    PipelineStager* getStager() { return resources_.getStager(); }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
-        if (timestamp_ == nullptr)
-        {
-            throw DBException("You must call timestampWith() before calling AppManagers::initializePipelines()");
-        }
-
         auto pipeline = pipeline_mgr->createPipeline(NAME, this);
 
         pipeline->addStage<Compressor>("compressor");
@@ -281,16 +279,7 @@ public:
         pipeline->bind("compressor.output_queue", "writer.input_queue");
         pipeline->noMoreBindings();
 
-        auto pipeline_head = pipeline->getInPortQueue<QueueCollectionData>("compressor.input_queue");
-        auto notif_head = pipeline->getInPortQueue<Notification>("writer.notif_queue");
-        auto dyn_field_head = pipeline->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-        pipeline_stager_ =
-            std::make_unique<PipelineStager>(heartbeat_, timestamp_.get(), pipeline_head, notif_head, dyn_field_head);
-
-        for (const auto& collector : collectors_)
-        {
-            collector->connectToPipeline(pipeline_stager_.get());
-        }
+        resources_.setPipeline(pipeline);
     }
 
     void postInit(int, char**) override
@@ -314,32 +303,16 @@ public:
             const auto clk_id = clk_ids.at(clk_name);
             const auto dtype_name = collector->encodeTypeName();
 
-            if (dtype_name == "UNCOLLECTABLE")
-            {
-                collector->throwOnAnyActivity();
-            } else
+            if (dtype_name != "UNCOLLECTABLE")
             {
                 ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
             }
         }
     }
 
-    void sendCollectedDataToPipeline()
-    {
-        if (!pipeline_stager_) [[unlikely]]
-        {
-            throw DBException("PipelineStager never set!");
-        }
-        pipeline_stager_->sendCollectedDataToPipeline();
-    }
+    void sendCollectedDataToPipeline() { pipeline_stager_->sendCollectedDataToPipeline(); }
 
-    void preTeardown() override
-    {
-        if (pipeline_stager_)
-        {
-            sendCollectedDataToPipeline();
-        }
-    }
+    void preTeardown() override { sendCollectedDataToPipeline(); }
 
     void postTeardown() override
     {
@@ -518,8 +491,9 @@ private:
     std::map<uint16_t, CollectableMeta> meta_by_cid_;
 
     std::unique_ptr<Timestamp> timestamp_;
-    std::unique_ptr<PipelineStager> pipeline_stager_;
     std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;
+    ArgosResources resources_;
+    PipelineStagerResource& pipeline_stager_{resources_.getStager()};
 };
 
 } // namespace simdb::argos

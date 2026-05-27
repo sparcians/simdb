@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "simdb/utils/TinyStrings.hpp"
+
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -17,8 +19,9 @@ namespace simdb {
 class StreamBuffer
 {
 public:
-    StreamBuffer(std::vector<char>& out, bool clear_first = true) :
-        out_(out)
+    StreamBuffer(std::vector<char>& out, TinyStrings<>* tiny_strings, bool clear_first = true) :
+        out_(out),
+        tiny_strings_(tiny_strings)
     {
         if (clear_first)
         {
@@ -33,6 +36,8 @@ public:
     }
 
     void append(const bool val) { append(static_cast<uint8_t>(val)); }
+
+    void append(const std::string& s) { append(tiny_strings_->getStringID(s)); }
 
     template <typename T> void append(const T& val)
     {
@@ -68,6 +73,7 @@ public:
 
 private:
     std::vector<char>& out_;
+    TinyStrings<>* const tiny_strings_;
 };
 
 } // namespace simdb

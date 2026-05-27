@@ -27,13 +27,10 @@ public:
     {
     }
 
-    void throwOnAnyActivity(uint16_t cid) { throw_on_any_activity_.insert(cid); }
-
-    void stage(CollectedData&& data)
+    void stage(const CollectedData& data)
     {
         auto cid = data.getCID();
         assert(cid != 0);
-        throwIfBadID_(cid);
         enabled_cids_.insert(cid);
         refreshable_cids_.insert(cid);
 
@@ -41,12 +38,12 @@ public:
         {
             QueueCollectionData entry;
             entry.sim_time = last_stage_time_.getValue();
-            entry.collection_data.emplace_back(std::make_unique<CollectedData>(std::move(data)));
+            entry.collection_data.emplace_back(std::make_unique<CollectedData>(data));
             waiting_queue_.emplace(std::move(entry));
         } else
         {
             CollectionDataAtTimePoint& collection = waiting_queue_.back().collection_data;
-            collection.emplace_back(std::make_unique<CollectedData>(std::move(data)));
+            collection.emplace_back(std::make_unique<CollectedData>(data));
         }
     }
 
@@ -61,7 +58,6 @@ public:
 
     void onEnabledChanged(uint16_t cid, bool enabled)
     {
-        throwIfBadID_(cid);
         if (advanceStageTime_())
         {
             QueueCollectionData entry;
@@ -77,7 +73,6 @@ public:
 
     void onQuietChanged(uint16_t cid, bool quiet)
     {
-        throwIfBadID_(cid);
         if (advanceStageTime_())
         {
             QueueCollectionData entry;
@@ -93,20 +88,21 @@ public:
 
     void postNotif(uint16_t cid, const std::string& notif, NotifType type)
     {
-        throwIfBadID_(cid);
         ValidValue<uint64_t> sim_time;
         if (timestamp_)
         {
-            sim_time = timestamp_->getTime();
+            Notification notification(cid, notif, type, timestamp_->getTime());
+            notif_head_->emplace(std::move(notification));
+        } else
+        {
+            Notification notification(cid, notif, type);
+            notif_head_->emplace(std::move(notification));
         }
-        Notification notification(cid, notif, type, sim_time);
-        notif_head_->emplace(std::move(notification));
     }
 
     void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
                                  const std::vector<MinimalType>& field_types)
     {
-        throwIfBadID_(cid);
         assert(timestamp_ != nullptr);
         DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->getTime());
         dyn_field_head_->emplace(std::move(changes));
@@ -145,7 +141,7 @@ private:
             full_payload = &it->second;
         }
 
-        auto lifecycle = std::make_unique<CollectedData>(cid);
+        auto lifecycle = std::make_unique<CollectedData>(cid, nullptr);
         auto& buf = lifecycle->getBuffer();
         const auto raw_action = static_cast<uint8_t>(action);
         buf.append(raw_action);
@@ -333,7 +329,7 @@ private:
                 // to the underlying buffer. Our last_sent_bytes_ also has the
                 // cid at the head of the bytes. That's why we are using the
                 // StreamBuffer::append() api below with a uint16_t offset.
-                auto injected_data = std::make_unique<CollectedData>(cid);
+                auto injected_data = std::make_unique<CollectedData>(cid, nullptr);
                 const auto& last_sent_bytes = last_sent_bytes_.at(cid);
                 const auto src = last_sent_bytes.data() + sizeof(uint16_t);
                 const auto src_bytes = last_sent_bytes.size() - sizeof(uint16_t);
@@ -351,14 +347,6 @@ private:
         }
     }
 
-    void throwIfBadID_(uint16_t cid) const
-    {
-        if (throw_on_any_activity_.count(cid) > 0)
-        {
-            throw DBException("Collectable with ID ") << cid << " is not allowed to perform any collection activity.";
-        }
-    }
-
     const size_t heartbeat_;
     Timestamp* const timestamp_;
     ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
@@ -371,7 +359,6 @@ private:
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;
     std::unordered_map<uint16_t, std::vector<char>> last_sent_bytes_;
     std::unordered_map<uint16_t, std::vector<char>> last_full_payload_bytes_;
-    std::unordered_set<uint16_t> throw_on_any_activity_;
 };
 
 } // namespace simdb::argos

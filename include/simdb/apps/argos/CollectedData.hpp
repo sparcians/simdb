@@ -13,13 +13,15 @@ namespace simdb::argos {
 class CollectedData
 {
 public:
-    explicit CollectedData(uint16_t cid) :
-        cid_(cid)
+    CollectedData(uint16_t cid, TinyStrings<>* tiny_strings) :
+        cid_(cid),
+        buffer_(data_, tiny_strings)
     {
-        buffer_.append(cid);
+        reset();
     }
 
-    CollectedData(CollectedData&&) = default;
+    CollectedData(CollectedData&&) = delete;
+    CollectedData(const CollectedData&) = default;
 
     uint16_t getCID() const { return cid_; }
 
@@ -27,10 +29,16 @@ public:
 
     StreamBuffer& getBuffer() { return buffer_; }
 
+    void reset()
+    {
+        data_.clear();
+        buffer_.append(cid_);
+    }
+
 private:
-    std::vector<char> data_;
-    StreamBuffer buffer_{data_};
     uint16_t cid_ = 0;
+    std::vector<char> data_;
+    StreamBuffer buffer_;
 };
 
 } // namespace simdb::argos

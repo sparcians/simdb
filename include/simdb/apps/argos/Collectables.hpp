@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/apps/argos/ArgosResources.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/Demangle.hpp"
@@ -13,34 +14,19 @@ namespace simdb::argos {
 class CollectionEntryPoint
 {
 public:
-    CollectionEntryPoint(size_t heartbeat, TinyStrings<>* tiny_strings) :
-        tiny_strings_(tiny_strings)
+    CollectionEntryPoint(ArgosResources* resource_container) :
+        stager_(resource_container->getStager()),
+        tiny_strings_(resource_container->getTinyStrings()),
+        collection_buf_(resource_container->getCollectedDataBuffers().getFor(getID()))
     {
-        // TODO cnyce: heartbeat is for the Minifiers once they get added back
-        (void)heartbeat;
     }
 
     /// Get the unique ID for this collection point.
     uint16_t getID() const { return cid_; }
 
-    /// \brief Connect to the ArgosCollector's main input queue
-    void connectToPipeline(PipelineStager* stager)
-    {
-        stager_ = stager;
-        if (throw_on_any_activity_)
-        {
-            stager_->throwOnAnyActivity(getID());
-        }
-    }
-
     /// Enable collection
     void enable()
     {
-        if (!stager_) [[unlikely]]
-        {
-            throw DBException("Pipeline was never opened!");
-        }
-
         if (!enabled_)
         {
             // TODO cnyce: handle initial value on first enable()
@@ -52,11 +38,6 @@ public:
     /// Disable collection
     void disable()
     {
-        if (!stager_) [[unlikely]]
-        {
-            throw DBException("Pipeline was never opened!");
-        }
-
         if (enabled_)
         {
             enabled_ = false;
@@ -67,11 +48,6 @@ public:
     /// Suppress heartbeat re-emission of previously seen bytes.
     void quiet()
     {
-        if (!stager_) [[unlikely]]
-        {
-            throw DBException("Pipeline was never opened!");
-        }
-
         if (!quiet_)
         {
             quiet_ = true;
@@ -82,11 +58,6 @@ public:
     /// Re-enable heartbeat re-emission of previously seen bytes.
     void awaken()
     {
-        if (!stager_) [[unlikely]]
-        {
-            throw DBException("Pipeline was never opened!");
-        }
-
         if (quiet_)
         {
             quiet_ = false;
@@ -95,34 +66,17 @@ public:
     }
 
     /// Check enabled
-    bool enabled() const { return enabled_ && stager_ != nullptr; }
+    bool enabled() const { return enabled_; }
 
     /// Check whether heartbeat re-emission is suppressed.
     bool quieted() const { return quiet_; }
-
-    /// Legacy collectors in unit tests often cannot be collected
-    /// and seem to only exist to check that compilation succeeds.
-    /// If anything touches the PipelineStager with our CID, the
-    /// simulation will immediately throw.
-    void throwOnAnyActivity()
-    {
-        throw_on_any_activity_ = true;
-        if (stager_)
-        {
-            stager_->throwOnAnyActivity(getID());
-        }
-    }
 
     /// Add a timestamped warning/error/msg which applies to this collectable.
     /// All of these will be visible in the Argos UI. These are purely for
     /// the user's benefit; Argos doesn't do anything with them but give
     /// a modal dialog of these notifications. These are never printed to
     /// stdout/stderr.
-    void postNotif(const std::string& notif, NotifType type)
-    {
-        assert(stager_ != nullptr);
-        stager_->postNotif(getID(), notif, type);
-    }
+    void postNotif(const std::string& notif, NotifType type) { stager_->postNotif(getID(), notif, type); }
 
     void postWarning(const std::string& warning) { postNotif(warning, NotifType::WARNING); }
 
@@ -196,7 +150,7 @@ public:
         {
             static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
             std::vector<char> bytes;
-            StreamBuffer buf(bytes);
+            StreamBuffer buf(bytes, nullptr);
             buf.append(val);
             setScalarValueBytes(bytes);
         }
@@ -243,7 +197,7 @@ public:
         }
 
         std::vector<char> final_bytes;
-        StreamBuffer buf(final_bytes);
+        StreamBuffer buf(final_bytes, nullptr);
         buf.append((uint16_t)size);
 
         for (uint64_t i = 0; i < size; ++i)
@@ -281,7 +235,7 @@ public:
         }
 
         std::vector<char> final_bytes;
-        StreamBuffer buf(final_bytes);
+        StreamBuffer buf(final_bytes, nullptr);
         buf.append((uint16_t)size);
 
         for (const auto& [bin_idx, bytes] : bin_bytes)
@@ -317,16 +271,6 @@ private:
         return counter;
     }
 
-    /// Stage collected bytes for pipeline processing.
-    void stage_(CollectedData&& data)
-    {
-        if (!stager_) [[unlikely]]
-        {
-            throw DBException("Pipeline was never opened!");
-        }
-        stager_->stage(std::move(data));
-    }
-
     void sendBytes_(const std::vector<char>& bytes)
     {
         assert(enabled());
@@ -336,11 +280,11 @@ private:
             awaken();
         }
 
-        CollectedData collected(getID());
-        auto& buf = collected.getBuffer();
+        collection_buf_.reset();
+        auto& buf = collection_buf_.getBuffer();
         buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
         buf.append(bytes);
-        stage_(std::move(collected));
+        stager_->stage(collection_buf_);
 
         // This code was working with the previous collector design for Minifiers.hpp
         // to save a ton on disk space:
@@ -360,18 +304,15 @@ private:
     /// Suppress heartbeat re-emission while true
     bool quiet_ = false;
 
-    /// Throw if this collectable attempts to access the PipelineStager.
-    bool throw_on_any_activity_ = false;
-
-    /// Main entry point into the pipeline
-    PipelineStager* stager_ = nullptr;
-
     std::string collectable_type_name_;
     ValidValue<bool> is_scalar_;
     ValidValue<bool> is_contig_container_;
     ValidValue<bool> is_sparse_container_;
     ValidValue<uint16_t> max_container_size_seen_;
-    TinyStrings<>* tiny_strings_ = nullptr;
+
+    PipelineStagerResource& stager_;
+    TinyStringsResource& tiny_strings_;
+    CollectedData& collection_buf_;
 };
 
 } // namespace simdb::argos

@@ -41,14 +41,18 @@ struct Notification
     NotifType type = NotifType::__INVALID__;
     ValidValue<uint64_t> sim_time;
 
-    // TODO XXX: ValidValue does not have a copy ctor - this would throw:
-    //   ValidValue<uint64_t> no_time;
-    //   Notification notif(_, _, _, no_time); // "operator uint64_t" -> THROWS!
-    Notification(uint16_t cid, const std::string& notif, const NotifType type, ValidValue<uint64_t> sim_time) :
+    Notification(uint16_t cid, const std::string& notif, const NotifType type, uint64_t sim_time) :
         cid(cid),
         notif(notif),
         type(type),
         sim_time(sim_time)
+    {
+    }
+
+    Notification(uint16_t cid, const std::string& notif, const NotifType type) :
+        cid(cid),
+        notif(notif),
+        type(type)
     {
     }
 

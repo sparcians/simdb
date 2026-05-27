@@ -126,12 +126,49 @@ public:
         });
     }
 
+    size_t serializedCount()
+    {
+        auto query = db_mgr_->createQuery("TinyStringIDs");
+        return query->count();
+    }
+
+    void batchInsert(std::set<std::string> strings)
+    {
+        auto query = db_mgr_->createQuery("TinyStringIDs");
+
+        std::string string_val;
+        query->select("StringValue", string_val);
+
+        auto results = query->getResultSet();
+        while (results.getNextRecord())
+        {
+            strings.erase(string_val);
+        }
+
+        if (strings.empty())
+        {
+            return;
+        }
+
+        for (const auto& s : strings)
+        {
+            (void)getStringID(s);
+        }
+
+        serialize();
+    }
+
 private:
     uint32_t getStringID_(const std::string& s)
     {
         auto iter = map_->find(s);
         if (iter == map_->end())
         {
+            if (map_->size() == UINT32_MAX)
+            {
+                throw DBException("Too many TinyStrings created. UINT32_MAX has been reached.");
+            }
+
             uint32_t id = map_->size() + 1;
             map_->insert({s, id});
             unserialized_map_.insert({id, s});
