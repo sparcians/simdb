@@ -17,7 +17,7 @@ public:
     CollectionEntryPoint(ArgosResources* resource_container) :
         stager_(resource_container->getStagerResource()),
         tiny_strings_(resource_container->getTinyStringsResource()),
-        collection_buf_(resource_container->getCollectedDataBuffersResource().getFor(getID()))
+        argos_resources_(resource_container)
     {
     }
 
@@ -280,11 +280,13 @@ private:
             awaken();
         }
 
-        collection_buf_.reset();
-        auto& buf = collection_buf_.getBuffer();
+        auto& collection_data = argos_resources_->getCollectedDataBuffersResource().getFor(getID());
+        collection_data.reset();
+
+        auto& buf = collection_data.getBuffer();
         buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
         buf.append(bytes);
-        stager_->stage(collection_buf_);
+        stager_->stage(collection_data);
 
         // This code was working with the previous collector design for Minifiers.hpp
         // to save a ton on disk space:
@@ -312,7 +314,7 @@ private:
 
     PipelineStagerResource& stager_;
     TinyStringsResource& tiny_strings_;
-    CollectedData& collection_buf_;
+    ArgosResources* const argos_resources_;
 };
 
 } // namespace simdb::argos
