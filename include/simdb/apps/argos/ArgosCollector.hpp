@@ -426,8 +426,7 @@ private:
                 }
 
                 auto inserter = getTableInserter_("DynamicFieldTypeChanges");
-                inserter->createRecordWithColValues(
-                    (int)cid, concat_field_types.str(), dyn_field_changes.sim_time);
+                inserter->createRecordWithColValues((int)cid, concat_field_types.str(), dyn_field_changes.sim_time);
 
                 action = pipeline::PipelineAction::PROCEED;
             }

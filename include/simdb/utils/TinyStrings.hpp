@@ -154,10 +154,7 @@ public:
     }
 
     /// Get the DB we are attached to.
-    DatabaseManager* getDatabaseManager() const
-    {
-        return db_mgr_;
-    }
+    DatabaseManager* getDatabaseManager() const { return db_mgr_; }
 
 private:
     uint32_t getStringID_(const std::string& s)

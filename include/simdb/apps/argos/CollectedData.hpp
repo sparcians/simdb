@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/utils/StreamBuffer.hpp"
+#include "simdb/apps/argos/StreamBuffer.hpp"
 
 #include <string>
 

@@ -182,7 +182,7 @@ private:
     std::unordered_map<uint16_t, std::unique_ptr<CollectedData>> collected_data_map_;
 };
 
-class ArgosResources// : public ArgosResourcesBase
+class ArgosResources // : public ArgosResourcesBase
 {
 public:
     template <typename Resource> void addResource(Resource* resource)

@@ -13,7 +13,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace simdb {
+namespace simdb::argos {
 
 /// \class StreamBuffer
 /// \brief Utility class which wraps a char buffer with typed append operators.
@@ -92,4 +92,4 @@ private:
     TinyStrings<>* const tiny_strings_;
 };
 
-} // namespace simdb
+} // namespace simdb::argos

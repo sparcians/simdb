@@ -168,7 +168,7 @@ public:
         return q;
     }
 
-    void writeToBuffer(simdb::StreamBuffer& buf) const
+    void writeToBuffer(simdb::argos::StreamBuffer& buf) const
     {
         buf.append(getUID());
 
@@ -243,7 +243,7 @@ void TestScalarCollection()
 
         auto inst = Instruction::genRandom();
         std::vector<char> inst_bytes;
-        simdb::StreamBuffer buf(inst_bytes, tiny_strings);
+        simdb::argos::StreamBuffer buf(inst_bytes, tiny_strings);
         inst->writeToBuffer(buf);
         struct_collector->setScalarValueBytes(inst_bytes);
 
@@ -309,7 +309,7 @@ template <bool Sparse> void TestInstQueueContainerCollection()
                     continue;
                 }
                 std::vector<char> bytes;
-                simdb::StreamBuffer buf(bytes, tiny_strings);
+                simdb::argos::StreamBuffer buf(bytes, tiny_strings);
                 queue[i]->writeToBuffer(buf);
                 sparse_bin_bytes.emplace(static_cast<uint16_t>(i), std::move(bytes));
             }
@@ -321,7 +321,7 @@ template <bool Sparse> void TestInstQueueContainerCollection()
             {
                 contig_bin_bytes.emplace_back();
                 auto& bytes = contig_bin_bytes.back();
-                simdb::StreamBuffer buf(bytes, tiny_strings);
+                simdb::argos::StreamBuffer buf(bytes, tiny_strings);
                 queue[i]->writeToBuffer(buf);
             }
             queue_collector->setContigContainerBinBytes(contig_bin_bytes);
