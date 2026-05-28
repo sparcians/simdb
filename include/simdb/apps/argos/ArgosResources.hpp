@@ -132,25 +132,9 @@ public:
             throw DBException("TinyStrings resource already created!");
         }
 
-        tiny_strings_ = std::make_unique<TinyStrings<>>(db_mgr);
-        if (tiny_strings_->serializedCount())
-        {
-            throw DBException("TinyStrings resource cannot accept a DB that already has TinyStringIDs!");
-        }
-
-        auto query = tmp_db_.createQuery("TinyStringIDs");
-
-        std::string string_val;
-        query->select("StringValue", string_val);
-
-        std::set<std::string> new_strings;
-        auto results = query->getResultSet();
-        while (results.getNextRecord())
-        {
-            new_strings.insert(string_val);
-        }
-
-        tiny_strings_->batchInsert(new_strings);
+        auto old_tiny_strings = get();
+        auto new_tiny_strings = std::make_unique<TinyStrings<>>(db_mgr, old_tiny_strings);
+        tiny_strings_ = std::move(new_tiny_strings);
         realized_ = true;
     }
 

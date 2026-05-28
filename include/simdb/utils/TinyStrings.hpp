@@ -19,7 +19,9 @@ public:
     static inline constexpr uint32_t BAD_STRING_ID = 0;
 
     /// Associate this TinyStrings with the given database.
-    TinyStrings(DatabaseManager* db_mgr) :
+    /// Optionally inherit all string-ID mappings from the
+    /// given TinyStrings if provided.
+    TinyStrings(DatabaseManager* db_mgr, TinyStrings<>* copy_from = nullptr) :
         db_mgr_(db_mgr)
     {
         const auto& schema = db_mgr_->getSchema();
@@ -30,10 +32,15 @@ public:
             auto& tbl = append_schema.addTable("TinyStringIDs");
             tbl.addColumn("StringValue", dt::string_t);
             tbl.addColumn("StringID", dt::uint32_t);
-            db_mgr->appendSchema(append_schema);
-        } else
+            db_mgr_->appendSchema(append_schema);
+        }
+
+        if (copy_from)
         {
-            auto query = db_mgr->createQuery("TinyStringIDs");
+            copy_from->serialize();
+
+            auto inserter = db_mgr_->prepareINSERT(SQL_TABLE("TinyStringIDs"));
+            auto query = copy_from->db_mgr_->createQuery("TinyStringIDs");
 
             std::string str;
             query->select("StringValue", str);
@@ -44,9 +51,29 @@ public:
             auto results = query->getResultSet();
             while (results.getNextRecord())
             {
-                assert(map_->find(str) == map_->end());
-                map_->emplace(str, id);
+                inserter->createRecordWithColValues(str, id);
             }
+        }
+
+        auto query = db_mgr_->createQuery("TinyStringIDs");
+
+        std::string str;
+        query->select("StringValue", str);
+
+        uint32_t id;
+        query->select("StringID", id);
+
+        auto results = query->getResultSet();
+        while (results.getNextRecord())
+        {
+            if (auto it = map_->find(str); it != map_->end() && it->second != id)
+            {
+                throw DBException("Duplicate string found with mismatching IDs:\n")
+                    << "\tString: " << str << "\n"
+                    << "\tValues: " << it->second << "," << id;
+            }
+
+            map_->insert({str, id});
         }
     }
 
@@ -126,38 +153,6 @@ public:
         });
     }
 
-    size_t serializedCount()
-    {
-        auto query = db_mgr_->createQuery("TinyStringIDs");
-        return query->count();
-    }
-
-    void batchInsert(std::set<std::string> strings)
-    {
-        auto query = db_mgr_->createQuery("TinyStringIDs");
-
-        std::string string_val;
-        query->select("StringValue", string_val);
-
-        auto results = query->getResultSet();
-        while (results.getNextRecord())
-        {
-            strings.erase(string_val);
-        }
-
-        if (strings.empty())
-        {
-            return;
-        }
-
-        for (const auto& s : strings)
-        {
-            (void)getStringID(s);
-        }
-
-        serialize();
-    }
-
 private:
     uint32_t getStringID_(const std::string& s)
     {
@@ -187,6 +182,7 @@ private:
 
     DatabaseManager* const db_mgr_;
     mutable std::mutex mutex_;
+    uint32_t next_id_ = 0;
 };
 
 } // namespace simdb
