@@ -88,7 +88,6 @@ public:
 
     void postNotif(uint16_t cid, const std::string& notif, NotifType type)
     {
-        ValidValue<uint64_t> sim_time;
         if (timestamp_)
         {
             Notification notification(cid, notif, type, timestamp_->getTime());
