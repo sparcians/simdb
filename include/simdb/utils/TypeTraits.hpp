@@ -811,4 +811,35 @@ template <typename T> using pod_convertible_t = typename pod_convertible<T>::typ
 
 template <typename T> constexpr bool is_pod_convertible_v = !std::is_same_v<pod_convertible_t<T>, void>;
 
+// TODO cnyce: reuse Sparta's has_ostream_operator utility once it gets moved to SimDB.
+template <typename T, typename = void> struct has_ostream_operator : std::false_type
+{
+};
+
+template <typename T>
+struct has_ostream_operator<T, std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
+    : std::true_type
+{
+};
+
+template <typename T> inline constexpr bool has_ostream_operator_v = has_ostream_operator<T>::value;
+
+template <typename T, typename = void> struct has_sparta_pair_definition_type : std::false_type
+{
+};
+
+template <typename T>
+struct has_sparta_pair_definition_type<T, std::void_t<typename T::SpartaPairDefinitionType>> : std::true_type
+{
+};
+
+template <typename T>
+inline constexpr bool has_sparta_pair_definition_type_v = has_sparta_pair_definition_type<T>::value;
+
+template <typename T> struct is_dynamic_type : std::false_type
+{
+};
+
+template <typename T> inline constexpr bool is_dynamic_type_v = is_dynamic_type<T>::value;
+
 } // namespace simdb::type_traits

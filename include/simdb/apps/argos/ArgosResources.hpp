@@ -127,7 +127,7 @@ public:
 
     void setDatabase(DatabaseManager* db_mgr) override final
     {
-        if (realized_)
+        if (realized_ && tiny_strings_->getDatabaseManager() != db_mgr)
         {
             throw DBException("TinyStrings resource already created!");
         }
@@ -182,7 +182,7 @@ private:
     std::unordered_map<uint16_t, std::unique_ptr<CollectedData>> collected_data_map_;
 };
 
-class ArgosResources
+class ArgosResources// : public ArgosResourcesBase
 {
 public:
     template <typename Resource> void addResource(Resource* resource)
@@ -237,11 +237,11 @@ public:
         }
     }
 
-    PipelineStagerResource& getStager() { return stager_resource_; }
+    PipelineStagerResource& getStagerResource() { return stager_resource_; }
 
-    TinyStringsResource& getTinyStrings() { return tiny_strings_resource_; }
+    TinyStringsResource& getTinyStringsResource() { return tiny_strings_resource_; }
 
-    CollectedDataResource& getCollectedDataBuffers() { return collected_data_bufs_resource_; }
+    CollectedDataResource& getCollectedDataBuffersResource() { return collected_data_bufs_resource_; }
 
 private:
     std::vector<HeartbeatResource*> heartbeat_resources_;

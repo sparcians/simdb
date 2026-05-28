@@ -15,9 +15,9 @@ class CollectionEntryPoint
 {
 public:
     CollectionEntryPoint(ArgosResources* resource_container) :
-        stager_(resource_container->getStager()),
-        tiny_strings_(resource_container->getTinyStrings()),
-        collection_buf_(resource_container->getCollectedDataBuffers().getFor(getID()))
+        stager_(resource_container->getStagerResource()),
+        tiny_strings_(resource_container->getTinyStringsResource()),
+        collection_buf_(resource_container->getCollectedDataBuffersResource().getFor(getID()))
     {
     }
 

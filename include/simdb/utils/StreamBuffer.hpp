@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/utils/TinyStrings.hpp"
+#include "simdb/utils/TypeTraits.hpp"
 
 #include <array>
 #include <cstdint>
@@ -63,7 +64,22 @@ public:
         append(val.data(), N * sizeof(T));
     }
 
-    template <typename T> std::enable_if_t<std::is_enum_v<T>, void> append(const T val) = delete;
+    template <typename T> std::enable_if_t<std::is_enum_v<T>> append(const T val)
+    {
+        if constexpr (type_traits::has_ostream_operator_v<T>)
+        {
+            // TODO cnyce: For now, stringifiable enums collect as strings
+            std::ostringstream oss;
+            oss << val;
+            append(oss.str());
+        } else
+        {
+            // Non-stringifiable enums collect as raw uint64_t values
+            using Underlying = std::underlying_type_t<T>;
+            static_assert(std::is_unsigned_v<Underlying>);
+            append(static_cast<uint64_t>(val));
+        }
+    }
 
     size_t size() const { return out_.size(); }
 

@@ -14,41 +14,6 @@ namespace simdb::argos {
 
 inline constexpr size_t DEFAULT_HEARTBEAT = 10;
 
-namespace detail {
-
-// TODO cnyce: reuse Sparta's has_ostream_operator utility once it gets moved to SimDB.
-template <typename T, typename = void> struct has_ostream_operator : std::false_type
-{
-};
-
-template <typename T>
-struct has_ostream_operator<T, std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
-    : std::true_type
-{
-};
-
-template <typename T> inline constexpr bool has_ostream_operator_v = has_ostream_operator<T>::value;
-
-template <typename T, typename = void> struct has_sparta_pair_definition_type : std::false_type
-{
-};
-
-template <typename T>
-struct has_sparta_pair_definition_type<T, std::void_t<typename T::SpartaPairDefinitionType>> : std::true_type
-{
-};
-
-template <typename T>
-inline constexpr bool has_sparta_pair_definition_type_v = has_sparta_pair_definition_type<T>::value;
-
-template <typename T> struct is_dynamic_type : std::false_type
-{
-};
-
-template <typename T> inline constexpr bool is_dynamic_type_v = is_dynamic_type<T>::value;
-
-} // namespace detail
-
 class ArgosCollector : public App
 {
 public:
@@ -239,7 +204,7 @@ public:
         } else if constexpr (std::is_same_v<std::decay_t<T>, const char*>)
         {
             return "string";
-        } else if constexpr (std::is_enum_v<T> && detail::has_ostream_operator_v<T>)
+        } else if constexpr (std::is_enum_v<T> && type_traits::has_ostream_operator_v<T>)
         {
             // TODO cnyce: For now, stringifiable enums collect as strings
             return "string";
@@ -249,13 +214,13 @@ public:
             using Underlying = std::underlying_type_t<T>;
             static_assert(std::is_unsigned_v<Underlying>);
             return demangle_type<uint64_t>();
-        } else if constexpr (type_traits::is_pod_v<T> || detail::has_sparta_pair_definition_type_v<T>)
+        } else if constexpr (type_traits::is_pod_v<T> || type_traits::has_sparta_pair_definition_type_v<T>)
         {
             return demangle_type<T>();
-        } else if constexpr (detail::is_dynamic_type_v<T>)
+        } else if constexpr (type_traits::is_dynamic_type_v<T>)
         {
             return "dynamic";
-        } else if constexpr (detail::has_ostream_operator_v<T>)
+        } else if constexpr (type_traits::has_ostream_operator_v<T>)
         {
             return "string";
         } else
@@ -264,9 +229,9 @@ public:
         }
     }
 
-    TinyStrings<>* getTinyStrings() { return resources_.getTinyStrings(); }
+    TinyStrings<>* getTinyStrings() { return resources_.getTinyStringsResource(); }
 
-    PipelineStager* getStager() { return resources_.getStager(); }
+    PipelineStager* getStager() { return resources_.getStagerResource(); }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
@@ -320,6 +285,11 @@ public:
         {
             collector->writeMetaOnPostTeardown(db_mgr_);
         }
+        // TODO cnyce: looks like we are only writing TinyStringsIDs at the end.
+        // This needs to happen during sendCollectedDataToPipeline(). But it has
+        // to be async (collection data and TinyStrings to go with it should all
+        // end up in the ArgosCollector::Writer::run_() method together so we can
+        // guarantee readability of those collection blobs.
         tiny_strings_.serialize();
     }
 
@@ -380,7 +350,7 @@ private:
             if (input_queue_->try_pop(collection_at_time))
             {
                 auto db_mgr = getDatabaseManager_();
-                auto id = createTimestampInDatabase(db_mgr, collection_at_time.sim_time);
+                auto id = Timestamp::createTimestampInDatabase(db_mgr, collection_at_time.sim_time);
 
                 auto inserter = getTableInserter_("CollectionRecords");
                 const auto& bytes = collection_at_time.compressed_collection_data;
@@ -456,11 +426,8 @@ private:
                 }
 
                 auto inserter = getTableInserter_("DynamicFieldTypeChanges");
-                inserter->setColumnValue(0, (int)cid);
-                inserter->setColumnValue(1, concat_field_types.str());
-
-                inserter->setColumnValue(2, dyn_field_changes.sim_time);
-                inserter->createRecord();
+                inserter->createRecordWithColValues(
+                    (int)cid, concat_field_types.str(), dyn_field_changes.sim_time);
 
                 action = pipeline::PipelineAction::PROCEED;
             }
@@ -493,7 +460,7 @@ private:
     std::unique_ptr<Timestamp> timestamp_;
     std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;
     ArgosResources resources_;
-    PipelineStagerResource& pipeline_stager_{resources_.getStager()};
+    PipelineStagerResource& pipeline_stager_{resources_.getStagerResource()};
 };
 
 } // namespace simdb::argos
