@@ -185,10 +185,25 @@ private:
 class ArgosResources
 {
 public:
-    void addResource(HeartbeatResource* resource) { heartbeat_resources_.push_back(resource); }
-    void addResource(PipelineResource* resource) { pipeline_resources_.push_back(resource); }
-    void addResource(TimestampResource* resource) { timestamp_resources_.push_back(resource); }
-    void addResource(DatabaseResource* resource) { database_resources_.push_back(resource); }
+    template <typename Resource> void addResource(Resource* resource)
+    {
+        if constexpr (std::is_base_of<HeartbeatResource, Resource>::value)
+        {
+            heartbeat_resources_.push_back(resource);
+        }
+        if constexpr (std::is_base_of<PipelineResource, Resource>::value)
+        {
+            pipeline_resources_.push_back(resource);
+        }
+        if constexpr (std::is_base_of<TimestampResource, Resource>::value)
+        {
+            timestamp_resources_.push_back(resource);
+        }
+        if constexpr (std::is_base_of<DatabaseResource, Resource>::value)
+        {
+            database_resources_.push_back(resource);
+        }
+    }
 
     void setHeartbeat(size_t heartbeat)
     {
