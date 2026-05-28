@@ -5,8 +5,10 @@
 #include "simdb/apps/argos/CollectedData.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
+#include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include <filesystem>
+#include <memory>
 #include <random>
 
 namespace simdb::argos {
@@ -72,11 +74,9 @@ public:
         checkReady_();
     }
 
-    PipelineStager* operator->() const { return get(); }
+    PipelineStager* operator->() const { return get().operator->(); }
 
-    operator PipelineStager*() const { return get(); }
-
-    PipelineStager* get() const { return stager_.get(); }
+    safe_weak_ptr<PipelineStager> get() const { return stager_; }
 
 private:
     void checkNotReady_()
@@ -95,7 +95,7 @@ private:
             auto notif_head = pipeline_->getInPortQueue<Notification>("writer.notif_queue");
             auto dyn_field_head = pipeline_->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
             stager_ =
-                std::make_unique<PipelineStager>(heartbeat_, timestamp_, pipeline_head, notif_head, dyn_field_head);
+                std::make_shared<PipelineStager>(heartbeat_, timestamp_, pipeline_head, notif_head, dyn_field_head);
 
             // Flush pending notifications (does not apply to other ConcurrentQueue's)
             Notification notif;
@@ -113,7 +113,8 @@ private:
     Timestamp* timestamp_ = nullptr;
 
     ConcurrentQueue<Notification> dummy_notif_head_;
-    std::unique_ptr<PipelineStager> stager_{new PipelineStager(0, nullptr, nullptr, &dummy_notif_head_, nullptr)};
+    std::shared_ptr<PipelineStager> stager_{
+        std::make_shared<PipelineStager>(0, nullptr, nullptr, &dummy_notif_head_, nullptr)};
     bool realized_ = false;
 };
 
@@ -132,17 +133,17 @@ public:
             throw DBException("TinyStrings resource already created!");
         }
 
-        auto old_tiny_strings = get();
-        auto new_tiny_strings = std::make_unique<TinyStrings<>>(db_mgr, old_tiny_strings);
+        auto copy_from = tiny_strings_.get();
+        auto new_tiny_strings = std::make_shared<TinyStrings<>>(db_mgr, copy_from);
         tiny_strings_ = std::move(new_tiny_strings);
         realized_ = true;
     }
 
-    TinyStrings<>* operator->() const { return get(); }
+    TinyStrings<>* operator->() const { return get().operator->(); }
 
-    operator TinyStrings<>*() const { return get(); }
+    safe_weak_ptr<TinyStrings<>> get() const { return tiny_strings_; }
 
-    TinyStrings<>* get() const { return tiny_strings_.get(); }
+    void serialize() { tiny_strings_->serialize(); }
 
 private:
     static std::filesystem::path makeTempFile_()
@@ -155,7 +156,7 @@ private:
     }
 
     DatabaseManager tmp_db_{makeTempFile_(), true};
-    std::unique_ptr<TinyStrings<>> tiny_strings_{new TinyStrings<>(&tmp_db_)};
+    std::shared_ptr<TinyStrings<>> tiny_strings_{std::make_shared<TinyStrings<>>(&tmp_db_)};
     bool realized_ = false;
 };
 
@@ -170,9 +171,10 @@ public:
     CollectedData& getFor(uint16_t cid)
     {
         auto& data = collected_data_map_[cid];
-        if (!data)
+        const auto live = tiny_strings_.get();
+        if (!data || data->usesExpiredTinyStrings(live))
         {
-            data = std::make_unique<CollectedData>(cid, tiny_strings_.get());
+            data = std::make_unique<CollectedData>(cid, live);
         }
         return *data;
     }

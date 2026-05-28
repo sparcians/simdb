@@ -140,7 +140,7 @@ private:
             full_payload = &it->second;
         }
 
-        auto lifecycle = std::make_unique<CollectedData>(cid, nullptr);
+        auto lifecycle = std::make_unique<CollectedData>(cid);
         auto& buf = lifecycle->getBuffer();
         const auto raw_action = static_cast<uint8_t>(action);
         buf.append(raw_action);
@@ -328,7 +328,7 @@ private:
                 // to the underlying buffer. Our last_sent_bytes_ also has the
                 // cid at the head of the bytes. That's why we are using the
                 // StreamBuffer::append() api below with a uint16_t offset.
-                auto injected_data = std::make_unique<CollectedData>(cid, nullptr);
+                auto injected_data = std::make_unique<CollectedData>(cid);
                 const auto& last_sent_bytes = last_sent_bytes_.at(cid);
                 const auto src = last_sent_bytes.data() + sizeof(uint16_t);
                 const auto src_bytes = last_sent_bytes.size() - sizeof(uint16_t);

@@ -4,6 +4,7 @@
 
 #include "simdb/apps/argos/StreamBuffer.hpp"
 
+#include <optional>
 #include <string>
 
 namespace simdb::argos {
@@ -13,9 +14,20 @@ namespace simdb::argos {
 class CollectedData
 {
 public:
-    CollectedData(uint16_t cid, TinyStrings<>* tiny_strings) :
+    CollectedData(uint16_t cid) :
+        CollectedData(cid, std::nullopt)
+    {
+    }
+
+    CollectedData(uint16_t cid, safe_weak_ptr<TinyStrings<>> tiny_strings) :
+        CollectedData(cid, std::make_optional(std::move(tiny_strings)))
+    {
+    }
+
+    CollectedData(uint16_t cid, std::optional<safe_weak_ptr<TinyStrings<>>> tiny_strings) :
         cid_(cid),
-        buffer_(data_, tiny_strings)
+        tiny_strings_(std::move(tiny_strings)),
+        buffer_(data_, tiny_strings_)
     {
         reset();
     }
@@ -35,8 +47,14 @@ public:
         buffer_.append(cid_);
     }
 
+    bool usesExpiredTinyStrings(const safe_weak_ptr<TinyStrings<>>& current) const
+    {
+        return buffer_.usesExpiredTinyStrings(current);
+    }
+
 private:
     uint16_t cid_ = 0;
+    std::optional<safe_weak_ptr<TinyStrings<>>> tiny_strings_;
     std::vector<char> data_;
     StreamBuffer buffer_;
 };

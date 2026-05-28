@@ -87,7 +87,7 @@ public:
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs() { nextCID_() = 0; }
 
-    TinyStrings<>* getTinyStrings() const { return tiny_strings_; }
+    safe_weak_ptr<TinyStrings<>> getTinyStrings() const { return tiny_strings_.get(); }
 
     void setScalarDataType(const std::string& dtype)
     {
@@ -150,7 +150,7 @@ public:
         {
             static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
             std::vector<char> bytes;
-            StreamBuffer buf(bytes, nullptr);
+            StreamBuffer buf(bytes);
             buf.append(val);
             setScalarValueBytes(bytes);
         }
@@ -197,7 +197,7 @@ public:
         }
 
         std::vector<char> final_bytes;
-        StreamBuffer buf(final_bytes, nullptr);
+        StreamBuffer buf(final_bytes);
         buf.append((uint16_t)size);
 
         for (uint64_t i = 0; i < size; ++i)
@@ -235,7 +235,7 @@ public:
         }
 
         std::vector<char> final_bytes;
-        StreamBuffer buf(final_bytes, nullptr);
+        StreamBuffer buf(final_bytes);
         buf.append((uint16_t)size);
 
         for (const auto& [bin_idx, bytes] : bin_bytes)

@@ -2,12 +2,14 @@
 
 #pragma once
 
+#include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include "simdb/utils/TypeTraits.hpp"
 
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -20,9 +22,10 @@ namespace simdb::argos {
 class StreamBuffer
 {
 public:
-    StreamBuffer(std::vector<char>& out, TinyStrings<>* tiny_strings, bool clear_first = true) :
+    StreamBuffer(std::vector<char>& out, std::optional<safe_weak_ptr<TinyStrings<>>> tiny_strings = std::nullopt,
+                 bool clear_first = true) :
         out_(out),
-        tiny_strings_(tiny_strings)
+        tiny_strings_(std::move(tiny_strings))
     {
         if (clear_first)
         {
@@ -38,7 +41,7 @@ public:
 
     void append(const bool val) { append(static_cast<uint8_t>(val)); }
 
-    void append(const std::string& s) { append(tiny_strings_->getStringID(s)); }
+    void append(const std::string& s) { append(tiny_strings_.value().operator->()->getStringID(s)); }
 
     template <typename T> void append(const T& val)
     {
@@ -87,9 +90,24 @@ public:
 
     bool operator==(const std::vector<char>& other) const { return out_ == other; }
 
+    bool usesExpiredTinyStrings(const safe_weak_ptr<TinyStrings<>>& current) const
+    {
+        if (!tiny_strings_.has_value())
+        {
+            return false;
+        }
+        if (tiny_strings_->expired())
+        {
+            return true;
+        }
+        const auto stored = tiny_strings_->try_lock();
+        const auto live = current.try_lock();
+        return !stored || !live || stored.get() != live.get();
+    }
+
 private:
     std::vector<char>& out_;
-    TinyStrings<>* const tiny_strings_;
+    std::optional<safe_weak_ptr<TinyStrings<>>> tiny_strings_;
 };
 
 } // namespace simdb::argos

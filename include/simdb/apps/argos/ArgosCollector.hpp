@@ -8,6 +8,7 @@
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/utils/Compress.hpp"
+#include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TypeTraits.hpp"
 
 namespace simdb::argos {
@@ -229,9 +230,9 @@ public:
         }
     }
 
-    TinyStrings<>* getTinyStrings() { return resources_.getTinyStringsResource(); }
+    safe_weak_ptr<TinyStrings<>> getTinyStrings() { return resources_.getTinyStringsResource().get(); }
 
-    PipelineStager* getStager() { return resources_.getStagerResource(); }
+    safe_weak_ptr<PipelineStager> getStager() { return resources_.getStagerResource().get(); }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
@@ -290,7 +291,7 @@ public:
         // to be async (collection data and TinyStrings to go with it should all
         // end up in the ArgosCollector::Writer::run_() method together so we can
         // guarantee readability of those collection blobs.
-        tiny_strings_.serialize();
+        resources_.getTinyStringsResource().serialize();
     }
 
 private:
@@ -441,7 +442,6 @@ private:
     };
 
     DatabaseManager* const db_mgr_;
-    TinyStrings<> tiny_strings_{db_mgr_};
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
 
     using ClockDescriptor = std::tuple<std::string, // clk name
