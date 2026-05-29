@@ -132,6 +132,9 @@ public:
         if (realized_ && tiny_strings_->getDatabaseManager() != db_mgr)
         {
             throw DBException("TinyStrings resource already created!");
+        } else if (realized_)
+        {
+            return;
         }
 
         auto copy_from = tiny_strings_.get();
