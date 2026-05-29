@@ -781,30 +781,45 @@ template <typename T> inline constexpr bool is_char_pointer_v = is_char_pointer<
 
 /**
  * \brief Templated struct for detecting "operator POD() const"
+ *
+ * Unlike a std::is_convertible_v cascade, this reports the *exact* return type
+ * of the class' conversion operator. Conversion to the operator's real return
+ * type uses an identity second standard conversion (Exact Match), which strictly
+ * outranks any chained conversion (e.g. operator uint32_t() also makes the class
+ * convertible to bool, but uint32_t wins). Resolves to void for non-class types,
+ * classes with no cast operator, and classes with more than one cast operator
+ * (an ambiguous probe that fails via SFINAE).
  */
 template <typename T> struct pod_convertible
 {
 private:
     using U = std::decay_t<T>;
 
-    // clang-format off
-    using detected_type =
-        std::conditional_t<std::is_convertible_v<U, bool>,     bool,
-        std::conditional_t<std::is_convertible_v<U, int8_t>,   int8_t,
-        std::conditional_t<std::is_convertible_v<U, uint8_t>,  uint8_t,
-        std::conditional_t<std::is_convertible_v<U, int16_t>,  int16_t,
-        std::conditional_t<std::is_convertible_v<U, uint16_t>, uint16_t,
-        std::conditional_t<std::is_convertible_v<U, int32_t>,  int32_t,
-        std::conditional_t<std::is_convertible_v<U, uint32_t>, uint32_t,
-        std::conditional_t<std::is_convertible_v<U, int64_t>,  int64_t,
-        std::conditional_t<std::is_convertible_v<U, uint64_t>, uint64_t,
-        std::conditional_t<std::is_convertible_v<U, double>,   double,
-        std::conditional_t<std::is_convertible_v<U, float>,    float,
-        void>>>>>>>>>>>;
-    // clang-format on
+    template <typename P> struct tag
+    {
+        using type = P;
+    };
+
+    static tag<bool> pick(bool);
+    static tag<int8_t> pick(int8_t);
+    static tag<uint8_t> pick(uint8_t);
+    static tag<int16_t> pick(int16_t);
+    static tag<uint16_t> pick(uint16_t);
+    static tag<int32_t> pick(int32_t);
+    static tag<uint32_t> pick(uint32_t);
+    static tag<int64_t> pick(int64_t);
+    static tag<uint64_t> pick(uint64_t);
+    static tag<double> pick(double);
+    static tag<float> pick(float);
+    static tag<void> pick(...);
+
+    template <typename V, std::enable_if_t<std::is_class_v<V>, int> = 0>
+    static auto detect(int) -> typename decltype(pick(std::declval<V>()))::type;
+
+    template <typename V> static auto detect(...) -> void;
 
 public:
-    using type = detected_type;
+    using type = decltype(detect<U>(0));
 };
 
 template <typename T> using pod_convertible_t = typename pod_convertible<T>::type;
