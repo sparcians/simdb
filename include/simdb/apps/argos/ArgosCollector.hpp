@@ -100,6 +100,16 @@ public:
         dyn_field_names_tbl.addColumn("SerializationCID", dt::int32_t);
         dyn_field_names_tbl.addColumn("FieldNames", dt::string_t);
         dyn_field_names_tbl.createIndexOn("SerializationCID");
+
+        auto& signed_enum_map_tbl = schema.addTable("SignedEnumMappings");
+        signed_enum_map_tbl.addColumn("EnumName", dt::string_t);
+        signed_enum_map_tbl.addColumn("EnumString", dt::string_t);
+        signed_enum_map_tbl.addColumn("EnumInt", dt::int64_t);
+
+        auto& unsigned_enum_map_tbl = schema.addTable("UnsignedEnumMappings");
+        unsigned_enum_map_tbl.addColumn("EnumName", dt::string_t);
+        unsigned_enum_map_tbl.addColumn("EnumString", dt::string_t);
+        unsigned_enum_map_tbl.addColumn("EnumInt", dt::uint64_t);
     }
 
     void setHeartbeat(size_t heartbeat)
@@ -164,75 +174,32 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
-    template <typename ScalarT>
-    CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name)
+    CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
+                                                const std::string& type_name)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setScalarDataType(encodeTypeName<ScalarT>());
-
-        // std::cout << "Created SimDB collection entry point:\n";
-        // std::cout << "  - path:  " << path << "\n";
-        // std::cout << "  - clock: " << clk_name << "\n";
-        // std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
-
+        entry_point->setScalarDataType(type_name);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return collectors_.back().get();
     }
 
-    template <typename BinT, bool Sparse>
+    template <bool Sparse>
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
-                                                   size_t capacity)
+                                                   size_t capacity, const std::string& type_name)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setContainerDataType(encodeTypeName<BinT>(), Sparse, capacity);
-
-        // std::cout << "Created SimDB collection entry point:\n";
-        // std::cout << "  - path:  " << path << "\n";
-        // std::cout << "  - clock: " << clk_name << "\n";
-        // std::cout << "  - dtype: " << entry_point->encodeTypeName() << std::endl;
-
+        entry_point->setContainerDataType(type_name, Sparse, capacity);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return collectors_.back().get();
-    }
-
-    template <typename T> static std::string encodeTypeName()
-    {
-        if constexpr (std::is_same_v<T, std::string>)
-        {
-            return "string";
-        } else if constexpr (std::is_same_v<std::decay_t<T>, const char*>)
-        {
-            return "string";
-        } else if constexpr (std::is_enum_v<T> && type_traits::has_ostream_operator_v<T>)
-        {
-            // TODO cnyce: For now, stringifiable enums collect as strings
-            return "string";
-        } else if constexpr (std::is_enum_v<T>)
-        {
-            // Non-stringifiable enums collect as raw uint64_t values
-            using Underlying = std::underlying_type_t<T>;
-            static_assert(std::is_unsigned_v<Underlying>);
-            return demangle_type<uint64_t>();
-        } else if constexpr (type_traits::is_pod_v<T> || type_traits::has_sparta_pair_definition_type_v<T>)
-        {
-            return demangle_type<T>();
-        } else if constexpr (type_traits::is_dynamic_type_v<T>)
-        {
-            return "dynamic";
-        } else if constexpr (type_traits::has_ostream_operator_v<T>)
-        {
-            return "string";
-        } else
-        {
-            return "UNCOLLECTABLE";
-        }
     }
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() { return resources_.getTinyStringsResource().get(); }
 
     safe_weak_ptr<PipelineStager> getStager() { return resources_.getStagerResource().get(); }
+
+    ArgosResources* getResources() { return &resources_; }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
@@ -267,7 +234,7 @@ public:
             const auto& full_path = std::get<0>(meta_by_cid_.at(cid));
             const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
             const auto clk_id = clk_ids.at(clk_name);
-            const auto dtype_name = collector->encodeTypeName();
+            const auto dtype_name = collector->getEncodedCollectedType();
 
             if (dtype_name != "UNCOLLECTABLE")
             {
@@ -291,7 +258,7 @@ public:
         // to be async (collection data and TinyStrings to go with it should all
         // end up in the ArgosCollector::Writer::run_() method together so we can
         // guarantee readability of those collection blobs.
-        resources_.getTinyStringsResource().serialize();
+        resources_.writeMetaOnPostTeardown(db_mgr_);
     }
 
 private:

@@ -5,6 +5,7 @@
 #include "simdb/apps/argos/CollectedData.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
+#include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include <filesystem>
@@ -184,7 +185,87 @@ private:
     std::unordered_map<uint16_t, std::unique_ptr<CollectedData>> collected_data_map_;
 };
 
-class ArgosResources // : public ArgosResourcesBase
+class EnumMapResource
+{
+    class EnumMapBase
+    {
+    public:
+        virtual ~EnumMapBase() = default;
+        virtual void dumpEnumMap(simdb::DatabaseManager* db_mgr) const = 0;
+    };
+
+    template <typename E, typename = void> class EnumMap : public EnumMapBase
+    {
+    public:
+        void inspect(E) {}
+        void dumpEnumMap(simdb::DatabaseManager*) const override final {}
+    };
+
+    template <typename E>
+    class EnumMap<E, std::enable_if_t<type_traits::has_ostream_operator_v<E>>> : public EnumMapBase
+    {
+    public:
+        void inspect(E val)
+        {
+            auto& s = enum_map_[val];
+            if (s.empty())
+            {
+                std::ostringstream oss;
+                oss << val;
+                s = oss.str();
+                sparta_assert(!s.empty());
+            }
+        }
+
+        void dumpEnumMap(DatabaseManager* db_mgr) const override final
+        {
+            using Underlying = std::underlying_type_t<E>;
+            using DumpInt = std::conditional_t<std::is_signed_v<Underlying>, int64_t, uint64_t>;
+            dumpEnumMap_<DumpInt>(db_mgr);
+        }
+
+    private:
+        template <typename IntType> void dumpEnumMap_(DatabaseManager* db_mgr) const
+        {
+            constexpr auto table_name = std::is_signed_v<IntType> ? "SignedEnumMappings" : "UnsignedEnumMappings";
+            auto inserter = db_mgr->prepareINSERT(SQL_TABLE(table_name));
+
+            const auto enum_name = demangle_type<E>();
+            for (const auto& [enum_val, enum_str] : enum_map_)
+            {
+                inserter->createRecordWithColValues(enum_name, enum_str, static_cast<IntType>(enum_val));
+            }
+        }
+
+        std::map<E, std::string> enum_map_;
+    };
+
+public:
+    template <typename E> void inspect(E val)
+    {
+        auto& enum_map = enum_maps_[simdb::demangle_type<E>()];
+        if (!enum_map)
+        {
+            enum_map = std::make_unique<EnumMap<E>>();
+        }
+        EnumMapBase* abstract_map = enum_map.get();
+        auto concrete_map = static_cast<EnumMap<E>*>(abstract_map);
+        concrete_map->inspect(val);
+    }
+
+    void serializeEnumMaps(DatabaseManager* db_mgr)
+    {
+        for (auto& [_, map] : enum_maps_)
+        {
+            map->dumpEnumMap(db_mgr);
+        }
+    }
+
+private:
+    std::unordered_map<std::string, std::unique_ptr<EnumMapBase>> enum_maps_;
+};
+
+class ArgosResources
 {
 public:
     template <typename Resource> void addResource(Resource* resource)
@@ -245,6 +326,14 @@ public:
 
     CollectedDataResource& getCollectedDataBuffersResource() { return collected_data_bufs_resource_; }
 
+    EnumMapResource* getEnumMapResource() { return &enum_map_resource_; }
+
+    void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
+    {
+        tiny_strings_resource_.serialize();
+        enum_map_resource_.serializeEnumMaps(db_mgr);
+    }
+
 private:
     std::vector<HeartbeatResource*> heartbeat_resources_;
     std::vector<PipelineResource*> pipeline_resources_;
@@ -254,6 +343,7 @@ private:
     PipelineStagerResource stager_resource_{this};
     TinyStringsResource tiny_strings_resource_{this};
     CollectedDataResource collected_data_bufs_resource_{tiny_strings_resource_};
+    EnumMapResource enum_map_resource_;
 };
 
 inline HeartbeatResource::HeartbeatResource(ArgosResources* resource_container)

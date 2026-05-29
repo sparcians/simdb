@@ -196,6 +196,26 @@ std::ostream& operator<<(std::ostream& os, const Instruction& inst)
     return os;
 }
 
+template <typename ScalarT> std::vector<char> getScalarBytes(const ScalarT& val, simdb::TinyStrings<>* tiny_strings)
+{
+    if constexpr (std::is_enum_v<ScalarT>)
+    {
+        using Underlying = std::underlying_type_t<ScalarT>;
+        return getScalarBytes(static_cast<Underlying>(val), tiny_strings);
+    } else if constexpr (std::is_same_v<ScalarT, std::string>)
+    {
+        auto sid = tiny_strings->getStringID(val);
+        return getScalarBytes(sid, tiny_strings);
+    } else
+    {
+        static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
+        std::vector<char> bytes;
+        simdb::argos::StreamBuffer buf(bytes);
+        buf.append(val);
+        return bytes;
+    }
+}
+
 void TestScalarCollection()
 {
     TEST_METHOD_INIT;
@@ -210,11 +230,11 @@ void TestScalarCollection()
     auto argos_collector = app_mgr.getApp<simdb::argos::ArgosCollector>();
     argos_collector->setHeartbeat(3);
 
-    auto int_collector = argos_collector->createScalarCollector<int32_t>("top.int32", "root");
-    auto string_collector = argos_collector->createScalarCollector<std::string>("top.string", "root");
-    auto enum_collector = argos_collector->createScalarCollector<InstType>("top.inst_type", "root");
-    auto bool_collector = argos_collector->createScalarCollector<bool>("top.bool", "root");
-    auto struct_collector = argos_collector->createScalarCollector<Instruction>("top.inst", "root");
+    auto int_collector = argos_collector->createScalarCollector("top.int32", "root", "int");
+    auto string_collector = argos_collector->createScalarCollector("top.string", "root", "string");
+    auto enum_collector = argos_collector->createScalarCollector("top.inst_type", "root", "InstType");
+    auto bool_collector = argos_collector->createScalarCollector("top.bool", "root", "bool");
+    auto struct_collector = argos_collector->createScalarCollector("top.inst", "root", "Instruction");
 
     uint64_t tick = 0;
     argos_collector->timestampWith(&tick);
@@ -230,16 +250,20 @@ void TestScalarCollection()
     while (++tick <= RUN_TICKS)
     {
         auto ival = randomInt<int32_t>();
-        int_collector->setScalarValue(ival);
+        auto bytes = getScalarBytes(ival, tiny_strings.get());
+        int_collector->setScalarValueBytes(bytes);
 
         auto sval = randomString();
-        string_collector->setScalarValue(sval);
+        bytes = getScalarBytes(sval, tiny_strings.get());
+        string_collector->setScalarValueBytes(bytes);
 
         auto eval = randomEnum();
-        enum_collector->setScalarValue(eval);
+        bytes = getScalarBytes(eval, tiny_strings.get());
+        enum_collector->setScalarValueBytes(bytes);
 
         auto bval = randomBool();
-        bool_collector->setScalarValue(bval);
+        bytes = getScalarBytes(bval, tiny_strings.get());
+        bool_collector->setScalarValueBytes(bytes);
 
         auto inst = Instruction::genRandom();
         std::vector<char> inst_bytes;
@@ -283,7 +307,7 @@ template <bool Sparse> void TestInstQueueContainerCollection()
 
     constexpr size_t capacity = 8;
     auto queue_collector =
-        argos_collector->createContainerCollector<Instruction, Sparse>("top.instq", "root", capacity);
+        argos_collector->createContainerCollector<Sparse>("top.instq", "root", capacity, "Instruction");
 
     uint64_t tick = 0;
     argos_collector->timestampWith(&tick);

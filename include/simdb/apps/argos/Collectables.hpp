@@ -112,48 +112,13 @@ public:
         collectable_type_name_ += std::to_string(capacity);
     }
 
-    std::string encodeTypeName() const
+    std::string getEncodedCollectedType() const
     {
         if (collectable_type_name_.empty())
         {
             throw DBException("Collectable data type name never set!");
         }
         return collectable_type_name_;
-    }
-
-    template <typename ScalarT> void setScalarValue(const ScalarT& val)
-    {
-        if (!enabled())
-        {
-            return;
-        }
-
-        if constexpr (std::is_enum_v<ScalarT>)
-        {
-            // TODO cnyce: Enums should be written as their underlying int type, and
-            // a string-int mapping should be put in the database. For now, just rely
-            // on TinyStrings and treat enums as strings instead of ints.
-            std::ostringstream oss;
-            oss << val;
-            auto enum_str = oss.str();
-            auto enum_sid = tiny_strings_->getStringID(enum_str);
-            setScalarValue(enum_sid);
-        } else if constexpr (std::is_same_v<ScalarT, std::string>)
-        {
-            auto sid = tiny_strings_->getStringID(val);
-            setScalarValue(sid);
-        } else if constexpr (std::is_same_v<std::decay_t<ScalarT>, const char*>)
-        {
-            auto sid = tiny_strings_->getStringID(val);
-            setScalarValue(sid);
-        } else
-        {
-            static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
-            std::vector<char> bytes;
-            StreamBuffer buf(bytes);
-            buf.append(val);
-            setScalarValueBytes(bytes);
-        }
     }
 
     void setScalarValueBytes(const std::vector<char>& bytes)
