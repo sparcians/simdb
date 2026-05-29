@@ -41,9 +41,11 @@ public:
 
     void append(const bool val) { append(static_cast<uint8_t>(val)); }
 
-    void append(const std::string& s) { append(tiny_strings_.value().operator->()->getStringID(s)); }
+    void append(const std::string& s) { append(tiny_strings_.value()->getStringID(s)); }
 
-    template <typename T> void append(const T& val)
+    template <typename T>
+    std::enable_if_t<std::is_trivial_v<T> && std::is_standard_layout_v<T> && !std::is_enum_v<T>, void>
+    append(const T& val)
     {
         static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
         append(&val, sizeof(T));
@@ -67,21 +69,10 @@ public:
         append(val.data(), N * sizeof(T));
     }
 
-    template <typename T> std::enable_if_t<std::is_enum_v<T>> append(const T val)
+    template <typename T> std::enable_if_t<std::is_enum_v<T>, void> append(const T val)
     {
-        if constexpr (type_traits::has_ostream_operator_v<T>)
-        {
-            // TODO cnyce: For now, stringifiable enums collect as strings
-            std::ostringstream oss;
-            oss << val;
-            append(oss.str());
-        } else
-        {
-            // Non-stringifiable enums collect as raw uint64_t values
-            using Underlying = std::underlying_type_t<T>;
-            static_assert(std::is_unsigned_v<Underlying>);
-            append(static_cast<uint64_t>(val));
-        }
+        using Underlying = std::underlying_type_t<T>;
+        append(static_cast<Underlying>(val));
     }
 
     size_t size() const { return out_.size(); }

@@ -171,13 +171,7 @@ public:
     void writeToBuffer(simdb::argos::StreamBuffer& buf) const
     {
         buf.append(getUID());
-
-        // TODO cnyce: Enums should be written as their underlying int type, and
-        // a string-int mapping should be put in the database. For now, just rely
-        // on TinyStrings and treat enums as strings instead of ints.
-        std::ostringstream oss;
-        oss << getType();
-        buf.append(oss.str());
+        buf.append(getType());
         buf.append(getOpcode());
         buf.append(getMnemonic());
         buf.append(getCsr());
