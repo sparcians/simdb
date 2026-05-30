@@ -193,8 +193,8 @@ template <typename ScalarT> std::vector<char> getScalarBytes(const ScalarT& val,
 {
     if constexpr (std::is_enum_v<ScalarT>)
     {
-        using Underlying = std::underlying_type_t<ScalarT>;
-        return getScalarBytes(static_cast<Underlying>(val), tiny_strings);
+        using underlying_t = std::underlying_type_t<ScalarT>;
+        return getScalarBytes(static_cast<underlying_t>(val), tiny_strings);
     } else if constexpr (std::is_same_v<ScalarT, std::string>)
     {
         auto sid = tiny_strings->getStringID(val);

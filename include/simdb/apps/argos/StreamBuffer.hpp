@@ -71,8 +71,8 @@ public:
 
     template <typename T> std::enable_if_t<std::is_enum_v<T>, void> append(const T val)
     {
-        using Underlying = std::underlying_type_t<T>;
-        append(static_cast<Underlying>(val));
+        using underlying_t = std::underlying_type_t<T>;
+        append(static_cast<underlying_t>(val));
     }
 
     size_t size() const { return out_.size(); }

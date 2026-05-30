@@ -277,8 +277,8 @@ class EnumMapResource
 
         void dumpEnumMap(DatabaseManager* db_mgr) const override final
         {
-            using Underlying = std::underlying_type_t<E>;
-            using DumpInt = std::conditional_t<std::is_signed_v<Underlying>, int64_t, uint64_t>;
+            using underlying_t = std::underlying_type_t<E>;
+            using DumpInt = std::conditional_t<std::is_signed_v<underlying_t>, int64_t, uint64_t>;
             dumpEnumMap_<DumpInt>(db_mgr);
         }
 
@@ -299,7 +299,7 @@ class EnumMapResource
     };
 
 public:
-    template <typename E> void inspect(E val)
+    template <typename E> std::enable_if_t<type_traits::has_ostream_operator_v<E>, void> inspect(E val)
     {
         auto& enum_map = enum_maps_[simdb::demangle_type<E>()];
         if (!enum_map)
@@ -310,6 +310,8 @@ public:
         auto concrete_map = static_cast<EnumMap<E>*>(abstract_map);
         concrete_map->inspect(val);
     }
+
+    template <typename E> std::enable_if_t<!type_traits::has_ostream_operator_v<E>, void> inspect(E) {}
 
     void serializeEnumMaps(DatabaseManager* db_mgr)
     {

@@ -851,10 +851,4 @@ struct has_sparta_pair_definition_type<T, std::void_t<typename T::SpartaPairDefi
 template <typename T>
 inline constexpr bool has_sparta_pair_definition_type_v = has_sparta_pair_definition_type<T>::value;
 
-template <typename T> struct is_dynamic_type : std::false_type
-{
-};
-
-template <typename T> inline constexpr bool is_dynamic_type_v = is_dynamic_type<T>::value;
-
 } // namespace simdb::type_traits
