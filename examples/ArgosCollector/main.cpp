@@ -264,12 +264,6 @@ void TestScalarCollection()
         simdb::argos::StreamBuffer buf(inst_bytes, tiny_strings);
         inst->writeToBuffer(buf);
         struct_collector->setScalarValueBytes(inst_bytes);
-
-        // Note that this API call is optional, and will be automatically
-        // called at the end of simulation (preTeardown). But for as long
-        // as this method is not called, the collected data will build up
-        // in memory.
-        argos_collector->sendCollectedDataToPipeline();
     }
 
     // Finalize...
@@ -344,12 +338,6 @@ template <bool Sparse> void TestInstQueueContainerCollection()
             }
             queue_collector->setContigContainerBinBytes(contig_bin_bytes);
         }
-
-        // Note that this API call is optional, and will be automatically
-        // called at the end of simulation (preTeardown). But for as long
-        // as this method is not called, the collected data will build up
-        // in memory.
-        argos_collector->sendCollectedDataToPipeline();
     }
 
     // Finalize...

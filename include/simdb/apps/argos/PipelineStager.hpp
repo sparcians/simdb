@@ -56,6 +56,8 @@ public:
         }
     }
 
+    void disableAutoSendMode(bool disable = true) { auto_send_when_time_advances_ = !disable; }
+
     void onEnabledChanged(uint16_t cid, bool enabled)
     {
         if (advanceStageTime_())
@@ -179,6 +181,11 @@ private:
         } else if (current_time < prev_slot_time)
         {
             throw DBException("Time must be monotonically increasing");
+        }
+
+        if (auto_send_when_time_advances_)
+        {
+            sendCollectedDataToPipeline();
         }
 
         return true;
@@ -353,6 +360,7 @@ private:
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
     std::queue<QueueCollectionData> waiting_queue_;
     ValidValue<uint64_t> last_stage_time_;
+    bool auto_send_when_time_advances_ = true;
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;
