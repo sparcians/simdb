@@ -12,10 +12,37 @@
 #include <memory>
 #include <random>
 
+//! There are collection classes that require things like DatabaseManager,
+//! collection heartbeat, etc. in order to be instantiated. We cannot know
+//! ahead of time all the ways in which these ctor args will become available
+//! for all simulations / unit tests. One simulation could do this:
+//!
+//!   - set the heartbeat value
+//!   - set the timestamp backpointer
+//!   - create the DatabaseManager         (now TinyStrings can be created)
+//!   - open pipelines                     (now PipelineStager can be created)
+//!
+//! But a unit test might do this:
+//!
+//!   - set the timestamp backpointer
+//!   - set the heartbeat value
+//!   - never create the DatabaseManager
+//!   - never open pipelines
+//!
+//! In the unit test, we would never have a DatabaseManager, so we would
+//! never have a TinyStrings (whose ctor takes a DatabaseManager).
+//!
+//! The classes below provide a way for Argos collection to freely use temporary
+//! resources like TinyStrings and PipelineStager until all required ctor args
+//! have been set, then the "live" resources like TinyStrings are created and
+//! pre-populated with any information gathered while the temporary objects
+//! were being used.
+
 namespace simdb::argos {
 
 class ArgosResources;
 
+//! For lazy creation of resources that require the pipeline heartbeat
 class HeartbeatResource
 {
 public:
@@ -23,6 +50,7 @@ public:
     virtual void setHeartbeat(size_t heartbeat) = 0;
 };
 
+//! For lazy creation of resources that require the Pipeline
 class PipelineResource
 {
 public:
@@ -30,6 +58,7 @@ public:
     virtual void setPipeline(pipeline::Pipeline* pipeline) = 0;
 };
 
+//! For lazy creation of resources that require the Timestamp
 class TimestampResource
 {
 public:
@@ -37,6 +66,7 @@ public:
     virtual void setTimestamp(Timestamp* timestamp) = 0;
 };
 
+//! For lazy creation of resources that require the DatabaseManager
 class DatabaseResource
 {
 public:
@@ -44,6 +74,12 @@ public:
     virtual void setDatabase(DatabaseManager* db_mgr) = 0;
 };
 
+//! \class PipelineStagerResource
+//! \brief Used to lazily create a "live" PipelineStager only when the
+//! heartbeat is known, the pipeline has been created, and the timestamp
+//! has been created. Those three bits of information can be set in any
+//! order. If one or more is never set, as in the case of some unit tests,
+//! then the ArgosCollector will be using a temporary PipelineStager.
 class PipelineStagerResource : public HeartbeatResource, public PipelineResource, public TimestampResource
 {
 public:
@@ -75,6 +111,9 @@ public:
         checkReady_();
     }
 
+    //! Access the temporary/live PipelineStager. DO NOT cache this raw
+    //! pointer. If you accidentally cache the temporary stager, you will
+    //! see a crash if it gets reallocated to the live stager.
     PipelineStager* operator->() const { return get().operator->(); }
 
     safe_weak_ptr<PipelineStager> get() const { return stager_; }
@@ -98,7 +137,9 @@ private:
             stager_ =
                 std::make_shared<PipelineStager>(heartbeat_, timestamp_, pipeline_head, notif_head, dyn_field_head);
 
-            // Flush pending notifications (does not apply to other ConcurrentQueue's)
+            // Flush pending notifications. There are use cases where we might
+            // need to send warnings/errors to Argos before e.g. the pipeline
+            // was opened or before the heartbeat was known.
             Notification notif;
             while (dummy_notif_head_.try_pop(notif))
             {
@@ -113,12 +154,18 @@ private:
     pipeline::Pipeline* pipeline_ = nullptr;
     Timestamp* timestamp_ = nullptr;
 
+    //! Temporary queue for Notifications received while using the temp PipelineStager
     ConcurrentQueue<Notification> dummy_notif_head_;
+
+    //! PipelineStager - starts out as the temporary stager, reallocated when
+    //! we get everything we need for the live stager
     std::shared_ptr<PipelineStager> stager_{
         std::make_shared<PipelineStager>(0, nullptr, nullptr, &dummy_notif_head_, nullptr)};
     bool realized_ = false;
 };
 
+//! This class is used to manage the TinyStrings resource before/after the
+//! DatabaseManager is first seen.
 class TinyStringsResource : public DatabaseResource
 {
 public:
@@ -143,6 +190,9 @@ public:
         realized_ = true;
     }
 
+    //! Access the temporary/live TinyStrings. DO NOT cache this raw
+    //! pointer. If you accidentally cache the temporary TinyStrings,
+    //! you will see a crash if it gets reallocated to the live one.
     TinyStrings<>* operator->() const { return get().operator->(); }
 
     safe_weak_ptr<TinyStrings<>> get() const { return tiny_strings_; }
@@ -164,6 +214,7 @@ private:
     bool realized_ = false;
 };
 
+//! This class manages CollectedData resources before/after the live TinyStrings is created.
 class CollectedDataResource
 {
 public:
@@ -188,6 +239,10 @@ private:
     std::unordered_map<uint16_t, std::unique_ptr<CollectedData>> collected_data_map_;
 };
 
+//! This class allows us to track collected enum values (int) and their corresponding
+//! stringified values (operator<<) and store them in the database for the Argos UI
+//! to use. Note that enums without operator<< are just shown in Argos as their int
+//! values.
 class EnumMapResource
 {
     class EnumMapBase

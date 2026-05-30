@@ -1,4 +1,3 @@
-#include "RandUtils.hpp"
 #include "SimDBTester.hpp"
 #include "simdb/apps/AppManager.hpp"
 #include "simdb/apps/argos/ArgosCollector.hpp"

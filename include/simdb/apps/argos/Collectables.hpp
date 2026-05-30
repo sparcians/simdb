@@ -11,6 +11,11 @@
 
 namespace simdb::argos {
 
+//! \class CollectionEntryPoint
+//! \brief Main entry point into Argos collection.
+//!
+//! TODO cnyce: These need to be template classes when the collection
+//! code from Sparta is merged into SimDB.
 class CollectionEntryPoint
 {
 public:
@@ -89,6 +94,8 @@ public:
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() const { return tiny_strings_.get(); }
 
+    /// TODO cnyce: Remove this method when Sparta/SimDB is merged. We can figure
+    /// this out using <T> only.
     void setScalarDataType(const std::string& dtype)
     {
         assert(collectable_type_name_.empty());
@@ -96,6 +103,8 @@ public:
         is_scalar_ = true;
     }
 
+    /// TODO cnyce: Remove this method when Sparta/SimDB is merged. We can figure
+    /// this out using <T> only.
     void setContainerDataType(const std::string& bin_dtype, bool sparse, size_t capacity)
     {
         assert(collectable_type_name_.empty());
@@ -121,6 +130,11 @@ public:
         return collectable_type_name_;
     }
 
+    //! NOTE: We only have setScalarValueBytes(), setContigContainerBinBytes()
+    //! and setSparseContainerBinBytes() all together in one class temporarily
+    //! until Sparta/SimDB collection is merged. When the entry point class
+    //! becomes a template, these will collapse to one method (<T> decides
+    //! the input data structure).
     void setScalarValueBytes(const std::vector<char>& bytes)
     {
         if (!enabled())
@@ -132,6 +146,7 @@ public:
         sendBytes_(bytes);
     }
 
+    //! \see setScalarValueBytes
     void setContigContainerBinBytes(const std::vector<std::vector<char>>& bin_bytes)
     {
         if (!enabled())
@@ -173,6 +188,7 @@ public:
         sendBytes_(final_bytes);
     }
 
+    //! \see setScalarValueBytes
     void setSparseContainerBinBytes(const std::map<uint16_t, std::vector<char>>& bin_bytes)
     {
         if (!enabled())

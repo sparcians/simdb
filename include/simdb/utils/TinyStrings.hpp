@@ -49,10 +49,13 @@ public:
             query->select("StringID", id);
 
             auto results = query->getResultSet();
-            while (results.getNextRecord())
-            {
-                inserter->createRecordWithColValues(str, id);
-            }
+
+            db_mgr_->safeTransaction([&]() {
+                while (results.getNextRecord())
+                {
+                    inserter->createRecordWithColValues(str, id);
+                }
+            });
         }
 
         auto query = db_mgr_->createQuery("TinyStringIDs");
@@ -120,8 +123,7 @@ public:
         return getStringID(std::string(s));
     }
 
-    /// Get a string ID for the given string (shared/unique_ptr<std::string>,
-    /// std::string*)
+    /// Get a string ID for the given string (pointer)
     template <typename S>
     type_traits::enable_if_t<!type_traits::is_char_pointer_v<S> && type_traits::is_any_pointer_v<S>, uint32_t>
     getStringID(const S& s)

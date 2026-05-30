@@ -12,6 +12,9 @@
 #include <utility>
 #include <vector>
 
+//! This file contains data types that are used to pass information
+//! down ArgosCollector's pipeline to the database.
+
 namespace simdb::argos {
 
 using CollectionDataAtTimePoint = std::vector<std::unique_ptr<CollectedData>>;

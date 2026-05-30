@@ -14,6 +14,17 @@
 
 namespace simdb::argos {
 
+//! \class PipelineStager
+//! \brief This class handles all logic related to "staging" all collected data
+//! before sending it down the pipeline to the database. Everything related to
+//! the following is handled by this class:
+//!
+//!   - tracking enabled/disabled changes
+//!   - replaying previously-seen bytes on heartbeats
+//!   - ensuring that everything collected at the same simulation time value goes to
+//!     the same DB blob
+//!   - updating dynamic field definitions
+//!   - forwarding timestamped errors/warnings/notifications to Argos
 class PipelineStager
 {
 public:
@@ -168,7 +179,6 @@ private:
             throw DBException("Time must be monotonically increasing");
         }
 
-        // Tell the call site whether we should start a brand new "slot" in the waiting queue.
         if (waiting_queue_.empty())
         {
             return true;

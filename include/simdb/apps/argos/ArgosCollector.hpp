@@ -15,9 +15,12 @@ namespace simdb::argos {
 
 inline constexpr size_t DEFAULT_HEARTBEAT = 10;
 
+//! \class ArgosCollector
+//! \brief Main entry point into the Argos collection system.
 class ArgosCollector : public App
 {
 public:
+    //! Required by all SimDB apps
     static constexpr auto NAME = "argos-collector";
 
     ArgosCollector(DatabaseManager* db_mgr) :
@@ -65,7 +68,6 @@ public:
         dtype_nodes_tbl.addColumn("EnumBacking", dt::string_t);
         dtype_nodes_tbl.addColumn("FormatStr", dt::string_t);
 
-        // TODO cnyce: floating-point timestamp support
         auto& timestamps_tbl = schema.addTable("Timestamps");
         timestamps_tbl.addColumn("Timestamp", dt::uint64_t);
         timestamps_tbl.ensureUnique("Timestamp");
@@ -82,14 +84,12 @@ public:
         collectable_tns_tbl.ensureUnique("SerializationCID");
         collectable_tns_tbl.unsetPrimaryKey();
 
-        // TODO cnyce: floating-point timestamp support
         auto& notif_tbl = schema.addTable("Notifications");
         notif_tbl.addColumn("SerializationCID", dt::int32_t);
         notif_tbl.addColumn("NotifStr", dt::string_t);
         notif_tbl.addColumn("NotifType", dt::int32_t);
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
 
-        // TODO cnyce: floating-point timestamp support
         auto& dyn_field_type_changes_tbl = schema.addTable("DynamicFieldTypeChanges");
         dyn_field_type_changes_tbl.addColumn("SerializationCID", dt::int32_t);
         dyn_field_type_changes_tbl.addColumn("FieldTypes", dt::string_t);
@@ -141,7 +141,6 @@ public:
         clocks_.emplace_back(std::move(clk_desc));
     }
 
-    // TODO cnyce: floating-point timestamp support
     void timestampWith(const uint64_t* backpointer)
     {
         if (timestamp_ != nullptr)
@@ -152,7 +151,6 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
-    // TODO cnyce: floating-point timestamp support
     void timestampWith(uint64_t (*fn)())
     {
         if (timestamp_ != nullptr)
@@ -163,7 +161,6 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
-    // TODO cnyce: floating-point timestamp support
     void timestampWith(std::function<uint64_t()> fn)
     {
         if (timestamp_ != nullptr)
@@ -174,22 +171,60 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
+    //! TODO cnyce: Once the collection code from Sparta is merged into SimDB, change this
+    //! to a template method so we can figure out the encoded data type name ourselves.
+    //! Scalar types are encoded as follows:
+    //!
+    //!   For scalar PODs:
+    //!   typeid(T).name()
+    //!       "bool"
+    //!       "unsigned long"
+    //!       ...
+    //!
+    //!   For scalar enums with operator<< (defn held in separate table for string-int map):
+    //!   typeid(T).name()
+    //!       "IssueType"
+    //!       "MMUState"
+    //!       ...
+    //!
+    //!   For scalar enums without operator<< (treated just like int PODs):
+    //!   typeid(std::underlying_type_t<T>).name()
+    //!       "int"
+    //!       "unsigned int"
+    //!       ...
+    //!
+    //!   For scalar struct-like types:
+    //!   typeid(T).name()
+    //!       "Packet"
+    //!       "Inst"
+    //!       ...
+    //!
+    //!   For scalar string-like types (std::string, const char*):
+    //!       "string"
     CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
-                                                const std::string& type_name)
+                                                const std::string& encoded_scalar_type)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setScalarDataType(type_name);
+        entry_point->setScalarDataType(encoded_scalar_type);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return collectors_.back().get();
     }
 
+    //! TODO cnyce: Once the collection code from Sparta is merged into SimDB, change this
+    //! to a template method so we can figure out the encoded data type name ourselves.
+    //! Container types are encoded as follows:
+    //!
+    //!   <encoded_scalar_type>_<sparse/contig>_capacity<N>
+    //!       "Inst_sparse_capacity32"
+    //!       "bool_contig_capacity4"
+    //!       ...
     template <bool Sparse>
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
-                                                   size_t capacity, const std::string& type_name)
+                                                   size_t capacity, const std::string& encoded_scalar_type)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setContainerDataType(type_name, Sparse, capacity);
+        entry_point->setContainerDataType(encoded_scalar_type, Sparse, capacity);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return collectors_.back().get();
@@ -235,17 +270,11 @@ public:
             const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
             const auto clk_id = clk_ids.at(clk_name);
             const auto dtype_name = collector->getEncodedCollectedType();
-
-            if (dtype_name != "UNCOLLECTABLE")
-            {
-                ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
-            }
+            ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
         }
     }
 
-    void sendCollectedDataToPipeline() { pipeline_stager_->sendCollectedDataToPipeline(); }
-
-    void preTeardown() override { sendCollectedDataToPipeline(); }
+    void preTeardown() override { pipeline_stager_->sendCollectedDataToPipeline(); }
 
     void postTeardown() override
     {
@@ -253,11 +282,6 @@ public:
         {
             collector->writeMetaOnPostTeardown(db_mgr_);
         }
-        // TODO cnyce: looks like we are only writing TinyStringsIDs at the end.
-        // This needs to happen during sendCollectedDataToPipeline(). But it has
-        // to be async (collection data and TinyStrings to go with it should all
-        // end up in the ArgosCollector::Writer::run_() method together so we can
-        // guarantee readability of those collection blobs.
         resources_.writeMetaOnPostTeardown(db_mgr_);
     }
 
