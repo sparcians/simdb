@@ -293,8 +293,9 @@ template <bool Sparse> void TestInstQueueContainerCollection()
     argos_collector->setHeartbeat(3);
 
     constexpr size_t capacity = 8;
-    auto queue_collector =
-        argos_collector->createContainerCollector<Sparse>("top.instq", "root", capacity, "Instruction");
+    auto container_dtype = std::string("Instruction_") + (Sparse ? "sparse" : "contig") + std::string("_capacity") +
+                           std::to_string(capacity);
+    auto queue_collector = argos_collector->createContainerCollector("top.instq", "root", container_dtype);
 
     uint64_t tick = 0;
     argos_collector->timestampWith(&tick);

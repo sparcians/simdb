@@ -105,20 +105,18 @@ public:
 
     /// TODO cnyce: Remove this method when Sparta/SimDB is merged. We can figure
     /// this out using <T> only.
-    void setContainerDataType(const std::string& bin_dtype, bool sparse, size_t capacity)
+    void setContainerDataType(const std::string& encoded_container_type)
     {
         assert(collectable_type_name_.empty());
-        collectable_type_name_ = bin_dtype;
-        if (sparse)
+        collectable_type_name_ = encoded_container_type;
+        if (encoded_container_type.find("_sparse") != std::string::npos)
         {
-            collectable_type_name_ += "_sparse_capacity";
             is_sparse_container_ = true;
         } else
         {
-            collectable_type_name_ += "_contig_capacity";
+            assert(encoded_container_type.find("_contig") != std::string::npos);
             is_contig_container_ = true;
         }
-        collectable_type_name_ += std::to_string(capacity);
     }
 
     std::string getEncodedCollectedType() const

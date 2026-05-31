@@ -219,12 +219,11 @@ public:
     //!       "Inst_sparse_capacity32"
     //!       "bool_contig_capacity4"
     //!       ...
-    template <bool Sparse>
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
-                                                   size_t capacity, const std::string& encoded_scalar_type)
+                                                   const std::string& encoded_container_type)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setContainerDataType(encoded_scalar_type, Sparse, capacity);
+        entry_point->setContainerDataType(encoded_container_type);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
         return collectors_.back().get();
