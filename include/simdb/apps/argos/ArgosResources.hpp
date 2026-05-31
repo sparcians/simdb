@@ -390,8 +390,9 @@ public:
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
-        tiny_strings_resource_.serialize();
+        tiny_strings_resource_->serialize();
         enum_map_resource_.serializeEnumMaps(db_mgr);
+        stager_resource_->writeMetaOnPostTeardown(db_mgr);
     }
 
 private:

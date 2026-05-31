@@ -50,7 +50,10 @@ public:
         collectable_tns_tbl.addColumn("FullPath", dt::string_t);
         collectable_tns_tbl.addColumn("ClockID", dt::int32_t);
         collectable_tns_tbl.addColumn("TypeName", dt::string_t);
+        collectable_tns_tbl.addColumn("ShowInUI", dt::int32_t);
+        collectable_tns_tbl.setColumnDefaultValue("ShowInUI", 0);
         collectable_tns_tbl.ensureUnique("SerializationCID");
+        collectable_tns_tbl.createIndexOn("SerializationCID");
         collectable_tns_tbl.unsetPrimaryKey();
 
         // TODO cnyce: populate this table in SimDB (Sparta will handle it for now)

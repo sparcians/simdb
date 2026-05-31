@@ -120,6 +120,31 @@ public:
         dyn_field_head_->emplace(std::move(changes));
     }
 
+    void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
+    {
+        std::vector<uint16_t> valid_cids;
+        for (const auto& [cid, _] : last_sent_bytes_)
+        {
+            valid_cids.push_back(cid);
+        }
+
+        std::ostringstream oss;
+        oss << "UPDATE CollectableTreeNodes SET ShowInUI=1 WHERE SerializationCID IN (";
+
+        bool comma = false;
+        for (auto cid : valid_cids)
+        {
+            if (comma)
+            {
+                oss << ",";
+            }
+            oss << cid;
+            comma = true;
+        }
+        oss << ")";
+        db_mgr->EXECUTE(oss.str());
+    }
+
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
     static constexpr auto kActionBytes = sizeof(uint8_t);
