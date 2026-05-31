@@ -60,13 +60,19 @@ public:
         // TODO cnyce: populate this table in SimDB (Sparta will handle it for now)
         auto& dtype_nodes_tbl = schema.addTable("DataTypeNodes");
         dtype_nodes_tbl.addColumn("SchemaId", dt::int32_t);
-        dtype_nodes_tbl.addColumn("ParentId", dt::int32_t);
-        dtype_nodes_tbl.addColumn("Kind", dt::string_t);
         dtype_nodes_tbl.addColumn("Name", dt::string_t);
-        dtype_nodes_tbl.addColumn("Description", dt::string_t);
         dtype_nodes_tbl.addColumn("TypeName", dt::string_t);
-        dtype_nodes_tbl.addColumn("EnumBacking", dt::string_t);
         dtype_nodes_tbl.addColumn("FormatStr", dt::string_t);
+
+        auto& signed_enum_map_tbl = schema.addTable("SignedEnumMappings");
+        signed_enum_map_tbl.addColumn("EnumName", dt::string_t);
+        signed_enum_map_tbl.addColumn("EnumString", dt::string_t);
+        signed_enum_map_tbl.addColumn("EnumInt", dt::int64_t);
+
+        auto& unsigned_enum_map_tbl = schema.addTable("UnsignedEnumMappings");
+        unsigned_enum_map_tbl.addColumn("EnumName", dt::string_t);
+        unsigned_enum_map_tbl.addColumn("EnumString", dt::string_t);
+        unsigned_enum_map_tbl.addColumn("EnumInt", dt::uint64_t);
 
         auto& timestamps_tbl = schema.addTable("Timestamps");
         timestamps_tbl.addColumn("Timestamp", dt::uint64_t);
@@ -100,16 +106,6 @@ public:
         dyn_field_names_tbl.addColumn("SerializationCID", dt::int32_t);
         dyn_field_names_tbl.addColumn("FieldNames", dt::string_t);
         dyn_field_names_tbl.createIndexOn("SerializationCID");
-
-        auto& signed_enum_map_tbl = schema.addTable("SignedEnumMappings");
-        signed_enum_map_tbl.addColumn("EnumName", dt::string_t);
-        signed_enum_map_tbl.addColumn("EnumString", dt::string_t);
-        signed_enum_map_tbl.addColumn("EnumInt", dt::int64_t);
-
-        auto& unsigned_enum_map_tbl = schema.addTable("UnsignedEnumMappings");
-        unsigned_enum_map_tbl.addColumn("EnumName", dt::string_t);
-        unsigned_enum_map_tbl.addColumn("EnumString", dt::string_t);
-        unsigned_enum_map_tbl.addColumn("EnumInt", dt::uint64_t);
     }
 
     void setHeartbeat(size_t heartbeat)
