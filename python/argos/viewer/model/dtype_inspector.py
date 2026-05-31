@@ -1,6 +1,7 @@
 import sqlite3
 from typing import Dict, Iterator, List, Optional
 from viewer.model.tiny_strings import TinyStrings
+from viewer.model.data_deserializers import SimpleDeserializer
 
 class DataTypeInspector:
     class DataTypeNode:
@@ -94,42 +95,68 @@ class DataTypeInspector:
 
         cur.execute(
             """
-            SELECT Id, SchemaId, ParentId, Kind, Name, Description, TypeName, EnumBacking, FormatStr
+            SELECT Id, SchemaId, Name, TypeName, FormatStr
             FROM DataTypeNodes
             ORDER BY Id
             """
         )
         raw_rows = cur.fetchall()
 
-        enum_rows = {}  # type: Dict[int, List[tuple]]
-        #cur.execute(
-        #    "SELECT EnumNodeId, MemberName, MemberValue FROM DataTypeEnumMembers ORDER BY Id"
-        #)
-        #for enum_node_id, member_name, member_value in cur.fetchall():
-        #    eid = int(enum_node_id)
-        #    enum_rows.setdefault(eid, []).append((str(member_name), str(member_value)))
+        enum_defns = {}
+        cur.execute(
+            """
+            SELECT EnumName, EnumString, EnumInt
+            FROM SignedEnumMappings
+            """
+        )
+        signed_enum_rows = cur.fetchall()
+        for enum_name, enum_str, enum_int in signed_enum_rows:
+            if enum_name not in enum_defns:
+                enum_defns[enum_name] = {}
+            enum_defns[enum_name][enum_str] = enum_int
+
+        cur.execute(
+            """
+            SELECT EnumName, EnumString, EnumInt
+            FROM UnsignedEnumMappings
+            """
+        )
+        unsigned_enum_rows = cur.fetchall()
+        for enum_name, enum_str, enum_int in unsigned_enum_rows:
+            if enum_name not in enum_defns:
+                enum_defns[enum_name] = {}
+            enum_defns[enum_name][enum_str] = int(enum_int)
 
         self._nodes_by_id.clear()
         self._top_by_schema = {sid: [] for sid in self._schemas}
 
         for row in raw_rows:
-            nid, sid, parent_id, kind, name, desc, type_name, enum_back, special_formatter = row
+            nid, sid, name, type_name, special_formatter = row
+            enum_back = ""
+            if type_name in SimpleDeserializer.CONVERTERS:
+                kind = "pod"
+            elif type_name == "string":
+                kind = "pod"
+            elif type_name != "dynamic":
+                kind = "enum"
+                assert type_name in enum_defns
+                enum_back = "long" if type_name in signed_enum_rows else "unsigned long"
+
             node = DataTypeInspector.DataTypeNode(
-                int(nid),
-                int(sid),
-                int(parent_id) if parent_id is not None else None,
-                str(kind),
-                str(name) if name is not None else "",
-                str(desc) if desc is not None else "",
-                str(type_name) if type_name is not None else "",
-                str(enum_back) if enum_back is not None else "",
-                str(special_formatter) if special_formatter is not None else "",
-                "",
-            )
+                nid,
+                sid,
+                None,
+                kind,
+                name,
+                None,
+                type_name,
+                enum_back,
+                special_formatter,
+                "")
+
             self._nodes_by_id[node.node_id] = node
-            if kind == "enum" and node.node_id in enum_rows:
-                for mname, mval in enum_rows[node.node_id]:
-                    node.enum_members[mname] = self._parse_enum_value(mval)
+            if kind == "enum":
+                node.enum_members = enum_defns[type_name]
 
         for node in self._nodes_by_id.values():
             pid = node.parent_id
@@ -167,14 +194,6 @@ class DataTypeInspector:
             )
             view.children = list(self._top_by_schema.get(sid, []))
             self._root_views.append(view)
-
-    @staticmethod
-    def _parse_enum_value(raw):
-        # type: (str) -> int
-        raw = raw.strip()
-        if raw.startswith("0x") or raw.startswith("0X"):
-            return int(raw, 16)
-        return int(raw, 0)
 
     def _iter_nodes(self):
         # type: () -> Iterator[DataTypeInspector.DataTypeNode]
