@@ -39,8 +39,10 @@ public:
     {
         if (temp_resource_stager)
         {
-            collectable_dtypes_ = temp_resource_stager->collectable_dtypes_;
-            known_enums_ = temp_resource_stager->known_enums_;
+            fixed_dtype_sizes_ = temp_resource_stager->fixed_dtype_sizes_;
+            fixed_size_cids_ = temp_resource_stager->fixed_size_cids_;
+            sparse_bin_dtypes_ = temp_resource_stager->sparse_bin_dtypes_;
+            contig_bin_dtypes_ = temp_resource_stager->contig_bin_dtypes_;
         }
     }
 
@@ -139,29 +141,30 @@ public:
 
     void onPostInit(DatabaseManager* db_mgr)
     {
+        // TODO cnyce: Remove this workaround when Sparta/SimDB collection-related
+        // stuff gets merged together.
+        if (db_mgr->createQuery("DataTypeSchemas")->count() == 0)
+        {
+            perform_stage_validation_ = false;
+            return;
+        }
+
+        // clang-format off
         fixed_dtype_sizes_ = {
-            {demangle_type<bool>(), sizeof(uint8_t)},      {demangle_type<int8_t>(), sizeof(int8_t)},
-            {demangle_type<int16_t>(), sizeof(int16_t)},   {demangle_type<int32_t>(), sizeof(int32_t)},
-            {demangle_type<int64_t>(), sizeof(int64_t)},   {demangle_type<uint8_t>(), sizeof(uint8_t)},
-            {demangle_type<uint16_t>(), sizeof(uint16_t)}, {demangle_type<uint32_t>(), sizeof(uint32_t)},
-            {demangle_type<uint64_t>(), sizeof(uint64_t)}, {demangle_type<float>(), sizeof(float)},
-            {demangle_type<double>(), sizeof(double)},     {"string", sizeof(uint32_t)},
+            {demangle_type<bool>(),     sizeof(uint8_t) },
+            {demangle_type<int8_t>(),   sizeof(int8_t)  },
+            {demangle_type<int16_t>(),  sizeof(int16_t) },
+            {demangle_type<int32_t>(),  sizeof(int32_t) },
+            {demangle_type<int64_t>(),  sizeof(int64_t) },
+            {demangle_type<uint8_t>(),  sizeof(uint8_t) },
+            {demangle_type<uint16_t>(), sizeof(uint16_t)},
+            {demangle_type<uint32_t>(), sizeof(uint32_t)},
+            {demangle_type<uint64_t>(), sizeof(uint64_t)},
+            {demangle_type<float>(),    sizeof(float)   },
+            {demangle_type<double>(),   sizeof(double)  },
+            {"string",                  sizeof(uint32_t)},
         };
-
-        auto append_enums = [&](const char* table, size_t underlying_size) {
-            auto query = db_mgr->createQuery(table);
-
-            std::string enum_name;
-            query->select("DISTINCT(EnumName)", enum_name);
-
-            auto results = query->getResultSet();
-            while (results.getNextRecord())
-            {
-                fixed_dtype_sizes_[enum_name] = underlying_size;
-            }
-        };
-        append_enums("SignedEnumMappings", sizeof(int64_t));
-        append_enums("UnsignedEnumMappings", sizeof(uint64_t));
+        // clang-format on
 
         auto append_struct_size = [&](const std::string& root_dtype, int schema_id) {
             auto query = db_mgr->createQuery("DataTypeNodes");
@@ -174,7 +177,16 @@ public:
             auto results = query->getResultSet();
             while (results.getNextRecord())
             {
-                struct_size += fixed_dtype_sizes_.at(field_dtype);
+                if (auto it = fixed_dtype_sizes_.find(field_dtype); it != fixed_dtype_sizes_.end())
+                {
+                    struct_size += it->second;
+                } else if (known_enums_.find(field_dtype) != known_enums_.end())
+                {
+                    struct_size += sizeof(uint64_t);
+                } else
+                {
+                    throw DBException("Unrecognized field data type: ") << field_dtype;
+                }
             }
 
             fixed_dtype_sizes_[root_dtype] = struct_size;
@@ -288,6 +300,11 @@ private:
 
     void validateOnStage_(const CollectedData& data)
     {
+        if (!perform_stage_validation_)
+        {
+            return;
+        }
+
         auto cid = data.getCID();
         assert(cid != 0);
 
@@ -297,7 +314,7 @@ private:
             // uint8_t comes next (Minifier action)
             // data bytes come last
             const auto& buf = data.getData();
-            const auto action = *reinterpret_cast<const uint8_t*>(buf.at(sizeof(uint16_t)));
+            const auto action = *reinterpret_cast<const uint8_t*>(buf.data() + sizeof(uint16_t));
             if (action != FULL_ACTION_FLAG)
             {
                 throw DBException("Expected FULL action for CID ") << cid << " (minifiers are disabled)";
@@ -312,13 +329,13 @@ private:
         } else if (auto it = contig_bin_dtypes_.find(cid); it != contig_bin_dtypes_.end())
         {
             const auto& buf = data.getData();
-            const auto action = *reinterpret_cast<const uint8_t*>(buf.at(sizeof(uint16_t)));
+            const auto action = *reinterpret_cast<const uint8_t*>(buf.data() + sizeof(uint16_t));
             if (action != FULL_ACTION_FLAG)
             {
                 throw DBException("Expected FULL action for CID ") << cid << " (minifiers are disabled)";
             }
 
-            const auto num_bins = *reinterpret_cast<const uint16_t*>(buf.at(sizeof(uint16_t) + sizeof(uint8_t)));
+            const auto num_bins = *reinterpret_cast<const uint16_t*>(buf.data() + sizeof(uint16_t) + sizeof(uint8_t));
             const auto expect_size = sizeof(uint16_t) + sizeof(uint8_t) + num_bins * fixed_dtype_sizes_.at(it->second);
             const auto actual_size = data.getData().size();
             if (expect_size != actual_size)
@@ -328,13 +345,13 @@ private:
         } else if (auto it = sparse_bin_dtypes_.find(cid); it != sparse_bin_dtypes_.end())
         {
             const auto& buf = data.getData();
-            const auto action = *reinterpret_cast<const uint8_t*>(buf.at(sizeof(uint16_t)));
+            const auto action = *reinterpret_cast<const uint8_t*>(buf.data() + sizeof(uint16_t));
             if (action != FULL_ACTION_FLAG)
             {
                 throw DBException("Expected FULL action for CID ") << cid << " (minifiers are disabled)";
             }
 
-            const auto num_bins = *reinterpret_cast<const uint16_t*>(buf.at(sizeof(uint16_t) + sizeof(uint8_t)));
+            const auto num_bins = *reinterpret_cast<const uint16_t*>(buf.data() + sizeof(uint16_t) + sizeof(uint8_t));
             const auto expect_size =
                 sizeof(uint16_t) + sizeof(uint8_t) + num_bins * (sizeof(uint16_t) + fixed_dtype_sizes_.at(it->second));
             const auto actual_size = data.getData().size();
@@ -557,6 +574,7 @@ private:
     std::map<uint16_t, size_t> fixed_size_cids_;
     std::map<uint16_t, std::string> sparse_bin_dtypes_;
     std::map<uint16_t, std::string> contig_bin_dtypes_;
+    bool perform_stage_validation_ = true;
 
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
