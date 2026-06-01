@@ -293,8 +293,6 @@ public:
         resources_.writeMetaOnPostTeardown(db_mgr_);
     }
 
-    DatabaseManager* getDatabaseManager() const { return db_mgr_; }
-
 private:
     class Compressor : public pipeline::Stage
     {
