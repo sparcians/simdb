@@ -135,13 +135,6 @@ def CreateDeserializer(inspector, dtype_name, tiny_strings=None):
     if dtype_name == 'string':
         return StringDeserializer(tiny_strings)
 
-    # Enum types
-    enum_map = inspector.GetEnumMap(dtype_name)
-    if enum_map:
-        backing_kind = inspector.GetEnumBackingKind(dtype_name)
-        val_deserializer = SimpleDeserializer(backing_kind, "")
-        return EnumDeserializer(val_deserializer, enum_map)
-
     # Container types
     container_meta = GetContainerMeta(dtype_name)
     if container_meta:
@@ -154,10 +147,18 @@ def CreateDeserializer(inspector, dtype_name, tiny_strings=None):
 
     # Struct types
     struct_defn = inspector.GetStructDefn(dtype_name)
-    if struct_defn is None:
-        raise Exception(f'Unable to create deserializer for data type: {dtype_name}')
+    if struct_defn is not None:
+        return StructDeserializer(dtype_name, struct_defn, inspector, tiny_strings)
 
-    return StructDeserializer(dtype_name, struct_defn, inspector, tiny_strings)
+    # Enum types
+    enum_map = inspector.GetEnumMap(dtype_name)
+    if enum_map:
+        backing_kind = inspector.GetEnumBackingKind(dtype_name)
+        if backing_kind in ('long', 'unsigned long'):
+            val_deserializer = SimpleDeserializer(backing_kind, "")
+            return EnumDeserializer(val_deserializer, enum_map)
+
+    return None
 
 # This class deserializes non-enum POD types.
 class SimpleDeserializer:

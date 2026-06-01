@@ -283,7 +283,7 @@ class SchedulingLinesWidget(wx.Panel):
         # Use a DC to get the length of the longest col label
         dc = wx.ScreenDC()
         dc.SetFont(self.grid.GetLabelFont())
-        max_col_label_len = max([dc.GetTextExtent(col_label)[0] for col_label in col_labels])
+        max_col_label_len = max([dc.GetTextExtent(col_label)[0] for col_label in col_labels]) if col_labels else 0
         self.grid.SetColLabelSize(max_col_label_len + 4)
 
         self.grid.SetColLabelValue(0, '')
@@ -1157,6 +1157,9 @@ class Rasterizer:
         self.detailed_pkt_col = detailed_pkt_col
 
     def Draw(self, elem_path, bin_idx, time_val, annos):
+        if not annos:
+            return
+
         assert elem_path == self.elem_path
         assert bin_idx == self.bin_idx
 

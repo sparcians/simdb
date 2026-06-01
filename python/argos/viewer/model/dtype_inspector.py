@@ -103,6 +103,8 @@ class DataTypeInspector:
         raw_rows = cur.fetchall()
 
         enum_defns = {}
+        enum_backings = {}
+
         cur.execute(
             """
             SELECT EnumName, EnumString, EnumInt
@@ -114,6 +116,7 @@ class DataTypeInspector:
             if enum_name not in enum_defns:
                 enum_defns[enum_name] = {}
             enum_defns[enum_name][enum_str] = enum_int
+            enum_backings[enum_name] = "long"
 
         cur.execute(
             """
@@ -126,21 +129,28 @@ class DataTypeInspector:
             if enum_name not in enum_defns:
                 enum_defns[enum_name] = {}
             enum_defns[enum_name][enum_str] = int(enum_int)
+            enum_backings[enum_name] = "unsigned long"
 
         self._nodes_by_id.clear()
         self._top_by_schema = {sid: [] for sid in self._schemas}
 
         for row in raw_rows:
             nid, sid, name, type_name, special_formatter = row
-            enum_back = ""
+            enum_back = None
             if type_name in SimpleDeserializer.CONVERTERS:
                 kind = "pod"
             elif type_name == "string":
                 kind = "pod"
             elif type_name != "dynamic":
                 kind = "enum"
-                assert type_name in enum_defns
-                enum_back = "long" if type_name in signed_enum_rows else "unsigned long"
+                if type_name not in enum_defns:
+                    # All this means is that we never ended up collecting
+                    # anything that uses this enum. All of the enum int:str
+                    # mappings are figured out only when first seen during
+                    # collection.
+                    enum_defns[type_name] = {}
+                else:
+                    enum_back = enum_backings[type_name]
 
             node = DataTypeInspector.DataTypeNode(
                 nid,
@@ -268,8 +278,5 @@ class DataTypeInspector:
         if deserializer:
             self._deserializers_by_typename[dtype_name] = deserializer
             return deserializer
-
-        if expect_exists:
-            raise Exception(f'Unable to create deserializer for data type: {dtype_name}')
 
         return None

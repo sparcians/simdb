@@ -7,7 +7,20 @@ class SimHierarchy:
         metas_by_path = {}
 
         cursor = db.cursor()
-        cursor.execute('SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes')
+
+        # ShowInUI=1
+        #    --> This means that we only show collectables that were actually collected.
+        #        The database has all the metadata to add everything to the NavTree,
+        #        but without any collected data it just looks cluttered.
+        #
+        # TypeName LIKE ?
+        #    --> We don't have good widgets for non-iterables. This constraint just
+        #        shows queues for the queue table widget and scheduling lines tool.
+        cursor.execute(
+            "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes "
+            "WHERE ShowInUI=1 AND (TypeName LIKE ? OR TypeName LIKE ?)",
+            ('%_sparse_capacity%', '%_contig_capacity%'),
+        )
         rows = [(r[0], r[1], r[2], r[3]) for r in cursor.fetchall()]
 
         for full_path, cid, clk_id, type_name in rows:
