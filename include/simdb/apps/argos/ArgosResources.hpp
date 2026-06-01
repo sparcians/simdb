@@ -134,10 +134,8 @@ private:
             auto pipeline_head = pipeline_->getInPortQueue<QueueCollectionData>("compressor.input_queue");
             auto notif_head = pipeline_->getInPortQueue<Notification>("writer.notif_queue");
             auto dyn_field_head = pipeline_->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-            auto temp_stager = stager_.get();
-            auto live_stager = std::make_shared<PipelineStager>(heartbeat_, timestamp_, pipeline_head, notif_head,
-                                                                dyn_field_head, temp_stager);
-            stager_ = std::move(live_stager);
+            stager_ =
+                std::make_shared<PipelineStager>(heartbeat_, timestamp_, pipeline_head, notif_head, dyn_field_head);
 
             // Flush pending notifications. There are use cases where we might
             // need to send warnings/errors to Argos before e.g. the pipeline
@@ -323,8 +321,6 @@ public:
         }
     }
 
-    EnumMapResource* operator->() { return this; }
-
 private:
     std::unordered_map<std::string, std::unique_ptr<EnumMapBase>> enum_maps_;
 };
@@ -390,9 +386,7 @@ public:
 
     CollectedDataResource& getCollectedDataBuffersResource() { return collected_data_bufs_resource_; }
 
-    EnumMapResource& getEnumMapResource() { return enum_map_resource_; }
-
-    void onPostInit(DatabaseManager* db_mgr) { stager_resource_->onPostInit(db_mgr); }
+    EnumMapResource* getEnumMapResource() { return &enum_map_resource_; }
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
