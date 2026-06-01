@@ -360,10 +360,12 @@ class SchedulingLinesWidget(wx.Panel):
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
             elem_captions = self.__GetCaptionsForElement(elem_path)
             for caption in elem_captions:
-                match = re.match(r'(.+)\[(\d+)\]', caption)
+                match = re.match(r'(.+)\[(\d+)(?:-(\d+))?\]', caption)
                 assert match
-                bin_idx = match.group(2)
-                tooltip = elem_path + '[' + bin_idx + ']'
+                bracket = match.group(2)
+                if match.group(3) is not None:
+                    bracket += '-' + match.group(3)
+                tooltip = elem_path + '[' + bracket + ']'
 
                 captions.append(caption)
                 self.grid.SetCellToolTip(row, col, tooltip)
@@ -464,7 +466,13 @@ class SchedulingLinesWidget(wx.Panel):
 
         # Extract the bin index from the caption
         match = re.match(r'(.+)\[(\d+)\]', caption)
-        assert match
+
+        # Don't do anything when we right-click on a cell for e.g. InstQueue[29-31]
+        # as those are just "filler" rows to indicate the full queue capacity (32).
+        # There is no data here, so there is no tooltip.
+        if not match:
+            return
+
         bin_idx = match.group(2)
 
         # Remove the [bin_idx] suffix from elem_path
