@@ -270,6 +270,16 @@ public:
             const auto dtype_name = collector->getEncodedCollectedType();
             ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
         }
+
+        auto& stager = resources_.getStagerResource();
+        for (const auto& collector : collectors_)
+        {
+            const auto cid = collector->getID();
+            const auto dtype_name = collector->getEncodedCollectedType();
+            stager->setEncodedCollectedType(cid, dtype_name);
+        }
+
+        resources_.onPostInit(db_mgr_);
     }
 
     void preTeardown() override { pipeline_stager_->sendCollectedDataToPipeline(); }

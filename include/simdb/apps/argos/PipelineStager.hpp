@@ -29,19 +29,28 @@ class PipelineStager
 {
 public:
     PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
-                   ConcurrentQueue<Notification>* notif_head, ConcurrentQueue<DynamicFieldChanges>* dyn_field_head) :
+                   ConcurrentQueue<Notification>* notif_head, ConcurrentQueue<DynamicFieldChanges>* dyn_field_head,
+                   PipelineStager* temp_resource_stager = nullptr) :
         heartbeat_(heartbeat),
         timestamp_(timestamp),
         pipeline_head_(pipeline_head),
         notif_head_(notif_head),
         dyn_field_head_(dyn_field_head)
     {
+        if (temp_resource_stager)
+        {
+            collectable_dtypes_ = temp_resource_stager->collectable_dtypes_;
+        }
     }
+
+    void setEncodedCollectedType(uint16_t cid, const std::string& dtype_name) { collectable_dtypes_[cid] = dtype_name; }
 
     void stage(const CollectedData& data)
     {
         auto cid = data.getCID();
         assert(cid != 0);
+        validateOnStage_(data);
+
         enabled_cids_.insert(cid);
         refreshable_cids_.insert(cid);
 
@@ -120,6 +129,82 @@ public:
         dyn_field_head_->emplace(std::move(changes));
     }
 
+    void onPostInit(DatabaseManager* db_mgr)
+    {
+        fixed_dtype_sizes_ = {
+            {demangle_type<bool>(), sizeof(uint8_t)},      {demangle_type<int8_t>(), sizeof(int8_t)},
+            {demangle_type<int16_t>(), sizeof(int16_t)},   {demangle_type<int32_t>(), sizeof(int32_t)},
+            {demangle_type<int64_t>(), sizeof(int64_t)},   {demangle_type<uint8_t>(), sizeof(uint8_t)},
+            {demangle_type<uint16_t>(), sizeof(uint16_t)}, {demangle_type<uint32_t>(), sizeof(uint32_t)},
+            {demangle_type<uint64_t>(), sizeof(uint64_t)}, {demangle_type<float>(), sizeof(float)},
+            {demangle_type<double>(), sizeof(double)},     {"string", sizeof(uint32_t)},
+        };
+
+        auto append_enums = [&](const char* table, size_t underlying_size) {
+            auto query = db_mgr->createQuery(table);
+
+            std::string enum_name;
+            query->select("DISTINCT(EnumName)", enum_name);
+
+            auto results = query->getResultSet();
+            while (results.getNextRecord())
+            {
+                fixed_dtype_sizes_[enum_name] = underlying_size;
+            }
+        };
+        append_enums("SignedEnumMappings", sizeof(int64_t));
+        append_enums("UnsignedEnumMappings", sizeof(uint64_t));
+
+        auto append_struct_size = [&](const std::string& root_dtype, int schema_id) {
+            auto query = db_mgr->createQuery("DataTypeNodes");
+            query->addConstraintForInt("SchemaId", Constraints::EQUAL, schema_id);
+
+            std::string field_dtype;
+            query->select("TypeName", field_dtype);
+
+            size_t struct_size = 0;
+            auto results = query->getResultSet();
+            while (results.getNextRecord())
+            {
+                struct_size += fixed_dtype_sizes_.at(field_dtype);
+            }
+
+            fixed_dtype_sizes_[root_dtype] = struct_size;
+        };
+
+        auto append_struct_sizes = [&]() {
+            auto query = db_mgr->createQuery("DataTypeSchemas");
+
+            int schema_id;
+            query->select("Id", schema_id);
+
+            std::string root_dtype;
+            query->select("RootTypeName", root_dtype);
+
+            auto results = query->getResultSet();
+            while (results.getNextRecord())
+            {
+                append_struct_size(root_dtype, schema_id);
+            }
+        };
+
+        append_struct_sizes();
+
+        for (const auto& [cid, dtype_name] : collectable_dtypes_)
+        {
+            if (auto it = fixed_dtype_sizes_.find(dtype_name); it != fixed_dtype_sizes_.end())
+            {
+                fixed_size_cids_[cid] = it->second;
+            } else if (auto idx = dtype_name.find("_sparse_capacity"); idx != std::string::npos)
+            {
+                sparse_bin_dtypes_[cid] = dtype_name.substr(0, idx);
+            } else if (auto idx = dtype_name.find("_contig_capacity"); idx != std::string::npos)
+            {
+                contig_bin_dtypes_[cid] = dtype_name.substr(0, idx);
+            }
+        }
+    }
+
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
         std::vector<uint16_t> valid_cids;
@@ -191,6 +276,65 @@ private:
         }
 
         collection_data.collection_data.emplace_back(std::move(lifecycle));
+    }
+
+    void validateOnStage_(const CollectedData& data)
+    {
+        auto cid = data.getCID();
+        assert(cid != 0);
+
+        if (auto it = fixed_size_cids_.find(cid); it != fixed_size_cids_.end())
+        {
+            // uint16_t comes first (CID)
+            // uint8_t comes next (Minifier action)
+            // data bytes come last
+            const auto& buf = data.getData();
+            const auto action = *reinterpret_cast<const uint8_t*>(buf.at(sizeof(uint16_t)));
+            if (action != FULL_ACTION_FLAG)
+            {
+                throw DBException("Expected FULL action for CID ") << cid << " (minifiers are disabled)";
+            }
+
+            const auto expect_size = sizeof(uint16_t) + sizeof(uint8_t) + it->second;
+            const auto actual_size = data.getData().size();
+            if (expect_size != actual_size)
+            {
+                throw DBException("Invalid data seen at time ") << timestamp_->getTime() << " for CID " << cid;
+            }
+        } else if (auto it = contig_bin_dtypes_.find(cid); it != contig_bin_dtypes_.end())
+        {
+            const auto& buf = data.getData();
+            const auto action = *reinterpret_cast<const uint8_t*>(buf.at(sizeof(uint16_t)));
+            if (action != FULL_ACTION_FLAG)
+            {
+                throw DBException("Expected FULL action for CID ") << cid << " (minifiers are disabled)";
+            }
+
+            const auto num_bins = *reinterpret_cast<const uint16_t*>(buf.at(sizeof(uint16_t) + sizeof(uint8_t)));
+            const auto expect_size = sizeof(uint16_t) + sizeof(uint8_t) + num_bins * fixed_dtype_sizes_.at(it->second);
+            const auto actual_size = data.getData().size();
+            if (expect_size != actual_size)
+            {
+                throw DBException("Invalid data seen at time ") << timestamp_->getTime() << " for CID " << cid;
+            }
+        } else if (auto it = sparse_bin_dtypes_.find(cid); it != sparse_bin_dtypes_.end())
+        {
+            const auto& buf = data.getData();
+            const auto action = *reinterpret_cast<const uint8_t*>(buf.at(sizeof(uint16_t)));
+            if (action != FULL_ACTION_FLAG)
+            {
+                throw DBException("Expected FULL action for CID ") << cid << " (minifiers are disabled)";
+            }
+
+            const auto num_bins = *reinterpret_cast<const uint16_t*>(buf.at(sizeof(uint16_t) + sizeof(uint8_t)));
+            const auto expect_size =
+                sizeof(uint16_t) + sizeof(uint8_t) + num_bins * (sizeof(uint16_t) + fixed_dtype_sizes_.at(it->second));
+            const auto actual_size = data.getData().size();
+            if (expect_size != actual_size)
+            {
+                throw DBException("Invalid data seen at time ") << timestamp_->getTime() << " for CID " << cid;
+            }
+        }
     }
 
     bool advanceStageTime_()
@@ -390,12 +534,21 @@ private:
 
     const size_t heartbeat_;
     Timestamp* const timestamp_;
+
     ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
     ConcurrentQueue<Notification>* const notif_head_;
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
+
     std::queue<QueueCollectionData> waiting_queue_;
     ValidValue<uint64_t> last_stage_time_;
     bool auto_send_when_time_advances_ = true;
+
+    std::map<uint16_t, std::string> collectable_dtypes_;
+    std::map<std::string, size_t> fixed_dtype_sizes_;
+    std::map<uint16_t, size_t> fixed_size_cids_;
+    std::map<uint16_t, std::string> sparse_bin_dtypes_;
+    std::map<uint16_t, std::string> contig_bin_dtypes_;
+
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;
