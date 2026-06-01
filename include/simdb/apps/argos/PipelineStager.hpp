@@ -40,18 +40,10 @@ public:
         if (temp_resource_stager)
         {
             collectable_dtypes_ = temp_resource_stager->collectable_dtypes_;
-            known_enums_ = temp_resource_stager->known_enums_;
         }
     }
 
     void setEncodedCollectedType(uint16_t cid, const std::string& dtype_name) { collectable_dtypes_[cid] = dtype_name; }
-
-    template <typename E> void addKnownEnumType()
-    {
-        static_assert(std::is_enum_v<E>);
-        auto enum_name = demangle_type<E>();
-        known_enums_.insert(enum_name);
-    }
 
     void stage(const CollectedData& data)
     {
@@ -551,7 +543,6 @@ private:
     ValidValue<uint64_t> last_stage_time_;
     bool auto_send_when_time_advances_ = true;
 
-    std::unordered_set<std::string> known_enums_;
     std::map<uint16_t, std::string> collectable_dtypes_;
     std::map<std::string, size_t> fixed_dtype_sizes_;
     std::map<uint16_t, size_t> fixed_size_cids_;
