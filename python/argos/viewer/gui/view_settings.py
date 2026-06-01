@@ -46,6 +46,7 @@ class ViewSettings:
         self._frame = None
         self._dirty = False
         self._dirty_reasons = set()
+        self._last_known_view = os.path.expanduser('~/.argos/last_known_view.avf')
 
     @property
     def view_file(self):
@@ -77,12 +78,15 @@ class ViewSettings:
         self._frame = frame
         if view_file:
             self.Load(view_file)
+        elif os.path.exists(self._last_known_view):
+            self.Load(self._last_known_view, set_as_current=False)
+        else:
+            self.__ResetDefaultViewSettings()
 
-        self.__ResetDefaultViewSettings()
         self.__ApplyUserSettings()
         self.SetDirty(False)
     
-    def Load(self, view_file):
+    def Load(self, view_file, set_as_current=True):
         if not os.path.isfile(view_file):
             msg = f"View file '{view_file}' does not exist"
             dlg = wx.MessageDialog(None, msg, 'Error', wx.OK | wx.ICON_ERROR)
@@ -100,7 +104,8 @@ class ViewSettings:
             self._frame.widget_renderer.ApplyViewSettings(settings['WidgetRenderer'])
 
         self._frame.inspector.RefreshWidgetsOnAllTabs()
-        self.view_file = view_file
+        if set_as_current:
+            self.view_file = view_file
         self.SetDirty(False)
 
     def CreateNewView(self):
@@ -185,8 +190,7 @@ class ViewSettings:
             wx.BeginBusyCursor()
             wx.CallAfter(DoLoad, self, view_file)
 
-    # Note that this method returns True if Argos can be closed after calling this method.
-    def SaveView(self, prompt_if_dirty=True, on_frame_closing=False):
+    def SaveView(self, prompt_if_dirty=True):
         self.__SaveUserSettings()
 
         if not self._dirty:
@@ -228,6 +232,37 @@ class ViewSettings:
         if result == wx.ID_NO:
             return True
 
+        self.__WriteViewSettings(view_file)
+        self.view_file = view_file
+        self.SetDirty(False)
+        return True
+
+    def OnFrameClosing(self):
+        # Returns True if Argos can be closed after calling this method.
+        self.__SaveUserSettings()
+
+        if self.view_file is None:
+            # Common case: no named AVF in use. Snapshot the current view so the
+            # next launch (without --view-file) reloads where the user left off.
+            self.__WriteViewSettings(self._last_known_view)
+            return True
+
+        # A named AVF is in use. Offer to save changes back to it, then drop any
+        # last_known_view so it does not shadow the named view on the next launch.
+        if self._dirty:
+            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(self.view_file))
+            if result == wx.ID_CANCEL:
+                return False
+
+            if result == wx.ID_YES:
+                self.SaveView(prompt_if_dirty=False)
+
+        if os.path.exists(self._last_known_view):
+            os.remove(self._last_known_view)
+
+        return True
+
+    def __WriteViewSettings(self, view_file):
         settings = {
             'NavTree': self._frame.explorer.navtree.GetCurrentViewSettings(),
             'Watchlist': self._frame.explorer.watchlist.GetCurrentViewSettings(),
@@ -237,12 +272,12 @@ class ViewSettings:
             'WidgetRenderer': self._frame.widget_renderer.GetCurrentViewSettings()
         }
 
+        settings_dir = os.path.dirname(view_file)
+        if settings_dir and not os.path.exists(settings_dir):
+            os.makedirs(settings_dir)
+
         with open(view_file, 'w') as fout:
             yaml.dump(settings, fout)
-
-        self.view_file = view_file
-        self.SetDirty(False)
-        return True
 
     def __UpdateTitle(self):
         if self._frame is None:
