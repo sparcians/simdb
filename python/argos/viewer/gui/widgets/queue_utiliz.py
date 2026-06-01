@@ -16,7 +16,7 @@ class QueueUtilizWidget(wx.Panel):
         # Note that we do not add the button to the sizer since we want to
         # force it to be in the top-left corner of the widget canvas. We do
         # this with the 'pos' argument to the wx.BitmapButton constructor.
-        gear_btn = wx.BitmapButton(self, bitmap=frame.CreateResourceBitmap('gear.png'), pos=(5,5))
+        gear_btn = frame.CreateSettingsButton(self)
         gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
         gear_btn.SetToolTip('Edit widget settings')
 

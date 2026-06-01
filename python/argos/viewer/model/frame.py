@@ -69,6 +69,9 @@ class ArgosFrame(wx.Frame):
         bitmap = bitmap.ConvertToImage().Rescale(w,h).ConvertToBitmap()
         return bitmap
 
+    def CreateSettingsButton(self, parent, size=(36,22), pos=(5,10)):
+        return wx.Button(parent, label="...", size=size, pos=pos)
+
     def __OnNewView(self, event):
         self.view_settings.CreateNewView()
 

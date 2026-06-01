@@ -73,7 +73,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.__Refresh()
 
         if not self.gear_btn:
-            self.gear_btn = wx.BitmapButton(self, bitmap=self.frame.CreateResourceBitmap('gear.png'), pos=(5,5))
+            self.gear_btn = self.frame.CreateSettingsButton(self)
             self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
             self.gear_btn.SetToolTip('Edit widget settings')
 
@@ -167,7 +167,7 @@ class SchedulingLinesWidget(wx.Panel):
             self.__RasterizeAllCells()
 
             if not self.gear_btn:
-                self.gear_btn = wx.BitmapButton(self, bitmap=self.frame.CreateResourceBitmap('gear.png'), pos=(5,5))
+                self.gear_btn = self.frame.CreateSettingsButton(self)
                 self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
                 self.gear_btn.SetToolTip('Edit widget settings')
         else:
@@ -265,8 +265,9 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
-        self.gear_btn = wx.BitmapButton(self, bitmap=self.frame.CreateResourceBitmap('gear.png'), pos=(5,5))
+        self.gear_btn = self.frame.CreateSettingsButton(self)
         self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
+        self.gear_btn.SetToolTip('Edit widget settings')
 
         current_tick = self.frame.widget_renderer.tick
         col_labels = []
