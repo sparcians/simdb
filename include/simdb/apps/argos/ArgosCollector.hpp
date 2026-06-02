@@ -363,7 +363,6 @@ private:
                 const auto cid = notification.cid;
                 const auto& notif_str = notification.notif;
                 const auto notif_type = notification.type;
-                assert(cid > 0);
 
                 inserter->setColumnValue(0, (int)cid);
                 inserter->setColumnValue(1, notif_str);
@@ -383,7 +382,7 @@ private:
                 const auto& field_types = dyn_field_changes.field_types;
                 assert(field_names.size() == field_types.size());
                 assert(!field_names.empty());
-                assert(cid > 0);
+                assert(cid != 0);
 
                 if (serialized_dyn_field_cids_.insert(cid).second)
                 {
