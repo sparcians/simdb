@@ -217,10 +217,15 @@ class BlobIterator:
     def __init__(self, dtype_inspector, simhier):
         self._dtype_inspector = dtype_inspector
         self._simhier = simhier
+        self._final_tick = None
 
     @property
     def connection(self):
         return self._dtype_inspector.connection
+
+    def GetFinalTick(self):
+        assert self._final_tick is not None, 'Iterate() never called'
+        return self._final_tick
 
     def Iterate(self, handler: BlobHandler, time_range: Any = None):
         cursor = self.connection.cursor()
@@ -268,6 +273,8 @@ class BlobIterator:
             handler_func = HandleCID
             while handler_func:
                 handler_func = handler_func(resources, context)
+
+        self._final_tick = context.current_tick
 
 def main():
     from viewer.model.dtype_inspector import DataTypeInspector

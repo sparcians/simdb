@@ -314,6 +314,10 @@ class SchedulingLinesWidget(wx.Panel):
             start_time = self.frame.widget_renderer.tick - self.num_ticks_before
             end_time = self.frame.widget_renderer.tick + self.num_ticks_after
 
+            # TODO XXX: We need to track values over time in the data extraction handler
+            # as opposed to just holding onto the last value
+            assert False
+
             vals = self.frame.data_retriever.Unpack(elem_path, (start_time, end_time))
             time_vals = vals['TimeVals']
             data_vals = vals['DataVals']

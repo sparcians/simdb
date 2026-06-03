@@ -63,7 +63,7 @@ class IterableStruct(wx.Panel):
 
         widget_renderer = self.frame.widget_renderer
         tick = widget_renderer.tick
-        queue_data = self.frame.data_retriever.Unpack(self.elem_path, (tick,tick))
+        queue_data = self.frame.data_retriever.Unpack(self.elem_path, tick)
 
         auto_colorize_col = self.frame.data_retriever.GetAutoColorizeColumn(self.elem_path)
         auto_colorize_col_idx = self.visible_field_names.index(auto_colorize_col) if auto_colorize_col in self.visible_field_names else None

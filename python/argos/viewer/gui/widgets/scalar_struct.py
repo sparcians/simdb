@@ -23,7 +23,7 @@ class ScalarStruct(wx.Panel):
     def UpdateWidgetData(self):
         widget_renderer = self.frame.widget_renderer
         tick = widget_renderer.tick
-        queue_data = self.frame.data_retriever.Unpack(self.elem_path, (tick,tick))
+        queue_data = self.frame.data_retriever.Unpack(self.elem_path, tick)
 
         field_max_len = max([len(field_name) for field_name in self._field_names])
         struct_str = []

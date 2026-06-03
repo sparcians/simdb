@@ -1,13 +1,11 @@
 import zlib, copy, sqlite3
 from viewer.gui.view_settings import DirtyReasons
-from viewer.model.data_deserializers import ByteBuffer
-from viewer.model.data_deserializers import SimpleDeserializer
-from viewer.model.data_deserializers import StringDeserializer
-from viewer.model.data_deserializers import EnumDeserializer
 from viewer.model.data_deserializers import ContigContainerDeserializer
 from viewer.model.data_deserializers import SparseContainerDeserializer
 from viewer.model.data_deserializers import StructDeserializer
 from viewer.model.collection_replayers import CollectionReplaySession
+from viewer.model.blob_iterator import BlobIterator
+from viewer.model.blob_handlers import DataExtractionHandler
 
 class DataRetriever:
     def __init__(self, frame, db_path, simhier, dtype_inspector):
@@ -181,6 +179,7 @@ class DataRetriever:
         if self._cached_utiliz_time_val is not None and time_val == self._cached_utiliz_time_val:
             return self._cached_utiliz_sizes
 
+        # TODO XXX: Use the blob iterator/handler for performance
         cids = self.simhier.GetContainerIDs()
         cids_data_dicts = self._replay_session.GetDataValueAtTime(cids, time_val)
 
@@ -193,35 +192,16 @@ class DataRetriever:
         self._cached_utiliz_sizes = sizes_by_cid
         return sizes_by_cid
 
-    def Unpack(self, elem_path, time_range):
-        if not type(time_range) in (list, tuple):
-            time_range = [time_range]
+    def Unpack(self, elem_path, tick):
+        tick_range = [tick-self._heartbeat+1, tick]
+        iterator = BlobIterator(self.dtype_inspector, self.simhier)
+        handler = DataExtractionHandler(self.simhier)
+        iterator.Iterate(handler, tick_range)
 
-        time_range = list(time_range)
-        for i,t in enumerate(time_range):
-            if isinstance(t, str):
-                t = int(t)
-                time_range[i] = t
-
-        if len(time_range) == 1:
-            time_range = [time_range, time_range]
-
-        cid = self.simhier.GetCollectionID(elem_path)
         unpacked = {
-            'TimeVals': [],
-            'DataVals': []
+            'TimeVals': [iterator.GetFinalTick()],
+            'DataVals': [handler.GetFinalValue(elem_path)]
         }
-
-        lo, hi = time_range[0], time_range[1]
-        sample_times = {t for t in self._time_vals if lo <= t <= hi}
-        sample_times.add(lo)
-        if hi != lo:
-            sample_times.add(hi)
-
-        for time_point in sorted(sample_times):
-            data_at_this_time = self._replay_session.GetDataValueAtTime(cid, time_point)
-            unpacked['TimeVals'].append(time_point)
-            unpacked['DataVals'].append(data_at_this_time)
 
         return unpacked
 
