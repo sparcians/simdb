@@ -78,6 +78,9 @@ class DataTypeInspector:
     def _load(self):
         # type: () -> None
         cur = self._conn.cursor()
+        cur.execute("SELECT SerializationCID,TypeName FROM CollectableTreeNodes")
+        self._dtypes_by_cid = {cid:type_name for cid,type_name in cur.fetchall()}
+
         cur.execute("SELECT Id, RootTypeName FROM DataTypeSchemas ORDER BY Id")
         for sid, root_name in cur.fetchall():
             sid = int(sid)
@@ -262,6 +265,9 @@ class DataTypeInspector:
             if node.special_formatter:
                 return node.special_formatter
         return ""
+
+    def GetDataTypeForCollectionID(self, cid):
+        return self._dtypes_by_cid.get(cid)
 
     def GetEffectiveColorKey(self, dtype_name):
         # type: (str) -> str

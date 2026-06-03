@@ -18,7 +18,7 @@ from viewer.model.dtype_inspector import DataTypeInspector
 _FIRST_MINIFIER_ACTION = 4
 _DISABLED = 0
 _ENABLED = 1
-_QUIETD = 2
+_QUIETED = 2
 _AWAKENED = 3
 
 
@@ -92,7 +92,7 @@ class ScalarMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("B"))
-        if action in (_DISABLED, _QUIETD):
+        if action in (_DISABLED, _QUIETED):
             self._last = {}
             return {}
 
@@ -141,7 +141,7 @@ class StructMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("B"))
-        if action in (_DISABLED, _QUIETD):
+        if action in (_DISABLED, _QUIETED):
             self._last = {}
             return {}
         if action in (_ENABLED, _AWAKENED):
@@ -188,7 +188,7 @@ class ContigContainerMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("B"))
-        if action in (_DISABLED, _QUIETD):
+        if action in (_DISABLED, _QUIETED):
             self._items = []
             return list(self._items)
         if action in (_ENABLED, _AWAKENED):
@@ -258,7 +258,7 @@ class SparseContainerMinifiedReplayer(CollectableReplayerBase):
 
     def replay_next(self, buf: ByteBuffer) -> Any:
         action = int(buf.Read("B"))
-        if action in (_DISABLED, _QUIETD):
+        if action in (_DISABLED, _QUIETED):
             self._cells = [None] * self._capacity
             return list(self._cells)
         if action in (_ENABLED, _AWAKENED):

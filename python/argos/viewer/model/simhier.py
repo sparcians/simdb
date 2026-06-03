@@ -31,6 +31,7 @@ class SimHierarchy:
                 'TypeName': type_name,
                 'ArgosDefaultHiddenColumns': ''
             }
+            #print (f'CID {cid} -> {type_name}')
 
         self._simhier_tree = SimHierTree()
         self._simhier_tree.BuildFromList(full_paths)
@@ -115,6 +116,10 @@ class SimHierarchy:
 
     def GetMetaAtPath(self, elem_path, meta_name):
         return self._simhier_tree.GetMetaAtPath(elem_path, meta_name)
+
+    def GetMetaForCollectionID(self, elem_id, meta_name):
+        elem_path = self.GetElemPath(elem_id)
+        return self.GetMetaAtPath(elem_path, meta_name)
 
     def GetParentID(self, elem_id):
         return self._parent_ids_by_child_id[elem_id]
