@@ -1,5 +1,6 @@
 from abc import abstractmethod
 
+# Base class for all blob handlers (for blob iteration)
 class BlobHandler:
     @abstractmethod
     def HandleScalarDisabled(self, context): pass
@@ -73,6 +74,7 @@ class BlobHandler:
     @abstractmethod
     def HandleSparseContainerRemovedBin(self, context, bin_idx): pass
 
+# Blob handler for sanity checking (ensure that we can simply iterate over any blob without parsing bugs)
 class SmokeTestHandler(BlobHandler):
     def HandleScalarDisabled(self, context):
         print(f'At tick {context.current_tick}, scalar cid {context.current_cid} was disabled')
@@ -145,3 +147,134 @@ class SmokeTestHandler(BlobHandler):
 
     def HandleSparseContainerRemovedBin(self, context, bin_idx):
         print(f'At tick {context.current_tick}, sparse container cid {context.current_cid} removed bin {bin_idx}')
+
+# Blob handler for extracting collected values/structs/containers
+class DataExtractionHandler(BlobHandler):
+    def __init__(self, simhier):
+        self._simhier = simhier
+        self._values_by_cid = {}
+
+    def HandleScalarDisabled(self, context):
+        if context.current_cid in self._values_by_cid:
+            self._values_by_cid[context.current_cid] = None
+
+    def HandleScalarQuieted(self, context):
+        if context.current_cid in self._values_by_cid:
+            self._values_by_cid[context.current_cid] = None
+
+    def HandleScalarCarried(self, context):
+        pass
+
+    def HandleScalarEnabled(self, context, deserialized):
+        self._values_by_cid[context.current_cid] = deserialized
+
+    def HandleScalarAwakened(self, context, deserialized):
+        self._values_by_cid[context.current_cid] = deserialized
+
+    def HandleScalarFullDump(self, context, deserialized):
+        self._values_by_cid[context.current_cid] = deserialized
+
+    def HandleContigContainerDisabled(self, context):
+        self._values_by_cid[context.current_cid] = []
+
+    def HandleContigContainerQuieted(self, context):
+        self._values_by_cid[context.current_cid] = []
+
+    def HandleContigContainerCarried(self, context):
+        pass
+
+    def HandleContigContainerEnabled(self, context, deserialized):
+        assert isinstance(deserialized, list)
+        assert len(deserialized) <= self._simhier.GetCapacityByCollectionID(context.current_cid)
+        self._values_by_cid[context.current_cid] = deserialized
+
+    def HandleContigContainerAwakened(self, context, deserialized):
+        assert isinstance(deserialized, list)
+        assert len(deserialized) <= self._simhier.GetCapacityByCollectionID(context.current_cid)
+        self._values_by_cid[context.current_cid] = deserialized
+
+    def HandleContigContainerFullDump(self, context, deserialized):
+        assert isinstance(deserialized, list)
+        assert len(deserialized) <= self._simhier.GetCapacityByCollectionID(context.current_cid)
+        self._values_by_cid[context.current_cid] = deserialized
+
+    def HandleContigContainerSwap(self, context, bin_idx, deserialized):
+        if context.current_cid in self._values_by_cid:
+            container_values = self._values_by_cid[context.current_cid]
+            assert bin_idx < self._simhier.GetCapacityByCollectionID(context.current_cid)
+            assert bin_idx < len(container_values)
+            container_values[bin_idx] = deserialized
+
+    def HandleContigContainerArrival(self, context, deserialized):
+        if context.current_cid in self._values_by_cid:
+            container_values = self._values_by_cid[context.current_cid]
+            container_values.append(deserialized)
+            assert len(container_values) <= self._simhier.GetCapacityByCollectionID(context.current_cid)
+
+    def HandleContigContainerDeparture(self, context):
+        if context.current_cid in self._values_by_cid:
+            container_values = self._values_by_cid[context.current_cid]
+            assert len(container_values) > 0
+            container_values.pop(0)
+
+    def HandleContigContainerBookends(self, context, deserialized):
+        self.HandleContigContainerDeparture(context)
+        self.HandleContigContainerArrival(context, deserialized)
+
+    def HandleSparseContainerDisabled(self, context):
+        if context.current_cid in self._values_by_cid:
+            self._values_by_cid[context.current_cid] = None
+
+    def HandleSparseContainerQuieted(self, context):
+        if context.current_cid in self._values_by_cid:
+            self._values_by_cid[context.current_cid] = None
+
+    def HandleSparseContainerCarried(self, context):
+        pass
+
+    def HandleSparseContainerEnabled(self, context, deserialized):
+        self._ResetSparseContainer(context, deserialized)
+
+    def HandleSparseContainerAwakened(self, context, deserialized):
+        self._ResetSparseContainer(context, deserialized)
+
+    def HandleSparseContainerFullDump(self, context, deserialized):
+        self._ResetSparseContainer(context, deserialized)
+
+    def HandleSparseContainerExchangedBin(self, context, bin_idx, bin_deserialized):
+        if context.current_cid in self._values_by_cid:
+            assert bin_idx < len(self._values_by_cid[context.current_cid])
+            self._values_by_cid[context.current_cid][bin_idx] = bin_deserialized
+
+    def HandleSparseContainerRemovedBin(self, context, bin_idx):
+        self.HandleSparseContainerExchangedBin(context, bin_idx, None)
+
+    def GetFinalValue(self, ident):
+        if isinstance(ident, str):
+            try:
+                ident = int(ident)
+            except:
+                ident = self._simhier.GetCollectionID(ident)
+
+        assert isinstance(ident, int)
+        return self._values_by_cid.get(ident)
+
+    def GetAllFinalValues(self, use_path_keys=True):
+        elem_paths = self._simhier.GetItemElemPaths()
+        if use_path_keys:
+            identifiers = elem_paths
+        else:
+            identifiers = [self._simhier.GetCollectionID(path) for path in elem_paths]
+
+        final_values = {
+            ident:self.GetFinalValue(ident)
+            for ident in identifiers
+        }
+
+        return final_values
+
+    def _ResetSparseContainer(self, context, deserialized):
+        capacity = self._simhier.GetCapacityByCollectionID(context.current_cid)
+        self._values_by_cid[context.current_cid] = [None]*capacity
+        for bin_idx, bin_deserialized in deserialized.items():
+            self._values_by_cid[context.current_cid][bin_idx] = bin_deserialized

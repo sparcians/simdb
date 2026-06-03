@@ -1,6 +1,7 @@
 import os, sys, zlib
 from typing import Any
 from functools import partial
+from collections import OrderedDict
 
 _PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _PACKAGE_ROOT not in sys.path:
@@ -238,9 +239,13 @@ class BlobIterator:
 
         lo, hi = time_range[0], time_range[1]
         cmd = 'SELECT Id,Timestamp FROM Timestamps '
-        cmd += f'WHERE CAST(Timestamp AS INTEGER)>={lo} AND CAST(Timestamp AS INTEGER)<={hi}'
+        cmd += f'WHERE CAST(Timestamp AS INTEGER)>={lo} AND CAST(Timestamp AS INTEGER)<={hi} '
+        cmd += 'ORDER BY Id ASC'
         cursor.execute(cmd)
-        timestamp_dict = {tsid:int(ts) for tsid,ts in cursor.fetchall()}
+        timestamp_dict = OrderedDict(
+            (tsid, int(ts))
+            for tsid, ts in cursor.fetchall()
+        )
 
         placeholders = ",".join("?" for _ in timestamp_dict.keys())
         cmd = (
@@ -248,7 +253,10 @@ class BlobIterator:
             f"WHERE TimestampID IN ({placeholders}) ORDER BY TimestampID ASC"
         )
         cursor.execute(cmd, tuple(sorted(timestamp_dict.keys())))
-        records_dict = {tsid:record for tsid,record in cursor.fetchall()}
+        records_dict = OrderedDict(
+            (tsid, record)
+            for tsid,record in cursor.fetchall()
+        )
 
         resources = Resources(self._dtype_inspector, self._simhier, handler)
         context = Context()
@@ -264,13 +272,32 @@ class BlobIterator:
 def main():
     from viewer.model.dtype_inspector import DataTypeInspector
     from viewer.model.simhier import SimHierarchy
+    import argparse
 
-    db_file = sys.argv[1]
-    dtype_inspector = DataTypeInspector(db_file)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tick", type=int, help="Extract the data values at this tick")
+    parser.add_argument("database", help="Path to the database file")
+    args = parser.parse_args()
+
+    dtype_inspector = DataTypeInspector(args.database)
     simhier = SimHierarchy(dtype_inspector.connection, dtype_inspector)
     iterator = BlobIterator(dtype_inspector, simhier)
-    handler = SmokeTestHandler()
-    iterator.Iterate(handler)
+
+    # No tick provided? Use smoke test handler.
+    if args.tick is None:
+        handler = SmokeTestHandler()
+        iterator.Iterate(handler)
+
+    # Tick provided? Use [tick-heartbeat+1 : tick] time range with data extraction handler.
+    else:
+        cursor = dtype_inspector.connection.cursor()
+        cursor.execute('SELECT Heartbeat FROM CollectionGlobals')
+        heartbeat = cursor.fetchone()[0]
+        tick_range = [args.tick-heartbeat+1, args.tick]
+
+        handler = DataExtractionHandler(simhier)
+        iterator.Iterate(handler, tick_range)
+        print(handler.GetAllFinalValues())
 
 if __name__ == '__main__':
     main()
