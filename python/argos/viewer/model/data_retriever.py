@@ -3,7 +3,6 @@ from viewer.gui.view_settings import DirtyReasons
 from viewer.model.data_deserializers import ContigContainerDeserializer
 from viewer.model.data_deserializers import SparseContainerDeserializer
 from viewer.model.data_deserializers import StructDeserializer
-from viewer.model.collection_replayers import CollectionReplaySession
 from viewer.model.blob_iterator import BlobIterator
 from viewer.model.blob_handlers import DataExtractionHandler
 
@@ -11,7 +10,6 @@ class DataRetriever:
     def __init__(self, frame, db_path, simhier, dtype_inspector):
         self.frame = frame
         self._db = sqlite3.connect(db_path)
-        self._replay_session = CollectionReplaySession(db_path, dtype_inspector)
         self.simhier = simhier
         self.dtype_inspector = dtype_inspector
         self.cursor = self._db.cursor()
