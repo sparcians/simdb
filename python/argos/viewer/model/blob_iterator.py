@@ -100,7 +100,6 @@ def HandleCID(resources, context):
 
 def HandleAction(resources, context):
     cid = context.current_cid
-    simhier = resources.simhier
     action = int(resources.buf.Read('B'))
 
     if cid not in resources.simhier.GetContainerIDs():
