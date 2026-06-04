@@ -89,6 +89,10 @@ class ByteBuffer:
         self._read_idx += num_bytes
         return extracted_bytes
 
+    def Jump(self, num_bytes):
+        assert self._read_idx + num_bytes <= self._end_idx
+        self._read_idx += num_bytes
+
     def Done(self):
         assert self._read_idx <= self._end_idx
         return self._read_idx == self._end_idx

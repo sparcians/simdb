@@ -93,10 +93,46 @@ def HandleCID(resources, context):
 
     cid = resources.buf.Read('H')
     if not context.IsActive(cid):
-        raise 'TODO XXX: skip over bytes'
+        return HandleSkip
 
     context.current_cid = cid
     return HandleAction
+
+def HandleSkip(resources, context):
+    cid = context.current_cid
+    action = int(resources.buf.Read('B'))
+
+    if action in (_DISABLED, _QUIETED, _CARRY, _CONTIG_CONTAINER_DEPART):
+        # No more bytes to skip
+        return HandleCID
+
+    type_deserializer = resources.GetDeserializer(context.current_cid)
+    type_bytes = type_deserializer.GetNumBytes()
+
+    if cid not in resources.simhier.GetContainerIDs():
+        assert action in (_ENABLED, _AWAKENED, _FULL)
+        skip_bytes = type_bytes
+    elif resources.simhier.GetSparseFlagByCollectionID(cid):
+        if action in (_ENABLED, _AWAKENED, _FULL):
+            size = int(resources.buf.Read('H'))
+            skip_bytes = size * (struct.calcsize('H') + type_bytes)
+        elif action == _SPARSE_CONTAINER_EXCHANGE:
+            skip_bytes = struct.calcsize('H') + type_bytes
+        elif action == _SPARSE_CONTAINER_REMOVE:
+            skip_bytes = struct.calcsize('H')
+    else:
+        if action in (_ENABLED, _AWAKENED, _FULL):
+            size = int(resources.buf.Read('H'))
+            skip_bytes = size * type_bytes
+        elif action == _CONTIG_CONTAINER_SWAP:
+            skip_bytes = struct.calcsize('H') + type_bytes
+        elif action == _CONTIG_CONTAINER_ARRIVE:
+            skip_bytes = type_bytes
+        elif action == _CONTIG_CONTAINER_BOOKENDS:
+            skip_bytes = type_bytes
+
+    resources.buf.Jump(skip_bytes)
+    return HandleCID
 
 def HandleAction(resources, context):
     cid = context.current_cid
@@ -234,12 +270,12 @@ class BlobIterator:
             lo, hi = cursor.fetchone()
             time_range = [int(lo), int(hi)]
 
-        if not type(time_range) in (list, tuple):
-            time_range = [int(time_range)]
-
-        time_range = list(time_range)
-        if len(time_range) == 1:
+        if isinstance(time_range, int):
             time_range = [time_range, time_range]
+        elif not isinstance(time_range, list):
+            time_range = list(time_range)
+            if len(time_range) == 1:
+                time_range *= 2
 
         lo, hi = time_range[0], time_range[1]
         cmd = 'SELECT Id,Timestamp FROM Timestamps '
