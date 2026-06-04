@@ -1,3 +1,4 @@
+import re
 import wx
 from viewer.gui.canvas_grid import CanvasGrid
 from viewer.gui.view_settings import DirtyReasons
@@ -88,6 +89,18 @@ class DataInspector(wx.Notebook):
             tab.Layout()
             tab.Refresh()
 
+    def __GetDefaultTabName(self):
+        # Suggest a "Tab N" name that does not collide with any existing tab.
+        # N is one past the highest existing "Tab N" number, but at least
+        # (num_tabs + 1) so the suggestion keeps growing as tabs are added.
+        highest = 0
+        for i in range(self.GetPageCount() - 1):
+            match = re.fullmatch(r"Tab (\d+)", self.GetPageText(i))
+            if match:
+                highest = max(highest, int(match.group(1)))
+
+        return "Tab %d" % max(len(self.tabs) + 1, highest + 1)
+
     def __AddPlusTab(self):
         super(DataInspector, self).AddPage(wx.Panel(self), "Add Tab")
 
@@ -105,7 +118,7 @@ class DataInspector(wx.Notebook):
         event.Skip()
 
     def __ShowAddTabDialog(self):
-        dlg = wx.TextEntryDialog(self, "Enter name for the new tab:", "New Tab", value="Tab %d" % (len(self.tabs) + 1))
+        dlg = wx.TextEntryDialog(self, "Enter name for the new tab:", "New Tab", value=self.__GetDefaultTabName())
 
         if dlg.ShowModal() == wx.ID_OK:
             new_tab_name = dlg.GetValue().strip()
@@ -148,8 +161,8 @@ class DataInspector(wx.Notebook):
     
     def __OnRenameTab(self, event, tab_idx):
         # Show a dialog to enter the new name
-        dlg = wx.TextEntryDialog(self, "Enter new name:", "Rename Tab", 
-                                 "Tab %d" % (len(self.tabs) + 1))
+        dlg = wx.TextEntryDialog(self, "Enter new name:", "Rename Tab",
+                                 self.__GetDefaultTabName())
         
         if dlg.ShowModal() == wx.ID_OK:
             new_name = dlg.GetValue().strip()
