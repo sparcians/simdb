@@ -85,19 +85,6 @@ class Watchlist(wx.TreeCtrl):
     def ResetToDefaultViewSettings(self, update_widgets=True):
         self.ApplyViewSettings({'grouping_mode': 'flat', 'watched_sim_elem_paths': []})
 
-    def GetItemElemPath(self, item):
-        if not item or not item.IsOk():
-            return None
-
-        node_names = []
-        while item and item != self.GetRootItem():
-            node_name = self.GetItemText(item)
-            node_names.append(node_name)
-            item = self.GetItemParent(item)
-
-        node_names.reverse()
-        return '.'.join(node_names)
-    
     def __GetExpandedElemPaths(self, start_item):
         expanded_items = []
         if start_item.IsOk() and self.IsExpanded(start_item):
