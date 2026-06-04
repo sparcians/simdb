@@ -799,11 +799,9 @@ class SchedulingLinesCustomizationDialog(wx.Dialog):
         self.element_path_regexes_list_ctrl.Select(orig_bottom_idx, False)
         self.element_path_regexes_list_ctrl.Select(orig_top_idx, True)
 
-        element_path_caption_regexes = self.GetElementPathCaptionRegexes(as_list=True)
-        tmp = element_path_caption_regexes[orig_top_idx]
-        element_path_caption_regexes[orig_top_idx] = element_path_caption_regexes[orig_bottom_idx]
-        element_path_caption_regexes[orig_bottom_idx] = tmp
-        self.caption_mgr.SetElemPathRegexReplacements(element_path_caption_regexes)
+        # The list ctrl rows have already been swapped above, so read it back in
+        # the new order and sync the caption manager (no extra swap).
+        self.caption_mgr.SetElemPathRegexReplacements(self.GetElementPathCaptionRegexes())
 
     def __MoveSelectedElemDown(self, evt):
         selected_elem_idxs = self.__GetListCtrlSelectedItemIdxs()
@@ -829,11 +827,9 @@ class SchedulingLinesCustomizationDialog(wx.Dialog):
         self.element_path_regexes_list_ctrl.Select(orig_top_idx, False)
         self.element_path_regexes_list_ctrl.Select(orig_bottom_idx, True)
 
-        element_path_caption_regexes = self.GetElementPathCaptionRegexes(as_list=True)
-        tmp = element_path_caption_regexes[orig_top_idx]
-        element_path_caption_regexes[orig_top_idx] = element_path_caption_regexes[orig_bottom_idx]
-        element_path_caption_regexes[orig_bottom_idx] = tmp
-        self.caption_mgr.SetElemPathRegexReplacements(element_path_caption_regexes)
+        # The list ctrl rows have already been swapped above, so read it back in
+        # the new order and sync the caption manager (no extra swap).
+        self.caption_mgr.SetElemPathRegexReplacements(self.GetElementPathCaptionRegexes())
 
     def __RemoveSelectedElems(self, evt):
         selected_elem_idxs = self.__GetListCtrlSelectedItemIdxs()
@@ -1113,16 +1109,31 @@ class CaptionManager:
         return None
 
     def GetAllMatchingElemPaths(self):
-        elem_paths = []
-        for elem_path in self.simhier.GetContainerElemPaths():
-            for regex, _ in self.regex_replacements_by_elem_path_regex.items():
-                if elem_path == regex:
-                    elem_paths.append(elem_path)
-                    break
+        # The display order of the queues/rows follows the order of the regex
+        # OrderedDict (i.e. the order the user set in the customization dialog),
+        # NOT the static order of self.simhier.GetContainerElemPaths(). The regex
+        # dict is therefore the outer loop here.
+        container_elem_paths = self.simhier.GetContainerElemPaths()
 
-                if re.compile(regex).match(elem_path):
+        elem_paths = []
+        seen = set()
+        for regex, _ in self.regex_replacements_by_elem_path_regex.items():
+            # Exact path match first (the regex is a full element path).
+            if regex in container_elem_paths and regex not in seen:
+                elem_paths.append(regex)
+                seen.add(regex)
+                continue
+
+            # Otherwise treat it as a regex and append all matching container
+            # paths (in stable simhier order within this single regex group).
+            compiled = re.compile(regex)
+            for elem_path in container_elem_paths:
+                if elem_path in seen:
+                    continue
+
+                if compiled.match(elem_path):
                     elem_paths.append(elem_path)
-                    break
+                    seen.add(elem_path)
 
         return elem_paths
 
