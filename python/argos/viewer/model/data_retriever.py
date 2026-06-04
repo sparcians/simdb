@@ -179,14 +179,16 @@ class DataRetriever:
         if self._cached_utiliz_time_val is not None and time_val == self._cached_utiliz_time_val:
             return self._cached_utiliz_sizes
 
-        # TODO XXX: Use the blob iterator/handler for performance
-        cids = self.simhier.GetContainerIDs()
-        cids_data_dicts = self._replay_session.GetDataValueAtTime(cids, time_val)
+        tick = int(time_val)
+        tick_range = [tick-self._heartbeat+1, tick]
+        iterator = BlobIterator(self.dtype_inspector, self.simhier)
+        handler = DataExtractionHandler(self.simhier)
+        iterator.Iterate(handler, tick_range)
 
         sizes_by_cid = {}
-        for cid, elems in cids_data_dicts.items():
-            elems = [e for e in elems if e is not None]
-            sizes_by_cid[cid] = len(elems)
+        for cid in self.simhier.GetContainerIDs():
+            elems = handler.GetFinalValue(cid)
+            sizes_by_cid[cid] = len([e for e in elems if e is not None]) if elems else 0
 
         self._cached_utiliz_time_val = time_val
         self._cached_utiliz_sizes = sizes_by_cid
