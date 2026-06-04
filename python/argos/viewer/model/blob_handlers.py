@@ -1,4 +1,6 @@
+import copy
 from abc import abstractmethod
+from collections import OrderedDict
 
 # Base class for all blob handlers (for blob iteration)
 class BlobHandler:
@@ -73,6 +75,10 @@ class BlobHandler:
 
     @abstractmethod
     def HandleSparseContainerRemovedBin(self, context, bin_idx): pass
+
+    # Called by the blob iterator after each blob (tick) has been fully
+    # processed. Handlers that track per-tick state can override this.
+    def SnapshotTick(self, context): pass
 
 # Blob handler for sanity checking (ensure that we can simply iterate over any blob without parsing bugs)
 class SmokeTestHandler(BlobHandler):
@@ -150,9 +156,16 @@ class SmokeTestHandler(BlobHandler):
 
 # Blob handler for extracting collected values/structs/containers
 class DataExtractionHandler(BlobHandler):
-    def __init__(self, simhier):
+    def __init__(self, simhier, snapshot_cids=None):
         self._simhier = simhier
         self._values_by_cid = {}
+
+        # When snapshot_cids is None, per-tick tracking is disabled and
+        # SnapshotTick() is a no-op (zero overhead for callers that only
+        # need the final reconstructed value). When a set of CIDs is given,
+        # we record a deep copy of each of those CIDs' values at every tick.
+        self._snapshot_cids = snapshot_cids
+        self._values_by_cid_by_tick = {}
 
     def HandleScalarDisabled(self, context):
         if context.current_cid in self._values_by_cid:
@@ -249,7 +262,23 @@ class DataExtractionHandler(BlobHandler):
     def HandleSparseContainerRemovedBin(self, context, bin_idx):
         self.HandleSparseContainerExchangedBin(context, bin_idx, None)
 
-    def GetFinalValue(self, ident):
+    def SnapshotTick(self, context):
+        if self._snapshot_cids is None:
+            return
+
+        for cid in self._snapshot_cids:
+            if cid not in self._values_by_cid:
+                continue
+
+            # Deep copy is required because contig/sparse container values are
+            # lists mutated in place (arrival/departure/swap/exchange). Without
+            # copying, every tick's snapshot would alias the same mutated list.
+            value = copy.deepcopy(self._values_by_cid[cid])
+            if cid not in self._values_by_cid_by_tick:
+                self._values_by_cid_by_tick[cid] = OrderedDict()
+            self._values_by_cid_by_tick[cid][context.current_tick] = value
+
+    def _ResolveCID(self, ident):
         if isinstance(ident, str):
             try:
                 ident = int(ident)
@@ -257,7 +286,15 @@ class DataExtractionHandler(BlobHandler):
                 ident = self._simhier.GetCollectionID(ident)
 
         assert isinstance(ident, int)
-        return self._values_by_cid.get(ident)
+        return ident
+
+    def GetValuesByTick(self, ident):
+        cid = self._ResolveCID(ident)
+        return self._values_by_cid_by_tick.get(cid, OrderedDict())
+
+    def GetFinalValue(self, ident):
+        cid = self._ResolveCID(ident)
+        return self._values_by_cid.get(cid)
 
     def GetAllFinalValues(self, use_path_keys=True):
         elem_paths = self._simhier.GetItemElemPaths()

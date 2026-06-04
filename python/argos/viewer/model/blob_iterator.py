@@ -273,6 +273,7 @@ class BlobIterator:
             handler_func = HandleCID
             while handler_func:
                 handler_func = handler_func(resources, context)
+            handler.SnapshotTick(context)
 
         self._final_tick = context.current_tick
 

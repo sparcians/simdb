@@ -310,15 +310,12 @@ class SchedulingLinesWidget(wx.Panel):
                 self.grid.SetColLabelValue(i, '')
 
     def __RasterizeAllCells(self):
-        for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
-            start_time = self.frame.widget_renderer.tick - self.num_ticks_before
-            end_time = self.frame.widget_renderer.tick + self.num_ticks_after
+        start_time = self.frame.widget_renderer.tick - self.num_ticks_before
+        end_time = self.frame.widget_renderer.tick + self.num_ticks_after
+        elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
 
-            # TODO XXX: We need to track values over time in the data extraction handler
-            # as opposed to just holding onto the last value
-            assert False
-
-            vals = self.frame.data_retriever.Unpack(elem_path, (start_time, end_time))
+        ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
+        for elem_path, vals in ranges.items():
             time_vals = vals['TimeVals']
             data_vals = vals['DataVals']
 

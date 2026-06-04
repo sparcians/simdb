@@ -205,5 +205,29 @@ class DataRetriever:
 
         return unpacked
 
+    def UnpackRange(self, start_tick, end_tick, elem_paths=None):
+        if elem_paths is None:
+            elem_paths = self.simhier.GetItemElemPaths()
+        cids = {self.simhier.GetCollectionID(p) for p in elem_paths}
+
+        # Warm up one heartbeat before the requested start so the value at
+        # start_tick is fully reconstructed (same lookback Unpack() uses).
+        iter_lo = int(start_tick) - self._heartbeat + 1
+        iterator = BlobIterator(self.dtype_inspector, self.simhier)
+        handler = DataExtractionHandler(self.simhier, snapshot_cids=cids)
+        iterator.Iterate(handler, [iter_lo, int(end_tick)])
+
+        unpacked = {}
+        for elem_path in elem_paths:
+            values_by_tick = handler.GetValuesByTick(elem_path)
+            time_vals, data_vals = [], []
+            for tick in sorted(values_by_tick.keys()):
+                if start_tick <= tick <= end_tick:
+                    time_vals.append(tick)
+                    data_vals.append(values_by_tick[tick])
+            unpacked[elem_path] = {'TimeVals': time_vals, 'DataVals': data_vals}
+
+        return unpacked
+
     def GetAllTimeVals(self):
         return copy.deepcopy(self._time_vals)
