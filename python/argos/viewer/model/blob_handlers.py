@@ -278,6 +278,10 @@ class DataExtractionHandler(BlobHandler):
                 self._values_by_cid_by_tick[cid] = OrderedDict()
             self._values_by_cid_by_tick[cid][context.current_tick] = value
 
+    def HasDataFor(self, ident):
+        cid = self._ResolveCID(ident)
+        return cid in self._values_by_cid
+
     def _ResolveCID(self, ident):
         if isinstance(ident, str):
             try:

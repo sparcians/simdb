@@ -198,10 +198,16 @@ class DataRetriever:
         handler = DataExtractionHandler(self.simhier)
         iterator.Iterate(handler, tick_range)
 
-        unpacked = {
-            'TimeVals': [iterator.GetFinalTick()],
-            'DataVals': [handler.GetFinalValue(elem_path)]
-        }
+        if handler.HasDataFor(elem_path):
+            unpacked = {
+                'TimeVals': [iterator.GetFinalTick()],
+                'DataVals': [handler.GetFinalValue(elem_path)]
+            }
+        else:
+            unpacked = {
+                'TimeVals': [],
+                'DataVals': []
+            }
 
         return unpacked
 
