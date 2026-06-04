@@ -11,6 +11,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.num_ticks_before = 5
         self.num_ticks_after = 25
         self.show_detailed_queue_packets = True
+        self.enable_tooltips = False
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
 
@@ -91,6 +92,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['num_ticks_before'] = self.num_ticks_before
         settings['num_ticks_after'] = self.num_ticks_after
         settings['show_detailed_queue_packets'] = self.show_detailed_queue_packets
+        settings['enable_tooltips'] = self.enable_tooltips
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
     
@@ -102,6 +104,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_ticks_before != settings['num_ticks_before'] or \
                 self.num_ticks_after != settings['num_ticks_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
+                self.enable_tooltips != settings.get('enable_tooltips', False) or \
                 self.tracked_annos != settings['tracked_annos']
 
         if not dirty:
@@ -111,6 +114,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.num_ticks_before = settings['num_ticks_before']
         self.num_ticks_after = settings['num_ticks_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
+        self.enable_tooltips = settings.get('enable_tooltips', False)
         self.tracked_annos = settings['tracked_annos']
 
         self.__Refresh()
@@ -453,6 +457,10 @@ class SchedulingLinesWidget(wx.Panel):
         return captions
     
     def __OnGridMouseMotion(self, evt):
+        if not self.enable_tooltips:
+            self.grid.UnsetToolTip()
+            return
+
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
         tooltip = self.grid.GetCellToolTip(row, col)
@@ -548,7 +556,7 @@ class SchedulingLinesWidget(wx.Panel):
         print ('TODO: Go to previous cycle where different')
 
     def __EditWidget(self, evt):
-        dlg = SchedulingLinesCustomizationDialog(self, self.caption_mgr, self.num_ticks_before, self.num_ticks_after, self.show_detailed_queue_packets)
+        dlg = SchedulingLinesCustomizationDialog(self, self.caption_mgr, self.num_ticks_before, self.num_ticks_after, self.show_detailed_queue_packets, self.enable_tooltips)
         result = dlg.ShowModal()
         dlg.Destroy()
 
@@ -557,14 +565,16 @@ class SchedulingLinesWidget(wx.Panel):
                                     'num_ticks_before': dlg.GetNumTicksBefore(),
                                     'num_ticks_after': dlg.GetNumTicksAfter(),
                                     'show_detailed_queue_packets': dlg.ShowDetailedQueuePackets(),
+                                    'enable_tooltips': dlg.EnableTooltips(),
                                     'tracked_annos': copy.deepcopy(self.tracked_annos)})
 
 class SchedulingLinesCustomizationDialog(wx.Dialog):
-    def __init__(self, parent, caption_mgr, num_ticks_before, num_ticks_after, show_detailed_queue_packets):
+    def __init__(self, parent, caption_mgr, num_ticks_before, num_ticks_after, show_detailed_queue_packets, enable_tooltips):
         super().__init__(parent, title="Customize Scheduling Lines")
 
         self.caption_mgr = copy.deepcopy(caption_mgr)
         self.show_detailed_queue_packets = show_detailed_queue_packets
+        self.enable_tooltips = enable_tooltips
         self.ok_btn = None
 
         self.move_up_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_UP, wx.ART_BUTTON))
@@ -660,6 +670,10 @@ class SchedulingLinesCustomizationDialog(wx.Dialog):
         show_detailed_queue_packets_checkbox.SetValue(show_detailed_queue_packets)
         show_detailed_queue_packets_checkbox.Bind(wx.EVT_CHECKBOX, self.__OnShowDetailedQueuePacketsChanged)
 
+        enable_tooltips_checkbox = wx.CheckBox(self, label='Enable tooltips')
+        enable_tooltips_checkbox.SetValue(enable_tooltips)
+        enable_tooltips_checkbox.Bind(wx.EVT_CHECKBOX, self.__OnEnableTooltipsChanged)
+
         regex_example_label = wx.StaticText(self, label='Regex examples:')
         regex_example_text = wx.StaticText(self, label='top.cpu.core([0-9]+).rob.stats.num_insts_retired')
         regex_example_text2 = wx.StaticText(self, label='top.cpu.core0.rob.stats.ipc')
@@ -700,6 +714,7 @@ class SchedulingLinesCustomizationDialog(wx.Dialog):
         vsizer.AddSpacer(10)
         vsizer.Add(num_ticks_sizer, 0, wx.ALL | wx.EXPAND, 5)
         vsizer.Add(show_detailed_queue_packets_checkbox, 0, wx.ALL | wx.EXPAND, 5)
+        vsizer.Add(enable_tooltips_checkbox, 0, wx.ALL | wx.EXPAND, 5)
         vsizer.Add(exit_btn_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
         self.errors_label = wx.StaticText(self, label='No issues found', size=(col0_width,-1))
@@ -736,6 +751,9 @@ class SchedulingLinesCustomizationDialog(wx.Dialog):
 
     def ShowDetailedQueuePackets(self):
         return self.show_detailed_queue_packets
+
+    def EnableTooltips(self):
+        return self.enable_tooltips
     
     def GetElementPathCaptionRegexes(self, as_list=False):
         regexes = OrderedDict()
@@ -869,6 +887,9 @@ class SchedulingLinesCustomizationDialog(wx.Dialog):
 
     def __OnShowDetailedQueuePacketsChanged(self, evt):
         self.show_detailed_queue_packets = evt.IsChecked()
+
+    def __OnEnableTooltipsChanged(self, evt):
+        self.enable_tooltips = evt.IsChecked()
 
     def __OnListCtrlItemDClicked(self, evt):
         # Get the mouse position in the list control
