@@ -77,14 +77,14 @@ class ViewSettings:
     def PostLoad(self, frame, view_file):
         self._frame = frame
         if view_file:
-            self.Load(view_file)
+            self.Load(view_file) # Not dirty
         elif os.path.exists(self._last_known_view):
             self.Load(self._last_known_view, set_as_current=False)
+            self.SetDirty(True)  # Implicitly loading "last known view" does not clear dirty flag
         else:
             self.__ResetDefaultViewSettings()
 
         self.__ApplyUserSettings()
-        self.SetDirty(False)
     
     def Load(self, view_file, set_as_current=True):
         if not os.path.isfile(view_file):
