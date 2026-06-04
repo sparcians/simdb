@@ -79,11 +79,11 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
 
-    def UpdateWidgetData(self):
+    def UpdateWidgetData(self, regenerate_grid=False):
         if not self.grid and not self.info and not self.gear_btn:
             return
 
-        self.__Refresh()
+        self.__Refresh(regenerate_grid)
 
     def GetCurrentViewSettings(self):
         settings = {}
@@ -157,14 +157,25 @@ class SchedulingLinesWidget(wx.Panel):
         regex_replacement = GetHeadsUpCamelCaseQueueName(elem_path)
         self.caption_mgr.SetElemPathRegexReplacement(elem_path, regex_replacement)
 
-    def __Refresh(self):
+    def __Refresh(self, new_grid=True):
         if len(self.caption_mgr.GetAllMatchingElemPaths()) > 0:
             if self.info:
                 self.info.Hide()
 
+            # Preserve the scrollbar position across the grid regeneration below.
+            # The old grid is destroyed and a brand-new one is created, which
+            # would otherwise reset the scroll position back to the top.
+            saved_view_start = self.grid.GetViewStart() if self.grid else None
+
             self.SetBackgroundColour('white')
-            self.__RegenerateSchedulingLinesGrid()
+            self.__RegenerateSchedulingLinesGrid(new_grid)
             self.__RasterizeAllCells()
+
+            # Restore the scroll position after the new grid has been laid out
+            # and auto-sized (which establishes its scroll range).
+            if saved_view_start is not None:
+                #wx.CallAfter(self.grid.Scroll, saved_view_start[0], saved_view_start[1])
+                self.grid.Scroll(saved_view_start[0], saved_view_start[1])
 
             if not self.gear_btn:
                 self.gear_btn = self.frame.CreateSettingsButton(self)
@@ -207,7 +218,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.SetSizer(hsizer)
         self.Layout()
 
-    def __RegenerateSchedulingLinesGrid(self):
+    def __RegenerateSchedulingLinesGrid(self, new_grid):
         if self.grid:
             self.grid.Destroy()
             self.grid = None
@@ -259,7 +270,8 @@ class SchedulingLinesWidget(wx.Panel):
         # Create 10-point font for the grid column labels
         font10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
 
-        self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
+        if new_grid or self.grid is None:
+            self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
         self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
         self.grid.GetGridWindow().Bind(wx.EVT_RIGHT_DOWN, self.__OnGridRightClick)
         self.grid.EnableGridLines(False)
@@ -527,7 +539,7 @@ class SchedulingLinesWidget(wx.Panel):
         if dirty:
             self.frame.view_settings.SetDirty(reason=DirtyReasons.TrackedPacketChanged)
 
-        self.UpdateWidgetData()
+        self.UpdateWidgetData(True)
 
     def __GoToNextCycleWhereDifferent(self, evt, elem_path, bin_idx):
         print ('TODO: Go to next cycle where different')
