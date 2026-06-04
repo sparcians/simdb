@@ -69,70 +69,17 @@ class Resources:
         return deserializer
 
 class Context:
-    def __init__(self, initial_active_cids=None):
+    def __init__(self):
         self.current_cid = None
         self.current_tick = None
 
-        # If None, we are looking for all CIDs. If empty set, we
-        # have nothing left to look for. If non-empty set, we are
-        # still looking for / parsing those CID bytes.
-        self._active_cids = initial_active_cids
-
-    def IsActive(self, cid):
-        if self._active_cids is None:
-            return True
-        assert isinstance(self._active_cids, set)
-        return cid in self._active_cids
-
-    def Done(self):
-        return self._active_cids == set()
-
 def HandleCID(resources, context):
-    if resources.buf.Done() or context.Done():
+    if resources.buf.Done():
         return
 
     cid = resources.buf.Read('H')
-    if not context.IsActive(cid):
-        return HandleSkip
-
     context.current_cid = cid
     return HandleAction
-
-def HandleSkip(resources, context):
-    cid = context.current_cid
-    action = int(resources.buf.Read('B'))
-
-    if action in (_DISABLED, _QUIETED, _CARRY, _CONTIG_CONTAINER_DEPART):
-        # No more bytes to skip
-        return HandleCID
-
-    type_deserializer = resources.GetDeserializer(context.current_cid)
-    type_bytes = type_deserializer.GetNumBytes()
-
-    if cid not in resources.simhier.GetContainerIDs():
-        assert action in (_ENABLED, _AWAKENED, _FULL)
-        skip_bytes = type_bytes
-    elif resources.simhier.GetSparseFlagByCollectionID(cid):
-        if action in (_ENABLED, _AWAKENED, _FULL):
-            size = int(resources.buf.Read('H'))
-            skip_bytes = size * (struct.calcsize('H') + type_bytes)
-        elif action == _SPARSE_CONTAINER_EXCHANGE:
-            skip_bytes = struct.calcsize('H') + type_bytes
-        elif action == _SPARSE_CONTAINER_REMOVE:
-            skip_bytes = struct.calcsize('H')
-    else:
-        if action in (_ENABLED, _AWAKENED, _FULL):
-            size = int(resources.buf.Read('H'))
-            skip_bytes = size * type_bytes
-        elif action == _CONTIG_CONTAINER_SWAP:
-            skip_bytes = struct.calcsize('H') + type_bytes
-        elif action == _CONTIG_CONTAINER_ARRIVE:
-            skip_bytes = type_bytes
-        elif action == _CONTIG_CONTAINER_BOOKENDS:
-            skip_bytes = type_bytes
-
-    resources.buf.Jump(skip_bytes)
-    return HandleCID
 
 def HandleAction(resources, context):
     cid = context.current_cid
