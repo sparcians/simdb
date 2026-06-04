@@ -1,22 +1,42 @@
 import re
 import wx
+import wx.aui
 from viewer.gui.canvas_grid import CanvasGrid
 from viewer.gui.view_settings import DirtyReasons
+from contextlib import contextmanager
 from functools import partial
 
-class DataInspector(wx.Notebook):
+class DataInspector(wx.aui.AuiNotebook):
     def __init__(self, parent, frame):
-        super(DataInspector, self).__init__(parent, style=wx.NB_TOP)
+        super(DataInspector, self).__init__(parent, style=wx.aui.AUI_NB_TOP | wx.aui.AUI_NB_SCROLL_BUTTONS)
 
         self.frame = frame
         self.tabs = []
+
+        # AuiNotebook (unlike wx.Notebook) emits EVT_AUINOTEBOOK_PAGE_CHANGED
+        # during programmatic page mutations (e.g. DeletePage/InsertPage). This
+        # guard ensures the "Add Tab" dialog only opens on a genuine user click
+        # of the plus tab, not while we are rebuilding tabs ourselves.
+        self.__suppress_add_tab_dialog = False
+
         self.__AddPlusTab()
         self.__AddInspectorTab("Tab 1")
         self.SetSelection(0)
         self.SetMinSize((200, 200))
 
-        self.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self.__OnPageChanged)
-        self.Bind(wx.EVT_CONTEXT_MENU, self.__OnContextMenu)
+        self.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CHANGED, self.__OnPageChanged)
+        self.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_RIGHT_DOWN, self.__OnContextMenu)
+
+    @contextmanager
+    def __SuppressAddTabDialog(self):
+        # Save/restore (rather than a plain True/False) so nested mutations,
+        # e.g. ApplyViewSettings calling __AddInspectorTab, behave correctly.
+        prev = self.__suppress_add_tab_dialog
+        self.__suppress_add_tab_dialog = True
+        try:
+            yield
+        finally:
+            self.__suppress_add_tab_dialog = prev
 
     def GetCurrentTabWidgetContainers(self):
         selected_tab = self.GetSelection()
@@ -39,24 +59,25 @@ class DataInspector(wx.Notebook):
         return settings
     
     def ApplyViewSettings(self, settings):
-        # Reset all tabs
-        for tab in self.tabs:
-            tab.ResetLayout()
+        with self.__SuppressAddTabDialog():
+            # Reset all tabs
+            for tab in self.tabs:
+                tab.ResetLayout()
 
-        self.tabs = []
+            self.tabs = []
 
-        # Delete all tabs except the last one
-        while self.GetPageCount() > 1:
-            self.DeletePage(0)
+            # Delete all tabs except the last one
+            while self.GetPageCount() > 1:
+                self.DeletePage(0)
 
-        # Add new tabs
-        for tab_name in settings['tab_names']:
-            self.__AddInspectorTab(tab_name)
+            # Add new tabs
+            for tab_name in settings['tab_names']:
+                self.__AddInspectorTab(tab_name)
 
-        # Apply settings to each tab
-        if 'tab_settings' in settings:
-            for i, tab_settings in enumerate(settings['tab_settings']):
-                self.tabs[i].ApplyViewSettings(tab_settings)
+            # Apply settings to each tab
+            if 'tab_settings' in settings:
+                for i, tab_settings in enumerate(settings['tab_settings']):
+                    self.tabs[i].ApplyViewSettings(tab_settings)
 
     def GetCurrentUserSettings(self):
         settings = {}
@@ -105,14 +126,15 @@ class DataInspector(wx.Notebook):
         super(DataInspector, self).AddPage(wx.Panel(self), "Add Tab")
 
     def __AddInspectorTab(self, name):
-        canvas_grid = CanvasGrid(self)
-        super(DataInspector, self).InsertPage(self.GetPageCount() - 1, canvas_grid, name)
-        self.tabs.append(canvas_grid)
-        self.SetSelection(self.GetPageCount() - 2)
+        with self.__SuppressAddTabDialog():
+            canvas_grid = CanvasGrid(self)
+            super(DataInspector, self).InsertPage(self.GetPageCount() - 1, canvas_grid, name)
+            self.tabs.append(canvas_grid)
+            self.SetSelection(self.GetPageCount() - 2)
 
     def __OnPageChanged(self, event):
         new_page_index = event.GetSelection()
-        if new_page_index == self.GetPageCount() - 1:
+        if not self.__suppress_add_tab_dialog and new_page_index == self.GetPageCount() - 1:
             self.__ShowAddTabDialog()
 
         event.Skip()
@@ -136,27 +158,22 @@ class DataInspector(wx.Notebook):
         dlg.Destroy()
 
     def __OnContextMenu(self, event):
-        # Get the position where the user right-clicked
-        pos = event.GetPosition()
-        pos = self.ScreenToClient(pos)  # Convert to client coordinates
-
-        # Check if the right-click was within the tab area
-        hit = self.HitTest(pos)
-        if hit == wx.NOT_FOUND or hit[0] == self.GetPageCount() - 1 or hit[0] == -1:
+        # The tab that was right-clicked is reported directly by the event.
+        tab_idx = event.GetSelection()
+        if tab_idx < 0 or tab_idx == self.GetPageCount() - 1:
             return
-        
+
         # Show the context menu
         menu = wx.Menu()
         rename_item = menu.Append(wx.ID_ANY, "Rename tab")
-        self.Bind(wx.EVT_MENU, partial(self.__OnRenameTab, tab_idx=hit[0]), rename_item)
+        self.Bind(wx.EVT_MENU, partial(self.__OnRenameTab, tab_idx=tab_idx), rename_item)
 
         if len(self.tabs) > 1:
             delete_item = menu.Append(wx.ID_ANY, "Delete tab")        
-            self.Bind(wx.EVT_MENU, partial(self.__OnDeleteTab, tab_idx=hit[0]), delete_item)
+            self.Bind(wx.EVT_MENU, partial(self.__OnDeleteTab, tab_idx=tab_idx), delete_item)
 
-        # Popup the menu
-        pos = wx.Point(pos.x, pos.y - 40)
-        self.PopupMenu(menu, self.ClientToScreen(pos))
+        # Popup at the current cursor position (wxDefaultPosition).
+        self.PopupMenu(menu)
         menu.Destroy()
     
     def __OnRenameTab(self, event, tab_idx):
@@ -184,8 +201,15 @@ class DataInspector(wx.Notebook):
         
         if dlg.ShowModal() == wx.ID_YES:
             # Delete the selected tab
-            self.DeletePage(tab_idx)
-            self.tabs.pop(tab_idx)
+            with self.__SuppressAddTabDialog():
+                self.DeletePage(tab_idx)
+                self.tabs.pop(tab_idx)
+
+                # Deleting the rightmost real tab can leave the plus tab
+                # selected; move selection back to a real tab.
+                if self.GetSelection() == self.GetPageCount() - 1:
+                    self.SetSelection(self.GetPageCount() - 2)
+
             self.frame.view_settings.SetDirty(reason=DirtyReasons.TabDeleted)
         
         dlg.Destroy()
