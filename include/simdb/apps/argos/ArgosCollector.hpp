@@ -7,6 +7,7 @@
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
+#include "simdb/sqlite/Dump.hpp"
 #include "simdb/utils/Compress.hpp"
 #include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TypeTraits.hpp"
@@ -120,6 +121,8 @@ public:
         heartbeat_ = heartbeat;
         resources_.setHeartbeat(heartbeat);
     }
+
+    void setVerbose(bool verbose = true) { verbose_ = verbose; }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
 
@@ -289,6 +292,21 @@ public:
             collector->writeMetaOnPostTeardown(db_mgr_);
         }
         resources_.writeMetaOnPostTeardown(db_mgr_);
+
+        if (verbose_)
+        {
+            std::cout << "[simdb] Collection tables at the end of simulation (except timestamps/blobs):\n\n";
+            dumpTable(db_mgr_, "CollectionGlobals");
+            dumpTable(db_mgr_, "Clocks");
+            dumpTable(db_mgr_, "CollectableTreeNodes");
+            dumpTable(db_mgr_, "DataTypeSchemas");
+            dumpTable(db_mgr_, "DataTypeNodes");
+            dumpTable(db_mgr_, "SignedEnumMappings");
+            dumpTable(db_mgr_, "UnsignedEnumMappings");
+            dumpTable(db_mgr_, "QueueMaxSizes");
+            dumpTable(db_mgr_, "Notifications");
+            dumpTable(db_mgr_, "DynamicFieldTypeChanges");
+        }
     }
 
 private:
@@ -439,6 +457,7 @@ private:
 
     DatabaseManager* const db_mgr_;
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
+    bool verbose_ = false;
 
     using ClockDescriptor = std::tuple<std::string, // clk name
                                        uint32_t,    // period

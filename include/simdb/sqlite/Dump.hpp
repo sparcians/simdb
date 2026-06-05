@@ -1,0 +1,174 @@
+// <Dump.hpp> -*- C++ -*-
+
+#pragma once
+
+#include "simdb/sqlite/DatabaseManager.hpp"
+
+namespace simdb {
+
+namespace detail {
+template <typename T> inline bool to_string(const ValidValue<T>& vv, std::string& out)
+{
+    if (!vv.isValid())
+    {
+        return false;
+    }
+
+    if constexpr (std::is_same_v<T, std::string>)
+    {
+        out = vv;
+    } else
+    {
+        out = std::to_string(vv.getValue());
+    }
+    return true;
+}
+
+inline void dumpTable(const std::string& table_name, const std::vector<std::string>& headers,
+                      const std::vector<std::vector<std::string>>& row_strings)
+{
+    std::vector<size_t> col_sizes;
+    for (const auto& h : headers)
+    {
+        col_sizes.push_back(h.size());
+    }
+
+    for (size_t i = 0; i < row_strings.size(); ++i)
+    {
+        for (size_t j = 0; j < row_strings[i].size(); ++j)
+        {
+            const auto& s = row_strings[i][j];
+            auto& size = col_sizes.at(j);
+            size = std::max(size, s.size());
+        }
+    }
+
+    // Give some extra space
+    for (auto& size : col_sizes)
+    {
+        size += 4;
+    }
+
+    // Begin printing
+    std::cout << "=========================================================\n";
+    std::cout << "Table: " << table_name << "\n";
+
+    // Print headers
+    for (size_t i = 0; i < headers.size(); ++i)
+    {
+        std::cout << std::setw(col_sizes[i]) << std::left << headers[i];
+    }
+    std::cout << "\n";
+
+    // Print dashes
+    auto num_dashes = std::accumulate(col_sizes.begin(), col_sizes.end(), 0);
+    std::cout << std::string(num_dashes, '-') << "\n";
+
+    // Print rows
+    if (row_strings.empty())
+    {
+        std::cout << "(table has no records)\n";
+    } else
+    {
+        for (size_t i = 0; i < row_strings.size(); ++i)
+        {
+            for (size_t j = 0; j < row_strings[i].size(); ++j)
+            {
+                const auto& s = row_strings[i][j];
+                std::cout << std::setw(col_sizes[j]) << std::left << s;
+            }
+            std::cout << "\n";
+        }
+    }
+
+    std::cout << std::endl;
+}
+} // namespace detail
+
+inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
+{
+    struct SelectedValueUnion
+    {
+        ValidValue<int32_t> i;
+        ValidValue<uint32_t> I;
+        ValidValue<int64_t> q;
+        ValidValue<uint64_t> Q;
+        ValidValue<double> d;
+        ValidValue<std::string> s;
+
+        SelectedValueUnion(SqlQuery* query, const Column* col)
+        {
+            using dt = SqlDataType;
+            switch (col->getDataType())
+            {
+            case dt::int32_t:
+                i = 0;
+                query->select(col->getName().c_str(), i.getValue());
+                break;
+            case dt::uint32_t:
+                I = 0;
+                query->select(col->getName().c_str(), I.getValue());
+                break;
+            case dt::int64_t:
+                q = 0;
+                query->select(col->getName().c_str(), q.getValue());
+                break;
+            case dt::uint64_t:
+                Q = 0;
+                query->select(col->getName().c_str(), Q.getValue());
+                break;
+            case dt::double_t:
+                d = 0;
+                query->select(col->getName().c_str(), d.getValue());
+                break;
+            case dt::string_t:
+                s = "";
+                query->select(col->getName().c_str(), s.getValue());
+                break;
+            default:
+                break;
+            }
+        }
+
+        std::string stringify() const
+        {
+            std::string out;
+            if (!detail::to_string(i, out) && !detail::to_string(I, out) && !detail::to_string(q, out) &&
+                !detail::to_string(Q, out) && !detail::to_string(d, out) && !detail::to_string(s, out))
+            {
+                throw DBException("Cannot stringify - no value set");
+            }
+            return out;
+        }
+    };
+
+    const auto& schema = db_mgr->getSchema();
+    const auto& table = schema.getTable(table_name);
+    const auto& columns = table.getColumns();
+
+    std::vector<std::string> headers;
+    std::deque<SelectedValueUnion> selects;
+    auto query = db_mgr->createQuery(table_name.c_str());
+    for (const auto& col : columns)
+    {
+        headers.push_back(col->getName());
+        selects.emplace_back(query.get(), col.get());
+    }
+
+    std::vector<std::vector<std::string>> row_strings;
+
+    auto results = query->getResultSet();
+    while (results.getNextRecord())
+    {
+        std::vector<std::string> col_strings;
+        for (const auto& col_result : selects)
+        {
+            col_strings.push_back(col_result.stringify());
+        }
+        row_strings.emplace_back(std::move(col_strings));
+    }
+
+    detail::dumpTable(table_name, headers, row_strings);
+}
+
+} // namespace simdb

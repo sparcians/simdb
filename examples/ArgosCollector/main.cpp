@@ -291,6 +291,7 @@ template <bool Sparse> void TestInstQueueContainerCollection()
     app_mgrs.createEnabledApps();
     auto argos_collector = app_mgr.getApp<simdb::argos::ArgosCollector>();
     argos_collector->setHeartbeat(3);
+    argos_collector->setVerbose(true);
 
     constexpr size_t capacity = 8;
     auto container_dtype = std::string("Instruction_") + (Sparse ? "sparse" : "contig") + std::string("_capacity") +

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "simdb/Exceptions.hpp"
+#include "simdb/utils/TypeTraits.hpp"
+#include <iostream>
 
 namespace simdb {
 
@@ -67,3 +69,10 @@ public:
 };
 
 } // namespace simdb
+
+template <typename T> inline std::ostream& operator<<(std::ostream& os, const simdb::ValidValue<T>& vv)
+{
+    static_assert(simdb::type_traits::has_ostream_operator_v<T>);
+    os << vv;
+    return os;
+}
