@@ -25,7 +25,7 @@ _CONTIG_CONTAINER_DEPART = 8
 _CONTIG_CONTAINER_BOOKENDS = 9
 
 # Sparse container-specific actions
-_SPARSE_CONTAINER_EXCHANGE = 6
+_SPARSE_CONTAINER_SWAP = 6
 _SPARSE_CONTAINER_REMOVE = 7
 
 _VALID_COMMON_ACTIONS = {
@@ -49,7 +49,7 @@ _VALID_CONTIG_CONTAINER_ACTIONS = _VALID_COMMON_ACTIONS | \
 
 _VALID_SPARSE_CONTAINER_ACTIONS = _VALID_COMMON_ACTIONS | \
     {
-        _SPARSE_CONTAINER_EXCHANGE,
+        _SPARSE_CONTAINER_SWAP,
         _SPARSE_CONTAINER_REMOVE
     }
 
@@ -184,7 +184,7 @@ def HandleSparseContainerAction(resources, context, action):
             elif action == _FULL:
                 resources.handler.HandleSparseContainerFullDump(context, deserialized)
 
-        elif action == _SPARSE_CONTAINER_EXCHANGE:
+        elif action == _SPARSE_CONTAINER_SWAP:
             bin_idx = resources.buf.Read('H')
             bin_deserialized = type_deserializer.Deserialize(resources.buf)
             resources.handler.HandleSparseContainerExchangedBin(context, bin_idx, bin_deserialized)

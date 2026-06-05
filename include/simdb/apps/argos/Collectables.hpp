@@ -34,7 +34,7 @@ public:
     {
         if (!enabled_)
         {
-            // TODO XXX: handle initial value on first enable()
+            // TODO cnyce: handle initial value on first enable()
             enabled_ = true;
             stager_->onEnabledChanged(getID(), enabled_);
         }

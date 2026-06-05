@@ -271,8 +271,8 @@ class DataExtractionHandler(BlobHandler):
                 continue
 
             # Deep copy is required because contig/sparse container values are
-            # lists mutated in place (arrival/departure/swap/exchange). Without
-            # copying, every tick's snapshot would alias the same mutated list.
+            # lists mutated in place Without copying, every tick's snapshot
+            # would alias the same mutated list.
             value = copy.deepcopy(self._values_by_cid[cid])
             if cid not in self._values_by_cid_by_tick:
                 self._values_by_cid_by_tick[cid] = OrderedDict()
