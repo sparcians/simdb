@@ -191,6 +191,16 @@ public:
         }
     }
 
+    /// Enable verbose mode for all apps in this AppManager.
+    void setVerbose(bool verbose = true)
+    {
+        verbose_ = verbose;
+        for (auto app : getApps_())
+        {
+            app->verbose_ = verbose_;
+        }
+    }
+
     /// After parsing command line arguments or configuration files,
     /// enable an app by its name. This will allow the app to be instantiated
     /// and run during the simulation lifecycle.
@@ -478,6 +488,7 @@ private:
                 App* app = factory->createApp(db_mgr_);
                 app->app_logger_ = app_logger_;
                 app->instance_ = instance_num;
+                app->verbose_ = verbose_;
                 std::string instance_name = app_name + std::string("-") + std::to_string(instance_num);
                 apps_[instance_name] = std::unique_ptr<App>(app);
             }
@@ -751,6 +762,9 @@ private:
     /// App logger (thread-safe). Owned by AppManagers.
     ThreadSafeLogger* app_logger_ = nullptr;
 
+    /// Verbose flag.
+    bool verbose_ = false;
+
     /// RAII timer to measure the performance of various app setup/teardown
     /// phases.
     class ScopedTimer
@@ -853,6 +867,16 @@ public:
         app_logger_ = std::make_unique<ThreadSafeFileLogger>(filename);
     }
 
+    /// Enable verbose mode for all apps in all AppManager's.
+    void setVerbose(bool verbose = true)
+    {
+        verbose_ = verbose;
+        for (auto& [app_mgr, _] : db_mgrs_by_app_mgr_)
+        {
+            app_mgr->setVerbose(verbose_);
+        }
+    }
+
     /// Create a new AppManager with a new database.
     ///
     /// Pass in new_db=true to overwrite existing database, or new_db=false to use
@@ -876,6 +900,8 @@ public:
 
         std::shared_ptr<DatabaseManager> db_mgr(new DatabaseManager(db_file, new_db));
         std::shared_ptr<AppManager> app_mgr(new AppManager(db_mgr.get(), app_logger_.get()));
+
+        app_mgr->setVerbose(verbose_);
 
         db_mgrs_by_db_file_[db_file] = db_mgr;
         app_mgrs_by_db_file_[db_file] = app_mgr;
@@ -1056,6 +1082,7 @@ private:
 
     std::unique_ptr<ThreadSafeLogger> app_logger_;
     bool accepting_logger_requests_ = true;
+    bool verbose_ = false;
 };
 
 /*!

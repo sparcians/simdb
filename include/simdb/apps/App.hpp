@@ -70,9 +70,6 @@ public:
     /// \brief Get the instance number (0 if single-instance).
     size_t getInstance() const { return instance_; }
 
-    /// \brief Enable verbose mode.
-    virtual void setVerbose(bool verbose = true) { (void)verbose; }
-
     /// \brief Hook called after command-line parsing, before simulation starts.
     virtual void postInit([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {}
 
@@ -91,6 +88,8 @@ public:
 protected:
     void setAppLogger_(ThreadSafeLogger* logger) { app_logger_ = logger; }
 
+    bool verbose() const { return verbose_; }
+
 private:
     /// Instance number for multi-instance apps (1-based).
     /// If zero, then this is a single-instance app.
@@ -98,6 +97,10 @@ private:
 
     /// Thread-safe loggers.
     ThreadSafeLogger* app_logger_ = nullptr;
+
+    /// Verbose flag.
+    bool verbose_ = false;
+
     friend class AppManager;
 };
 

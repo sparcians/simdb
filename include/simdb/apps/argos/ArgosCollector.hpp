@@ -122,8 +122,6 @@ public:
         resources_.setHeartbeat(heartbeat);
     }
 
-    void setVerbose(bool verbose = true) override { verbose_ = verbose; }
-
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
 
     void addClock(const std::string& clk_name, size_t period, size_t numer, size_t denom)
@@ -285,7 +283,7 @@ public:
         }
         resources_.writeMetaOnPostTeardown(db_mgr_);
 
-        if (verbose_)
+        if (verbose())
         {
             std::cout << "[simdb] Collection tables at the end of simulation (except timestamps/blobs):\n\n";
             dumpTable(db_mgr_, "CollectionGlobals");
@@ -449,7 +447,6 @@ private:
 
     DatabaseManager* const db_mgr_;
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
-    bool verbose_ = false;
 
     using ClockDescriptor = std::tuple<std::string, // clk name
                                        uint32_t,    // period
