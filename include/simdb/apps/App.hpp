@@ -70,6 +70,9 @@ public:
     /// \brief Get the instance number (0 if single-instance).
     size_t getInstance() const { return instance_; }
 
+    /// \brief Enable verbose mode.
+    virtual void setVerbose(bool verbose = true) { (void)verbose; }
+
     /// \brief Hook called after command-line parsing, before simulation starts.
     virtual void postInit([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {}
 

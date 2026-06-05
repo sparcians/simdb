@@ -122,7 +122,7 @@ public:
         resources_.setHeartbeat(heartbeat);
     }
 
-    void setVerbose(bool verbose = true) { verbose_ = verbose; }
+    void setVerbose(bool verbose = true) override { verbose_ = verbose; }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
 
@@ -207,10 +207,6 @@ public:
                                                 const std::string& encoded_scalar_type)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        std::cout << "Collecting:\n";
-        std::cout << "  - path: " << path << "\n";
-        std::cout << "  - type: " << encoded_scalar_type << "\n";
-
         entry_point->setScalarDataType(encoded_scalar_type);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
@@ -229,10 +225,6 @@ public:
                                                    const std::string& encoded_container_type)
     {
         auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        std::cout << "Collecting:\n";
-        std::cout << "  - path: " << path << "\n";
-        std::cout << "  - type: " << encoded_container_type << "\n";
-
         entry_point->setContainerDataType(encoded_container_type);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
