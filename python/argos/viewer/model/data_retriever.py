@@ -156,10 +156,15 @@ class DataRetriever:
         self.frame.view_settings.SetDirty(reason=DirtyReasons.QueueTableAutoColorizeChanged)
 
     def GetAutoColorizeColumn(self, elem_path):
-        struct_name, _ = self.__GetStructViewMeta(elem_path)
+        struct_name, deserializer = self.__GetStructViewMeta(elem_path)
         if struct_name is None:
             return None
-        return self._auto_colorize_column_by_elem_path.get(elem_path)
+
+        col = self._auto_colorize_column_by_elem_path.get(elem_path)
+        if col is None:
+            col = deserializer.GetVisibleFieldNames()[0]
+
+        return col
 
     def __GetStructViewMeta(self, elem_path):
         deserializer = self.GetDeserializer(elem_path)

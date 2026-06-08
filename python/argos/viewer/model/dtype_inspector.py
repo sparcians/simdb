@@ -153,7 +153,7 @@ class DataTypeInspector:
                     # collection.
                     enum_defns[type_name] = {}
                 else:
-                    enum_back = enum_backings[type_name]
+                    enum_back = enum_backings.get(type_name)
 
             node = DataTypeInspector.DataTypeNode(
                 nid,
