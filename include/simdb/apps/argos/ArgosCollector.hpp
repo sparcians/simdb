@@ -91,8 +91,8 @@ public:
         auto& queue_max_sizes_tbl = schema.addTable("QueueMaxSizes");
         queue_max_sizes_tbl.addColumn("SerializationCID", dt::int32_t);
         queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
-        collectable_tns_tbl.ensureUnique("SerializationCID");
-        collectable_tns_tbl.unsetPrimaryKey();
+        queue_max_sizes_tbl.ensureUnique("SerializationCID");
+        queue_max_sizes_tbl.unsetPrimaryKey();
 
         auto& notif_tbl = schema.addTable("Notifications");
         notif_tbl.addColumn("SerializationCID", dt::int32_t);

@@ -96,34 +96,39 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
         ValidValue<double> d;
         ValidValue<std::string> s;
 
-        SelectedValueUnion(SqlQuery* query, const Column* col)
+        SelectedValueUnion(SqlQuery* query, const Column* col) :
+            SelectedValueUnion(query, col->getName(), col->getDataType())
+        {
+        }
+
+        SelectedValueUnion(SqlQuery* query, const std::string& col_name, const SqlDataType dtype)
         {
             using dt = SqlDataType;
-            switch (col->getDataType())
+            switch (dtype)
             {
             case dt::int32_t:
                 i = 0;
-                query->select(col->getName().c_str(), i.getValue());
+                query->select(col_name.c_str(), i.getValue());
                 break;
             case dt::uint32_t:
                 I = 0;
-                query->select(col->getName().c_str(), I.getValue());
+                query->select(col_name.c_str(), I.getValue());
                 break;
             case dt::int64_t:
                 q = 0;
-                query->select(col->getName().c_str(), q.getValue());
+                query->select(col_name.c_str(), q.getValue());
                 break;
             case dt::uint64_t:
                 Q = 0;
-                query->select(col->getName().c_str(), Q.getValue());
+                query->select(col_name.c_str(), Q.getValue());
                 break;
             case dt::double_t:
                 d = 0;
-                query->select(col->getName().c_str(), d.getValue());
+                query->select(col_name.c_str(), d.getValue());
                 break;
             case dt::string_t:
                 s = "";
-                query->select(col->getName().c_str(), s.getValue());
+                query->select(col_name.c_str(), s.getValue());
                 break;
             default:
                 break;
@@ -148,7 +153,14 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
 
     std::vector<std::string> headers;
     std::deque<SelectedValueUnion> selects;
+
     auto query = db_mgr->createQuery(table_name.c_str());
+    if (table.getPrimaryKey() == "Id")
+    {
+        headers.push_back("Id");
+        selects.emplace_back(query.get(), "Id", SqlDataType::int32_t);
+    }
+
     for (const auto& col : columns)
     {
         headers.push_back(col->getName());
