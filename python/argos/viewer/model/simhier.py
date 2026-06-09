@@ -10,16 +10,13 @@ class SimHierarchy:
 
         # ShowInUI=1
         #    --> This means that we only show collectables that were actually collected.
-        #        The database has all the metadata to add everything to the NavTree,
+        #        The database has all the metadata to add everything to the hierarchy,
         #        but without any collected data it just looks cluttered.
         #
-        # TypeName LIKE ?
-        #    --> We don't have good widgets for non-iterables. This constraint just
-        #        shows queues for the queue table widget and scheduling lines tool.
+        # Queue-only display in the left-hand tree is handled by NavTree (future rename: Queues).
         cursor.execute(
             "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes "
-            "WHERE ShowInUI=1 AND (TypeName LIKE ? OR TypeName LIKE ?)",
-            ('%_sparse_capacity%', '%_contig_capacity%'),
+            "WHERE ShowInUI=1"
         )
         rows = [(r[0], r[1], r[2], r[3]) for r in cursor.fetchall()]
 

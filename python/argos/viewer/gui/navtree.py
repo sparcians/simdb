@@ -6,6 +6,7 @@ class NavTree(wx.TreeCtrl):
         super(NavTree, self).__init__(parent, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT)
         self.frame = frame
         self.simhier = frame.simhier
+        self._visible_elem_paths = self.__BuildVisibleElemPaths()
 
         self._root = self.AddRoot("root")
         self._tree_items_by_id = {0: self._root }
@@ -36,7 +37,7 @@ class NavTree(wx.TreeCtrl):
             assert elem_path.find('root.') == -1
 
     def UpdateUtilizBitmaps(self):
-        for elem_path in self.simhier.GetElemPaths(True):
+        for elem_path in self.simhier.GetContainerElemPaths():
             collectable_id = self.simhier.GetCollectionID(elem_path)
             widget_type = self.simhier.GetWidgetType(collectable_id)
             if widget_type == 'QueueTable':
@@ -131,11 +132,22 @@ class NavTree(wx.TreeCtrl):
 
         return expanded_items
 
+    def __BuildVisibleElemPaths(self):
+        visible_paths = set()
+        for container_path in self.simhier.GetContainerElemPaths():
+            parts = container_path.split('.')
+            for i in range(1, len(parts) + 1):
+                visible_paths.add('.'.join(parts[:i]))
+        return visible_paths
+
     def __RecurseBuildTree(self, node):
         if node is self.simhier.GetTree().GetRoot():
             for child in node.GetChildren():
                 self.__RecurseBuildTree(child)
         else:
+            if node.GetPath() not in self._visible_elem_paths:
+                return
+
             if node.GetParent():
                 parent_id = node.GetParent().GetID()
             else:

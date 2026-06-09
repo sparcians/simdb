@@ -8,4 +8,5 @@ class SystemwideTools(wx.TreeCtrl):
         self._root = self.AddRoot("Systemwide Tools")
         self.AppendItem(self._root, "Queue Utilization")
         self.AppendItem(self._root, "Scheduling Lines")
+        self.AppendItem(self._root, "Summary Views")
         self.ExpandAll()
