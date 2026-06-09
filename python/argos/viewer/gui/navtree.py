@@ -189,30 +189,6 @@ class NavTree(wx.TreeCtrl):
         collapse_all = menu.Append(-1, "Collapse All")
         self.Bind(wx.EVT_MENU, partial(CollapseAll, navtree=self), collapse_all)
 
-        def AddToWatchlist(*args, **kwargs):
-            navtree = kwargs['navtree']
-            elem_path = kwargs['elem_path']
-            navtree.frame.explorer.watchlist.AddToWatchlist(elem_path)
-
-        def ShowWatchlistHelp(*args, **kwargs):
-            wx.MessageBox("Right-click nodes in the NavTree to add them to the Watchlist.\n" \
-                          "You will only see 'Add to Watchlist' on the right-click menu if the node \n" \
-                          "has a widget associated with it and is not already in the Watchlist.", "Watchlist Help")
-
-        menu.AppendSeparator()
-
-        if item in self._leaf_elem_paths_by_tree_item:
-            elem_path = self._leaf_elem_paths_by_tree_item[item]
-            if elem_path not in self.frame.explorer.watchlist.GetWatchedSimElems():
-                add_to_watchlist = menu.Append(-1, "Add to Watchlist")
-                self.Bind(wx.EVT_MENU, partial(AddToWatchlist, navtree=self, elem_path=elem_path), add_to_watchlist)
-            else:
-                show_watchlist_help = menu.Append(-1, "Watchlist Help")
-                self.Bind(wx.EVT_MENU, ShowWatchlistHelp, show_watchlist_help)
-        else:
-            show_watchlist_help = menu.Append(-1, "Watchlist Help")
-            self.Bind(wx.EVT_MENU, ShowWatchlistHelp, show_watchlist_help)
-
         self.PopupMenu(menu)
         menu.Destroy()
 

@@ -7,9 +7,6 @@ class DirtyReasons(enum.Enum):
     TabAdded = 4
     TabRenamed = 5
     TabDeleted = 6
-    WatchlistAdded = 7
-    WatchlistRemoved = 8
-    WatchlistOrgChanged = 9
     QueueUtilizDispQueueChanged = 10
     TimeseriesPlotSettingsChanged = 11
     QueueTableDispColsChanged = 12
@@ -26,9 +23,6 @@ DIRTY_REASONS = {
     DirtyReasons.TabAdded: 'A new tab was added',
     DirtyReasons.TabRenamed: 'A tab was renamed',
     DirtyReasons.TabDeleted: 'A tab was deleted',
-    DirtyReasons.WatchlistAdded: 'Something was added to the Watchlist',
-    DirtyReasons.WatchlistRemoved: 'Something was removed from the Watchlist',
-    DirtyReasons.WatchlistOrgChanged: 'The Watchlist organization (flat/hier) was changed',
     DirtyReasons.QueueUtilizDispQueueChanged: 'The displayed queues in a Queue Utilization widget were changed',
     DirtyReasons.TimeseriesPlotSettingsChanged: 'Settings were changed for a timeseries plot',
     DirtyReasons.QueueTableDispColsChanged: 'Displayed columns were changed for a Queue Table widget',
@@ -97,7 +91,6 @@ class ViewSettings:
         with open(view_file, 'r') as fin:
             settings = yaml.load(fin, Loader=yaml.FullLoader)
             self._frame.explorer.navtree.ApplyViewSettings(settings['NavTree'])
-            self._frame.explorer.watchlist.ApplyViewSettings(settings['Watchlist'])
             self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
             self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
             self._frame.inspector.ApplyViewSettings(settings['Inspector'])
@@ -265,7 +258,6 @@ class ViewSettings:
     def __WriteViewSettings(self, view_file):
         settings = {
             'NavTree': self._frame.explorer.navtree.GetCurrentViewSettings(),
-            'Watchlist': self._frame.explorer.watchlist.GetCurrentViewSettings(),
             'PlaybackBar': self._frame.playback_bar.GetCurrentViewSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentViewSettings(),
             'Inspector': self._frame.inspector.GetCurrentViewSettings(),
@@ -304,7 +296,6 @@ class ViewSettings:
 
         settings = {
             'NavTree': self._frame.explorer.navtree.GetCurrentUserSettings(),
-            'Watchlist': self._frame.explorer.watchlist.GetCurrentUserSettings(),
             'PlaybackBar': self._frame.playback_bar.GetCurrentUserSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentUserSettings(),
             'Inspector': self._frame.inspector.GetCurrentUserSettings(),
@@ -331,7 +322,6 @@ class ViewSettings:
             with open(settings_file, 'r') as fin:
                 settings = yaml.load(fin, Loader=yaml.FullLoader)
                 self._frame.explorer.navtree.ApplyUserSettings(settings['NavTree'])
-                self._frame.explorer.watchlist.ApplyUserSettings(settings['Watchlist'])
                 self._frame.playback_bar.ApplyUserSettings(settings['PlaybackBar'])
                 self._frame.data_retriever.ApplyUserSettings(settings['DataRetriever'])
                 self._frame.inspector.ApplyUserSettings(settings['Inspector'])
@@ -348,7 +338,6 @@ class ViewSettings:
     
     def __ResetDefaultViewSettings(self):
         self._frame.explorer.navtree.ResetToDefaultViewSettings(False)
-        self._frame.explorer.watchlist.ResetToDefaultViewSettings(False)
         self._frame.playback_bar.ResetToDefaultViewSettings(False)
         self._frame.data_retriever.ResetToDefaultViewSettings(False)
         self._frame.inspector.ResetToDefaultViewSettings(False)

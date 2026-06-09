@@ -110,7 +110,6 @@ class WidgetRenderer:
 
     def __UpdateWidgetsOnCurrentTab(self):
         self.frame.explorer.navtree.UpdateUtilizBitmaps()
-        self.frame.explorer.watchlist.UpdateUtilizBitmaps()
 
         notebook = self.frame.inspector
         page_idx = notebook.GetSelection()
