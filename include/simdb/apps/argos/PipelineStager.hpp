@@ -122,7 +122,7 @@ public:
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
-        std::vector<uint16_t> valid_cids;
+        std::vector<int> valid_cids;
         for (const auto& [cid, _] : last_sent_bytes_)
         {
             valid_cids.push_back(cid);
@@ -143,6 +143,40 @@ public:
         }
         oss << ")";
         db_mgr->EXECUTE(oss.str());
+
+        // Add a warning to Argos about everything that was setup for collection
+        // but never actually collected. These won't be displayed in the UI trees.
+        auto query = db_mgr->createQuery("CollectableTreeNodes");
+        query->addConstraintForInt("SerializationCID", SetConstraints::NOT_IN_SET, valid_cids);
+
+        std::string path;
+        query->select("FullPath", path);
+
+        std::set<std::string> uncollected_paths;
+        auto results = query->getResultSet();
+        while (results.getNextRecord())
+        {
+            uncollected_paths.insert(path);
+        }
+
+        if (!uncollected_paths.empty())
+        {
+            oss.str("");
+            oss.clear();
+            oss << "No data was ever collected for the following collectables, and will not be shown in Argos:\n";
+            for (const auto& bad_path : uncollected_paths)
+            {
+                oss << bad_path << "\n";
+            }
+
+            auto warning = oss.str();
+            warning.pop_back(); // remove newline
+
+            constexpr auto no_cid = 0;
+            db_mgr->INSERT(
+                SQL_TABLE("Notifications"),
+                SQL_VALUES(no_cid, warning, (int)NotifType::WARNING));
+        }
     }
 
 private:

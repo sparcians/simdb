@@ -15,6 +15,7 @@ class DirtyReasons(enum.Enum):
     SashPositionChanged = 15
     WidgetRemoved = 16,
     TrackedPacketChanged = 17
+    SummaryViewsWidgetChanged = 18
 
 DIRTY_REASONS = {
     DirtyReasons.WidgetDropped: 'A widget was dropped onto the widget canvas',
@@ -30,7 +31,8 @@ DIRTY_REASONS = {
     DirtyReasons.SchedulingLinesWidgetChanged: 'Displayed queues were changed for a Scheduling Lines widget',
     DirtyReasons.SashPositionChanged: 'Widget canvas splitter window sash position changed',
     DirtyReasons.WidgetRemoved: 'A widget was removed from the inspector canvas',
-    DirtyReasons.TrackedPacketChanged: 'Changes were made to tracked packet(s)'
+    DirtyReasons.TrackedPacketChanged: 'Changes were made to tracked packet(s)',
+    DirtyReasons.SummaryViewsWidgetChanged: 'Displayed collectables were changed for a Summary Views widget'
 }
 
 class ViewSettings:

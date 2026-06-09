@@ -12,8 +12,6 @@ class SimHierarchy:
         #    --> This means that we only show collectables that were actually collected.
         #        The database has all the metadata to add everything to the hierarchy,
         #        but without any collected data it just looks cluttered.
-        #
-        # Queue-only display in the left-hand tree is handled by QueuesTree.
         cursor.execute(
             "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes "
             "WHERE ShowInUI=1"
@@ -28,7 +26,6 @@ class SimHierarchy:
                 'TypeName': type_name,
                 'ArgosDefaultHiddenColumns': ''
             }
-            #print (f'CID {cid} -> {type_name}')
 
         self._simhier_tree = SimHierTree()
         self._simhier_tree.BuildFromList(full_paths)
