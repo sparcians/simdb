@@ -258,8 +258,8 @@ class ViewSettings:
 
     def __WriteViewSettings(self, view_file):
         settings = {
-            'Queues': self._frame.explorer.queues_tree.GetCurrentViewSettings(),
-            'Scalars': self._frame.explorer.scalars_tree.GetCurrentViewSettings(),
+            'QueuesTree': self._frame.explorer.queues_tree.GetCurrentViewSettings(),
+            'ScalarsTree': self._frame.explorer.scalars_tree.GetCurrentViewSettings(),
             'PlaybackBar': self._frame.playback_bar.GetCurrentViewSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentViewSettings(),
             'Inspector': self._frame.inspector.GetCurrentViewSettings(),
@@ -297,8 +297,8 @@ class ViewSettings:
         settings_file = os.path.join(settings_dir, 'user_settings.yaml')
 
         settings = {
-            'Queues': self._frame.explorer.queues_tree.GetCurrentUserSettings(),
-            'Scalars': self._frame.explorer.scalars_tree.GetCurrentUserSettings(),
+            'QueuesTree': self._frame.explorer.queues_tree.GetCurrentUserSettings(),
+            'ScalarsTree': self._frame.explorer.scalars_tree.GetCurrentUserSettings(),
             'PlaybackBar': self._frame.playback_bar.GetCurrentUserSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentUserSettings(),
             'Inspector': self._frame.inspector.GetCurrentUserSettings(),

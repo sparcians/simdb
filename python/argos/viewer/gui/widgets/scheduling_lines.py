@@ -21,14 +21,6 @@ class SchedulingLinesWidget(wx.Panel):
         self.rasterizers = {}
         self.grid = None
 
-        self.info = wx.StaticText(self, label='Drag queues from the Queues tree to create scheduling lines.', size=(600,18))
-        self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-
-        vsizer = wx.BoxSizer(wx.VERTICAL)
-        vsizer.AddStretchSpacer()
-        vsizer.Add(self.info, 1, wx.ALL | wx.CENTER | wx.EXPAND, 5)
-        vsizer.AddStretchSpacer()
-
         cursor = frame.db.cursor()
         cmd = 'SELECT SerializationCID,MaxSize FROM QueueMaxSizes'
 
@@ -185,8 +177,6 @@ class SchedulingLinesWidget(wx.Panel):
                 self.gear_btn = self.frame.CreateSettingsButton(self)
                 self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
                 self.gear_btn.SetToolTip('Edit widget settings')
-        else:
-            self.__ShowUsageInfo()
 
     def __ShowUsageInfo(self):
         if self.gear_btn:
@@ -206,7 +196,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.SetBackgroundColour('light gray')
 
-        self.info = wx.StaticText(self, label='Drag queues from the Queues tree to create scheduling lines.', size=(600,18))
+        self.info = wx.StaticText(self, label='Drag queues from the Queues tree to create scheduling lines.')#, size=(600,18))
         self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
 
         vsizer = wx.BoxSizer(wx.VERTICAL)
