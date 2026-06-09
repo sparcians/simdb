@@ -21,7 +21,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.rasterizers = {}
         self.grid = None
 
-        self.info = wx.StaticText(self, label='Drag queues from the NavTree to create scheduling lines.', size=(600,18))
+        self.info = wx.StaticText(self, label='Drag queues from the Queues tree to create scheduling lines.', size=(600,18))
         self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
 
         vsizer = wx.BoxSizer(wx.VERTICAL)
@@ -206,7 +206,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.SetBackgroundColour('light gray')
 
-        self.info = wx.StaticText(self, label='Drag queues from the NavTree to create scheduling lines.', size=(600,18))
+        self.info = wx.StaticText(self, label='Drag queues from the Queues tree to create scheduling lines.', size=(600,18))
         self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
 
         vsizer = wx.BoxSizer(wx.VERTICAL)

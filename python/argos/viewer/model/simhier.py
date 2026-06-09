@@ -13,7 +13,7 @@ class SimHierarchy:
         #        The database has all the metadata to add everything to the hierarchy,
         #        but without any collected data it just looks cluttered.
         #
-        # Queue-only display in the left-hand tree is handled by NavTree (future rename: Queues).
+        # Queue-only display in the left-hand tree is handled by QueuesTree.
         cursor.execute(
             "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes "
             "WHERE ShowInUI=1"

@@ -56,7 +56,8 @@ class ArgosFrame(wx.Frame):
         self.Maximize()
 
     def PostLoad(self, view_file):
-        self.widget_creator.BindToWidgetSource(self.explorer.navtree)
+        self.widget_creator.BindToWidgetSource(self.explorer.queues_tree)
+        self.widget_creator.BindToWidgetSource(self.explorer.scalars_tree)
         self.widget_creator.BindToWidgetSource(self.explorer.tools)
         self.view_settings.PostLoad(self, view_file)
 

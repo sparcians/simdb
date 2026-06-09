@@ -42,7 +42,7 @@ class WidgetCreator:
             widget_creation_str = tree.GetItemText(item)
         else:
             elem_path = tree.GetItemElemPath(item)
-            simhier = self.frame.explorer.navtree.simhier
+            simhier = self.frame.simhier
 
             if elem_path in simhier.GetContainerElemPaths():
                 widget_creation_str = f'IterableStruct${elem_path}'

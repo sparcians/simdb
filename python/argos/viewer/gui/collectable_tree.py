@@ -1,12 +1,12 @@
-import wx, os
+import wx
 from functools import partial
 
-class NavTree(wx.TreeCtrl):
-    def __init__(self, parent, frame):
-        super(NavTree, self).__init__(parent, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT)
+class CollectableTree(wx.TreeCtrl):
+    def __init__(self, parent, frame, leaf_elem_paths):
+        super(CollectableTree, self).__init__(parent, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT)
         self.frame = frame
         self.simhier = frame.simhier
-        self._visible_elem_paths = self.__BuildVisibleElemPaths()
+        self._visible_elem_paths = self.__BuildVisibleElemPaths(leaf_elem_paths)
 
         self._root = self.AddRoot("root")
         self._tree_items_by_id = {0: self._root }
@@ -23,9 +23,6 @@ class NavTree(wx.TreeCtrl):
         self.Bind(wx.EVT_RIGHT_DOWN, self.__OnRightClick)
         self.Bind(wx.EVT_TREE_ITEM_EXPANDED, self.__OnItemExpanded)
 
-        self._utiliz_image_list = frame.widget_renderer.utiliz_handler.CreateUtilizImageList()
-        self.SetImageList(self._utiliz_image_list)
-
         self._tooltips_by_item = {}
         self.Bind(wx.EVT_TREE_ITEM_GETTOOLTIP, self.__ProcessTooltip)
 
@@ -37,33 +34,11 @@ class NavTree(wx.TreeCtrl):
             assert elem_path.find('root.') == -1
 
     def UpdateUtilizBitmaps(self):
-        for elem_path in self.simhier.GetContainerElemPaths():
-            collectable_id = self.simhier.GetCollectionID(elem_path)
-            widget_type = self.simhier.GetWidgetType(collectable_id)
-            if widget_type == 'QueueTable':
-                utiliz_pct = self.frame.widget_renderer.utiliz_handler.GetUtilizPct(elem_path)
-                image_idx = int(utiliz_pct * 100)
-                item = self._leaf_tree_items_by_elem_path[elem_path]
-                self.SetItemImage(item, image_idx)
-
-                capacity = self.simhier.GetCapacityByElemPath(elem_path)
-                size = int(capacity * utiliz_pct)
-                tooltip = '{}\nUtilization: {}% ({}/{} bins filled)'.format(elem_path, round(utiliz_pct*100), size, capacity)
-            elif widget_type == 'Timeseries':
-                image_idx = self._utiliz_image_list.GetImageCount() - 1
-                item = self._leaf_tree_items_by_elem_path[elem_path]
-                self.SetItemImage(item, image_idx)
-                tooltip = '{}\nNo utilization data available for timeseries stats'.format(elem_path)
-            else:
-                item = None 
-                tooltip = None
-
-            if item and tooltip:
-                self._tooltips_by_item[item] = tooltip
+        pass
 
     def ExpandAll(self):
         self.Unbind(wx.EVT_TREE_ITEM_EXPANDED)
-        super(NavTree, self).ExpandAll()
+        super(CollectableTree, self).ExpandAll()
         self.UpdateUtilizBitmaps()
         self.Bind(wx.EVT_TREE_ITEM_EXPANDED, self.__OnItemExpanded)
 
@@ -132,10 +107,11 @@ class NavTree(wx.TreeCtrl):
 
         return expanded_items
 
-    def __BuildVisibleElemPaths(self):
+    @staticmethod
+    def __BuildVisibleElemPaths(leaf_elem_paths):
         visible_paths = set()
-        for container_path in self.simhier.GetContainerElemPaths():
-            parts = container_path.split('.')
+        for leaf_path in leaf_elem_paths:
+            parts = leaf_path.split('.')
             for i in range(1, len(parts) + 1):
                 visible_paths.add('.'.join(parts[:i]))
         return visible_paths
@@ -176,18 +152,18 @@ class NavTree(wx.TreeCtrl):
         menu = wx.Menu()
 
         def ExpandAll(event, **kwargs):
-            kwargs['navtree'].ExpandAll()
+            kwargs['tree'].ExpandAll()
             event.Skip()
 
         def CollapseAll(event, **kwargs):
-            kwargs['navtree'].CollapseAll()
+            kwargs['tree'].CollapseAll()
             event.Skip()
 
         expand_all = menu.Append(-1, "Expand All")
-        self.Bind(wx.EVT_MENU, partial(ExpandAll, navtree=self), expand_all)
+        self.Bind(wx.EVT_MENU, partial(ExpandAll, tree=self), expand_all)
 
         collapse_all = menu.Append(-1, "Collapse All")
-        self.Bind(wx.EVT_MENU, partial(CollapseAll, navtree=self), collapse_all)
+        self.Bind(wx.EVT_MENU, partial(CollapseAll, tree=self), collapse_all)
 
         self.PopupMenu(menu)
         menu.Destroy()
@@ -198,3 +174,41 @@ class NavTree(wx.TreeCtrl):
     def __ProcessTooltip(self, event):
         item = event.GetItem()
         event.SetToolTip(self._tooltips_by_item.get(item, ""))
+
+class QueuesTree(CollectableTree):
+    def __init__(self, parent, frame):
+        super().__init__(parent, frame, frame.simhier.GetContainerElemPaths())
+        self._utiliz_image_list = frame.widget_renderer.utiliz_handler.CreateUtilizImageList()
+        self.SetImageList(self._utiliz_image_list)
+
+    def UpdateUtilizBitmaps(self):
+        for elem_path in self.simhier.GetContainerElemPaths():
+            collectable_id = self.simhier.GetCollectionID(elem_path)
+            widget_type = self.simhier.GetWidgetType(collectable_id)
+            if widget_type == 'QueueTable':
+                utiliz_pct = self.frame.widget_renderer.utiliz_handler.GetUtilizPct(elem_path)
+                image_idx = int(utiliz_pct * 100)
+                item = self._leaf_tree_items_by_elem_path[elem_path]
+                self.SetItemImage(item, image_idx)
+
+                capacity = self.simhier.GetCapacityByElemPath(elem_path)
+                size = int(capacity * utiliz_pct)
+                tooltip = '{}\nUtilization: {}% ({}/{} bins filled)'.format(elem_path, round(utiliz_pct*100), size, capacity)
+            elif widget_type == 'Timeseries':
+                image_idx = self._utiliz_image_list.GetImageCount() - 1
+                item = self._leaf_tree_items_by_elem_path[elem_path]
+                self.SetItemImage(item, image_idx)
+                tooltip = '{}\nNo utilization data available for timeseries stats'.format(elem_path)
+            else:
+                item = None 
+                tooltip = None
+
+            if item and tooltip:
+                self._tooltips_by_item[item] = tooltip
+
+class ScalarsTree(CollectableTree):
+    def __init__(self, parent, frame):
+        simhier = frame.simhier
+        leaf_paths = simhier.GetScalarStatsElemPaths() + simhier.GetScalarStructsElemPaths()
+        leaf_paths.sort()
+        super().__init__(parent, frame, leaf_paths)
