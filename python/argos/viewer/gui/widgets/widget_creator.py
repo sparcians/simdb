@@ -1,10 +1,7 @@
 import wx
 from viewer.gui.widgets.queue_utiliz import QueueUtilizWidget
 from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
-#from viewer.gui.widgets.scalar_statistic import ScalarStatistic
-from viewer.gui.widgets.scalar_struct import ScalarStruct
 from viewer.gui.widgets.iterable_struct import IterableStruct
-#from viewer.gui.widgets.ipc import IPCWidget
 
 class WidgetCreator:
     def __init__(self, frame):
@@ -20,22 +17,14 @@ class WidgetCreator:
             return QueueUtilizWidget(widget_container, self.frame)
         elif widget_creation_key == 'Scheduling Lines':
             return SchedulingLinesWidget(widget_container, self.frame)
-        elif widget_creation_key == 'IPC':
-            #return IPCWidget(widget_container, self.frame)
-            wx.MessageBox('IPC widget is not implemented', 'Error', wx.OK | wx.ICON_ERROR)
         elif widget_creation_key.find('$') != -1:
             widget_name, elem_path = widget_creation_key.split('$')
-            if widget_name == 'ScalarStatistic':
-                #return ScalarStatistic(widget_container, self.frame, elem_path)
-                wx.MessageBox('ScalarStatistic widget is not implemented', 'Error', wx.OK | wx.ICON_ERROR)
-            elif widget_name == 'ScalarStruct':
-                return ScalarStruct(widget_container, self.frame, elem_path)
-            elif widget_name == 'IterableStruct':
+            if widget_name == 'IterableStruct':
                 return IterableStruct(widget_container, self.frame, elem_path)
         elif widget_creation_key == 'NO_WIDGET':
             return None
-        else:
-            raise ValueError(f"Unknown widget creation key: {widget_creation_key}")
+
+        raise ValueError(f"Unknown widget creation key: {widget_creation_key}")
 
     def __BeginDragFromTree(self, event):
         tree = event.GetEventObject()
@@ -52,11 +41,7 @@ class WidgetCreator:
             elem_path = tree.GetItemElemPath(item)
             simhier = self.frame.explorer.navtree.simhier
 
-            if elem_path in simhier.GetScalarStatsElemPaths():
-                widget_creation_str = f'ScalarStatistic${elem_path}'
-            elif elem_path in simhier.GetScalarStructsElemPaths():
-                widget_creation_str = f'ScalarStruct${elem_path}'
-            elif elem_path in simhier.GetContainerElemPaths():
+            if elem_path in simhier.GetContainerElemPaths():
                 widget_creation_str = f'IterableStruct${elem_path}'
 
         if widget_creation_str is None:

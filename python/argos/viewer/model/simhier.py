@@ -55,10 +55,8 @@ class SimHierarchy:
                 else:
                     self._sparse_cids.add(cid)
             elif dtype_inspector.GetStructDefn(dtype) is not None:
-                self._widget_types_by_cid[cid] = 'ScalarStruct'
                 self._scalar_structs_elem_paths.append(leaf.GetPath())
             else:
-                self._widget_types_by_cid[cid] = 'Timeseries'
                 self._scalar_stats_elem_paths.append(leaf.GetPath())
 
         self._widget_types_by_cid = {}
