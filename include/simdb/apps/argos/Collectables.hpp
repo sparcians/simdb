@@ -236,32 +236,6 @@ private:
         return counter;
     }
 
-    void sendBytes_(const std::vector<char>& bytes)
-    {
-        assert(enabled());
-
-        if (quieted())
-        {
-            awaken();
-        }
-
-        auto& collection_data = argos_resources_->getCollectedDataBuffersResource().getFor(getID());
-        collection_data.reset();
-
-        auto& buf = collection_data.getBuffer();
-        buf.append(FULL_ACTION_FLAG); // TODO cnyce: minifiers
-        buf.append(bytes);
-        stager_->stage(collection_data);
-
-        // This code was working with the previous collector design for Minifiers.hpp
-        // to save a ton on disk space:
-        // https://github.com/sparcians/simdb/pull/185/changes/5988aa743d015c1f0fa6f16fe9f6b517b191b679#diff-2315254eec5b0d00f82ecc99fd169ee680eaca658a10a54f0f2f5e914131b4a4
-        //
-        // We'll port the minifier code to the latest design when the non-optimized
-        // Argos collector has settled a bit. For now, we'll accept lots of waste by
-        // doing full byte dumps each time (FULL_ACTION_FLAG).
-    }
-
     /// Unique collectable ID
     const uint16_t cid_{nextCID_()};
 
