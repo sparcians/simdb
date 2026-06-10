@@ -157,6 +157,8 @@ public:
         }
     }
 
+    size_t getNumValues() const { return col_vals_.size(); }
+
 private:
     std::list<std::shared_ptr<ValueContainerBase>> col_vals_;
 };

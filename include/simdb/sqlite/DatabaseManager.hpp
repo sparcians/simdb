@@ -544,6 +544,11 @@ private:
     /// \see See public INSERT() method for details on how to call this method.
     std::unique_ptr<SqlRecord> INSERT_(SqlTable&& table, SqlColumns&& cols, SqlValues&& vals)
     {
+        if (cols.getColNames().size() != vals.getNumValues())
+        {
+            throw DBException("Mismatching number of columns and values");
+        }
+
         std::unique_ptr<SqlRecord> record;
 
         db_conn_->safeTransaction([&]() {
