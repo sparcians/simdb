@@ -171,7 +171,7 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
-    //! TODO cnyce: Once the collection code from Sparta is merged into SimDB, change this
+    //! TODO cnyce: Once the collection code from Sparta is moved to SimDB, change this
     //! to a template method so we can figure out the encoded data type name ourselves.
     //! Scalar types are encoded as follows:
     //!
@@ -211,7 +211,7 @@ public:
         return collectors_.back().get();
     }
 
-    //! TODO cnyce: Once the collection code from Sparta is merged into SimDB, change this
+    //! TODO cnyce: Once the collection code from Sparta is moved to SimDB, change this
     //! to a template method so we can figure out the encoded data type name ourselves.
     //! Container types are encoded as follows:
     //!

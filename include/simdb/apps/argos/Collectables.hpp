@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/apps/argos/ArgosResources.hpp"
+#include "simdb/apps/argos/Minifiers.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/Demangle.hpp"
@@ -15,14 +16,15 @@ namespace simdb::argos {
 //! \brief Main entry point into Argos collection.
 //!
 //! TODO cnyce: These need to be template classes when the collection
-//! code from Sparta is merged into SimDB.
+//! code from Sparta is moved into SimDB.
 class CollectionEntryPoint
 {
 public:
-    CollectionEntryPoint(ArgosResources* resource_container) :
+    CollectionEntryPoint(ArgosResources* resource_container, bool enable_minification = true) :
         stager_(resource_container->getStagerResource()),
         tiny_strings_(resource_container->getTinyStringsResource()),
-        argos_resources_(resource_container)
+        argos_resources_(resource_container),
+        enable_minification_(enable_minification)
     {
     }
 
@@ -94,28 +96,35 @@ public:
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() const { return tiny_strings_.get(); }
 
-    /// TODO cnyce: Remove this method when Sparta/SimDB is merged. We can figure
-    /// this out using <T> only.
+    /// TODO cnyce: Remove this method when Sparta collection code is moved to SimDB.
+    /// We can figure this out using <T> only.
     void setScalarDataType(const std::string& dtype)
     {
         assert(collectable_type_name_.empty());
         collectable_type_name_ = dtype;
-        is_scalar_ = true;
+        minifier_ = std::make_unique<Minifier>(argos_resources_, getID(), !enable_minification_);
     }
 
-    /// TODO cnyce: Remove this method when Sparta/SimDB is merged. We can figure
-    /// this out using <T> only.
+    /// TODO cnyce: Remove this method when Sparta collection code is moved to SimDB.
+    /// We can figure this out using <T> only.
     void setContainerDataType(const std::string& encoded_container_type)
     {
         assert(collectable_type_name_.empty());
         collectable_type_name_ = encoded_container_type;
+
+        size_t pos = encoded_container_type.find_last_not_of("0123456789");
+        auto capacity = std::stoi(encoded_container_type.substr(pos + 1));
+        assert(capacity <= UINT16_MAX);
+
         if (encoded_container_type.find("_sparse") != std::string::npos)
         {
-            is_sparse_container_ = true;
+            minifier_ =
+                std::make_unique<Minifier>(argos_resources_, getID(), true, (uint16_t)capacity, !enable_minification_);
         } else
         {
             assert(encoded_container_type.find("_contig") != std::string::npos);
-            is_contig_container_ = true;
+            minifier_ =
+                std::make_unique<Minifier>(argos_resources_, getID(), false, (uint16_t)capacity, !enable_minification_);
         }
     }
 
@@ -140,8 +149,7 @@ public:
             return;
         }
 
-        assert(is_scalar_);
-        sendBytes_(bytes);
+        minifier_->minifyAndSend(bytes);
     }
 
     //! \see setScalarValueBytes
@@ -152,7 +160,7 @@ public:
             return;
         }
 
-        assert(is_contig_container_);
+        // TODO cnyce: add this to the Minifier
         uint64_t size = 0;
         for (const auto& bytes : bin_bytes)
         {
@@ -174,16 +182,7 @@ public:
             max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
         }
 
-        std::vector<char> final_bytes;
-        StreamBuffer buf(final_bytes);
-        buf.append((uint16_t)size);
-
-        for (uint64_t i = 0; i < size; ++i)
-        {
-            buf.append(bin_bytes[i]);
-        }
-
-        sendBytes_(final_bytes);
+        minifier_->minifyAndSend(bin_bytes);
     }
 
     //! \see setScalarValueBytes
@@ -194,7 +193,7 @@ public:
             return;
         }
 
-        assert(is_sparse_container_);
+        // TODO cnyce: add this to the Minifier
         uint64_t size = 0;
         for (const auto& [_, bytes] : bin_bytes)
         {
@@ -213,20 +212,7 @@ public:
             max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
         }
 
-        std::vector<char> final_bytes;
-        StreamBuffer buf(final_bytes);
-        buf.append((uint16_t)size);
-
-        for (const auto& [bin_idx, bytes] : bin_bytes)
-        {
-            if (!bytes.empty())
-            {
-                buf.append(bin_idx);
-                buf.append(bytes);
-            }
-        }
-
-        sendBytes_(final_bytes);
+        minifier_->minifyAndSend(bin_bytes);
     }
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr) const
@@ -286,14 +272,13 @@ private:
     bool quiet_ = false;
 
     std::string collectable_type_name_;
-    ValidValue<bool> is_scalar_;
-    ValidValue<bool> is_contig_container_;
-    ValidValue<bool> is_sparse_container_;
     ValidValue<uint16_t> max_container_size_seen_;
 
     PipelineStagerResource& stager_;
     TinyStringsResource& tiny_strings_;
     ArgosResources* const argos_resources_;
+    std::unique_ptr<Minifier> minifier_;
+    const bool enable_minification_;
 };
 
 } // namespace simdb::argos

@@ -38,6 +38,8 @@ public:
     {
     }
 
+    size_t getHeartbeat() const { return heartbeat_; }
+
     void stage(const CollectedData& data)
     {
         auto cid = data.getCID();
