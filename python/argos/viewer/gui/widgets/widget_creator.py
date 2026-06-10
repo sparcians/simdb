@@ -47,7 +47,7 @@ class WidgetCreator:
             if elem_path in simhier.GetContainerElemPaths():
                 widget_creation_str = f'IterableStruct${elem_path}'
             elif elem_path in simhier.GetScalarStatsElemPaths() or elem_path in simhier.GetScalarStructsElemPaths():
-                widget_creation_str = elem_path
+                widget_creation_str = f'Unknown${elem_path}'
 
         if widget_creation_str is None:
             event.Skip()

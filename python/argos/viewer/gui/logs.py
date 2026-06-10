@@ -56,3 +56,6 @@ class CollectionLogs(scrolled.ScrolledPanel):
         self.SetSizer(sizer)
         self.SetupScrolling()
         self.Layout()
+
+    def UpdateWidgets(self):
+        pass
