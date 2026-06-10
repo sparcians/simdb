@@ -298,7 +298,7 @@ class SummaryGrid(wx.Panel):
                 self.SetLabel(label)
                 self.SetToolTip(label)
             else:
-                self.SetLabel('(none)')
+                self.SetLabel('(no data)')
 
         def __HandleContextMenu(self, evt, auto_color):
             self.auto_color = auto_color
@@ -317,7 +317,7 @@ class SummaryGrid(wx.Panel):
                 label = f'{pct} full ({size}/{self.capacity})'
                 self.SetLabel(label)
             else:
-                self.SetLabel('(empty)')
+                self.SetLabel('(no data)')
 
 class SummaryViewsEditDialog(wx.Dialog):
     _TREE_STYLE = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT | wx.TR_MULTIPLE

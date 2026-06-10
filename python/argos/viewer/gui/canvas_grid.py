@@ -167,11 +167,29 @@ class CanvasGrid(wx.Panel):
 
         self.PopupMenu(menu, pos)
 
+    def __GetWidgetState(self):
+        if not isinstance(self.container, WidgetContainer):
+            return None, None
+
+        widget = self.container.GetWidget()
+        if widget is None:
+            return None, None
+
+        return widget.GetWidgetCreationString(), widget.GetCurrentViewSettings()
+
+    @staticmethod
+    def __PlaceWidgetInContainer(frame, widget_container, widget_creation_str, widget_settings):
+        if not widget_creation_str:
+            return
+
+        widget = frame.widget_creator.CreateWidget(widget_creation_str, widget_container)
+        if widget_settings is not None:
+            widget.ApplyViewSettings(widget_settings)
+
+        widget_container.SetWidget(widget)
+
     def __OnSplitVertically(self, event):
-        widget_creation_str = None
-        if self.container:
-            widget = self.container.GetWidget()
-            widget_creation_str = widget.GetWidgetCreationString() if widget else None
+        widget_creation_str, widget_settings = self.__GetWidgetState()
 
         if self.container:
             self.container.DestroyAllWidgets()
@@ -181,21 +199,15 @@ class CanvasGrid(wx.Panel):
         self.GetSizer().Add(self.container, 1, wx.EXPAND)
         self.Layout()
 
-        if widget_creation_str:
-            win1 = self.container.container.GetWindow1()
-            widget_container = win1.container
-            widget = self.container.frame.widget_creator.CreateWidget(widget_creation_str, widget_container)
-            widget_container.SetWidget(widget)
+        win1 = self.container.container.GetWindow1()
+        self.__PlaceWidgetInContainer(self.frame, win1.container, widget_creation_str, widget_settings)
 
         splitter = self.container.container
         splitter.SetSashPosition(splitter.GetSize().GetWidth() // 2)
         self.frame.view_settings.SetDirty(reason=DirtyReasons.WidgetSplit)
 
     def __OnSplitHorizontally(self, event):
-        widget_creation_str = None
-        if self.container:
-            widget = self.container.GetWidget()
-            widget_creation_str = widget.GetWidgetCreationString() if widget else None
+        widget_creation_str, widget_settings = self.__GetWidgetState()
 
         if self.container:
             self.container.DestroyAllWidgets()
@@ -205,11 +217,8 @@ class CanvasGrid(wx.Panel):
         self.GetSizer().Add(self.container, 1, wx.EXPAND)
         self.Layout()
 
-        if widget_creation_str:
-            win1 = self.container.container.GetWindow1()
-            widget_container = win1.container
-            widget = self.container.frame.widget_creator.CreateWidget(widget_creation_str, widget_container)
-            widget_container.SetWidget(widget)
+        win1 = self.container.container.GetWindow1()
+        self.__PlaceWidgetInContainer(self.frame, win1.container, widget_creation_str, widget_settings)
 
         splitter = self.container.container
         splitter.SetSashPosition(splitter.GetSize().GetHeight() // 2)
@@ -225,17 +234,17 @@ class CanvasGrid(wx.Panel):
         return None
 
     def __Explode(self, event):
-        widget = self.container.GetWidget()
-        widget_creation_str = widget.GetWidgetCreationString() if widget else None
+        widget_creation_str, widget_settings = self.__GetWidgetState()
 
-        frame = self.container.frame
+        frame = self.frame
         inspector = frame.inspector
         inspector.ResetCurrentTab()
 
         if widget_creation_str:
             containers = inspector.GetCurrentTabWidgetContainers()
-            widget = frame.widget_creator.CreateWidget(widget_creation_str, containers[0])
-            containers[0].SetWidget(widget)
+            CanvasGrid.__PlaceWidgetInContainer(
+                frame, containers[0], widget_creation_str, widget_settings,
+            )
 
         frame.view_settings.SetDirty(reason=DirtyReasons.CanvasExploded)
 

@@ -496,7 +496,7 @@ class SchedulingLinesWidget(wx.Panel):
         auto_colorize_column = self.frame.data_retriever.GetAutoColorizeColumn(elem_path)
         unpacked = self.frame.data_retriever.Unpack(elem_path, cell_tick)
         data_vals = unpacked['DataVals'][0]
-        if data_vals is None:
+        if data_vals is None or int(bin_idx) >= len(data_vals):
             return
 
         bin_data = data_vals[int(bin_idx)]
