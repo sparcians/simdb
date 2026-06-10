@@ -8,11 +8,13 @@ class SummaryViews(wx.Panel):
     def __init__(self, parent, frame):
         super().__init__(parent)
         self.frame = frame
-        self.info = None
+        self.gear_btn = None
+        self.placeholder_label = None
+        self.summary_scroller = None
         self.summary = None
         self._summary_grid_dirty = True
         self._elem_paths_by_cid = {}
-        self.__ShowUsageInfo()
+        self.__ShowEmptyPlaceholder()
 
     @property
     def elem_paths(self):
@@ -67,73 +69,101 @@ class SummaryViews(wx.Panel):
 
     def __Refresh(self):
         if len(self.elem_paths):
-            if self.info:
-                self.info.Destroy()
-                self.info = None
+            self.__DestroyEmptyPlaceholder()
 
             self.SetBackgroundColour('white')
             self.__RegenerateSummary()
         else:
-            if self.summary:
+            if self.summary_scroller:
+                self.summary_scroller.Destroy()
+                self.summary_scroller = None
+                self.summary = None
+            elif self.summary:
                 self.summary.Destroy()
                 self.summary = None
 
             self._summary_grid_dirty = True
-            self.__ShowUsageInfo()
+            self.__ShowEmptyPlaceholder()
+
+    def __DestroyEmptyPlaceholder(self):
+        if self.gear_btn:
+            self.gear_btn.Destroy()
+            self.gear_btn = None
+
+        if self.placeholder_label:
+            self.placeholder_label.Destroy()
+            self.placeholder_label = None
 
     def __RegenerateSummary(self):
         assert len(self.elem_paths)
         if self._summary_grid_dirty:
-            if self.summary:
-                self.summary.Destroy()
-            self.summary = SummaryGrid(self, self.frame, self.elem_paths)
+            if self.summary_scroller:
+                self.summary_scroller.Destroy()
+                self.summary_scroller = None
+                self.summary = None
+
+            self.summary_scroller = wx.ScrolledWindow(self, style=wx.VSCROLL | wx.HSCROLL)
+            self.summary_scroller.SetScrollRate(10, 10)
+            self.summary = SummaryGrid(self.summary_scroller, self.frame, self.elem_paths, self)
+
+            scroller_sizer = wx.BoxSizer(wx.VERTICAL)
+            scroller_sizer.Add(self.summary, 0)
+            self.summary_scroller.SetSizer(scroller_sizer)
 
             if not self.GetSizer():
                 self.SetSizer(wx.BoxSizer(wx.HORIZONTAL))
             hsizer = self.GetSizer()
             hsizer.Clear()
             hsizer.AddSpacer(5)
+            hsizer.Add(self.summary_scroller, 1, wx.EXPAND | wx.ALL, 5)
 
-            vsizer = wx.BoxSizer(wx.VERTICAL)
-            vsizer.AddSpacer(5)
-            vsizer.Add(self.summary)
-            hsizer.Add(vsizer)
+            self.summary.Layout()
+            self.summary_scroller.Layout()
+            self.summary_scroller.FitInside()
 
             self._summary_grid_dirty = False
 
         self.summary.UpdateWidgetData()
         self.Layout()
 
-    def __ShowUsageInfo(self):
-        if self.info:
-            self.info.Destroy()
-            self.info = None
+    def __ShowEmptyPlaceholder(self):
+        self.__DestroyEmptyPlaceholder()
 
         if self.GetSizer():
             self.GetSizer().Clear()
 
         self.SetBackgroundColour('light gray')
 
-        self.info = wx.StaticText(self, label='Drag collectables from the Queues/Scalars tree to create summary views.')
-        self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-
-        vsizer = wx.BoxSizer(wx.VERTICAL)
-        vsizer.AddStretchSpacer()
-        vsizer.Add(self.info, 1, wx.ALL | wx.CENTER | wx.EXPAND, 5)
-        vsizer.AddStretchSpacer()
+        self.gear_btn = self.frame.CreateSettingsButton(self)
+        self.gear_btn.Bind(wx.EVT_BUTTON, self.EditWidget)
+        self.placeholder_label = wx.StaticText(self, label='Make selections')
 
         hsizer = wx.BoxSizer(wx.HORIZONTAL)
-        hsizer.AddStretchSpacer()
-        hsizer.Add(vsizer, 0, wx.CENTER | wx.EXPAND)
-        hsizer.AddStretchSpacer()
+        hsizer.AddSpacer(5)
+        hsizer.Add(self.gear_btn, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        hsizer.Add(self.placeholder_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 
-        self.SetSizer(hsizer)
+        vsizer = wx.BoxSizer(wx.VERTICAL)
+        vsizer.AddSpacer(5)
+        vsizer.Add(hsizer, 0, wx.EXPAND)
+
+        self.SetSizer(vsizer)
         self.Layout()
 
+    def EditWidget(self, evt):
+        dlg = SummaryViewsEditDialog(self, self.frame, self.elem_paths)
+        result = dlg.ShowModal()
+        if result == wx.ID_OK:
+            elem_paths = dlg.GetSelectedElemPaths()
+        dlg.Destroy()
+        if result == wx.ID_OK:
+            self.ApplyViewSettings({'elem_paths': elem_paths})
+
 class SummaryGrid(wx.Panel):
-    def __init__(self, parent, frame, elem_paths):
+    def __init__(self, parent, frame, elem_paths, summary_views):
         wx.Panel.__init__(self, parent)
         self.frame = frame
+        self.summary_views = summary_views
         self.value_handlers = {}
         self.gear_btn = None
 
@@ -160,7 +190,7 @@ class SummaryGrid(wx.Panel):
         mono10_bold = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
 
         self.gear_btn = frame.CreateSettingsButton(self)
-        self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
+        self.gear_btn.Bind(wx.EVT_BUTTON, self.summary_views.EditWidget)
         self.gear_btn.SetToolTip('Edit widget settings')
 
         row = 0
@@ -231,16 +261,6 @@ class SummaryGrid(wx.Panel):
 
             handler.UpdateValue(value)
 
-    def __EditWidget(self, evt):
-        summary_views = self.GetParent()
-        dlg = SummaryViewsEditDialog(summary_views, self.frame, summary_views.elem_paths)
-        result = dlg.ShowModal()
-        if result == wx.ID_OK:
-            elem_paths = dlg.GetSelectedElemPaths()
-        dlg.Destroy()
-        if result == wx.ID_OK:
-            summary_views.ApplyViewSettings({'elem_paths': elem_paths})
-
     class SimpleSummary(wx.StaticText):
         def __init__(self, parent, frame):
             wx.StaticText.__init__(self, parent, label='TODO')
@@ -274,7 +294,9 @@ class SummaryGrid(wx.Panel):
                     field_value = str(field_value)
                     field_value = re.sub(r'\s+', ' ', field_value)
                     label.append(f'{field_name}({field_value})')
-                self.SetLabel(' '.join(label))
+                label = ' '.join(label)
+                self.SetLabel(label)
+                self.SetToolTip(label)
             else:
                 self.SetLabel('(none)')
 
