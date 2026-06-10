@@ -114,7 +114,7 @@ class SummaryViews(wx.Panel):
 
         self.SetBackgroundColour('light gray')
 
-        self.info = wx.StaticText(self, label='Drag collectables from the Queues/Scalars tree to create summary views.')#, size=(750,18))
+        self.info = wx.StaticText(self, label='Drag collectables from the Queues/Scalars tree to create summary views.')
         self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
 
         vsizer = wx.BoxSizer(wx.VERTICAL)
@@ -166,9 +166,11 @@ class SummaryGrid(wx.Panel):
         row = 0
         sizer.Add(self.gear_btn, pos=(row,0))
 
-        max_parent_len = 0
+        max_label_len = 0
         for parent, leaves in collectable_grps.items():
-            max_parent_len = max(max_parent_len, len(parent))
+            max_label_len = max(max_label_len, len(parent))
+            for leaf in leaves:
+                max_label_len = max(max_label_len, len(leaf))
 
         row += 1
         for parent, leaves in collectable_grps.items():
@@ -179,7 +181,7 @@ class SummaryGrid(wx.Panel):
 
             for leaf in leaves:
                 full_path = parent + '.' + leaf
-                num_dashes = max_parent_len - len(leaf) - 1
+                num_dashes = max_label_len - len(leaf) + 1
                 if num_dashes > 0:
                     label = '-'*num_dashes + ' '
                 else:
