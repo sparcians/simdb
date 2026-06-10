@@ -153,6 +153,11 @@ public:
             buf.append(Action::FULL);
             buf.append(scalar_bytes);
             cycles_since_last_full_ = 0;
+
+            if (!full_dump_only_)
+            {
+                prev_scalar_bytes_ = scalar_bytes;
+            }
         } else
         {
             buf.append(Action::CARRY);
@@ -160,7 +165,6 @@ public:
         }
 
         has_history_ = true;
-        prev_scalar_bytes_ = scalar_bytes;
         stager_->stage(std::move(data));
     }
 
@@ -181,6 +185,7 @@ public:
             // Always need to rebase when we hit a heartbeat
             (cycles_since_last_full_ + 1) % stager_->getHeartbeat() == 0;
 
+        has_history_ = true;
         auto curr_size = getNumElements_(contig_bin_bytes);
 
         if (write_full)
@@ -192,8 +197,11 @@ public:
                 buf.append(contig_bin_bytes[i]);
             }
             stager_->stage(std::move(data));
-            prev_contig_bins_ = contig_bin_bytes;
-            cycles_since_last_full_ = 0;
+            if (!full_dump_only_)
+            {
+                prev_contig_bins_ = contig_bin_bytes;
+                cycles_since_last_full_ = 0;
+            }
             return;
         }
 
@@ -350,6 +358,7 @@ public:
             // Always need to rebase when we hit a heartbeat
             (cycles_since_last_full_ + 1) % stager_->getHeartbeat() == 0;
 
+        has_history_ = true;
         auto curr_size = getNumElements_(sparse_bin_bytes);
 
         if (write_full)
@@ -365,8 +374,12 @@ public:
                 }
             }
             stager_->stage(std::move(data));
-            prev_sparse_bins_ = sparse_bin_bytes;
-            cycles_since_last_full_ = 0;
+
+            if (!full_dump_only_)
+            {
+                prev_sparse_bins_ = sparse_bin_bytes;
+                cycles_since_last_full_ = 0;
+            }
             return;
         }
 
