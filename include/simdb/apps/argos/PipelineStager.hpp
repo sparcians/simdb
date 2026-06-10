@@ -149,24 +149,69 @@ public:
         auto query = db_mgr->createQuery("CollectableTreeNodes");
         query->addConstraintForInt("SerializationCID", SetConstraints::NOT_IN_SET, valid_cids);
 
+        struct CID_Info
+        {
+            std::string path;
+            std::string type;
+
+            CID_Info(const std::string& path, const std::string& type) :
+                path(path),
+                type(type)
+            {
+            }
+            CID_Info(const CID_Info&) = default;
+            CID_Info(CID_Info&&) = default;
+        };
+
         std::string path;
         query->select("FullPath", path);
 
-        std::set<std::string> uncollected_paths;
+        std::string type;
+        query->select("TypeName", type);
+
+        std::vector<CID_Info> cid_infos;
         auto results = query->getResultSet();
         while (results.getNextRecord())
         {
-            uncollected_paths.insert(path);
+            cid_infos.emplace_back(path, type);
         }
 
-        if (!uncollected_paths.empty())
+        if (!cid_infos.empty())
         {
             oss.str("");
             oss.clear();
             oss << "No data was ever collected for the following collectables, and will not be shown in Argos:\n";
-            for (const auto& bad_path : uncollected_paths)
+            // top.cpu.core0.fetch.next_pc            (unsigned long)
+            // top.cpu.core0.rob.retire               (Contiguous container of 'Inst')
+            size_t leftcol_w = 0;
+            for (const auto& info : cid_infos)
             {
-                oss << bad_path << "\n";
+                leftcol_w = std::max(leftcol_w, info.path.size());
+            }
+
+            leftcol_w += 12;
+            for (const auto& info : cid_infos)
+            {
+                oss << std::left << std::setw(leftcol_w) << info.path;
+                if (auto idx = info.type.find("_sparse"); idx != std::string::npos)
+                {
+                    // Inst_sparse_capacity32
+                    auto base_type = type.substr(0, idx);
+                    oss << "(Sparse container of '" << base_type << "')";
+                } else if (auto idx = info.type.find("_contig"); idx != std::string::npos)
+                {
+                    // Inst_contig_capacity12
+                    auto base_type = type.substr(0, idx);
+                    oss << "(Contig container of '" << base_type << "')";
+                } else
+                {
+                    // Inst
+                    // unsigned long
+                    // MMUState
+                    // ...
+                    oss << "(" << type << ")";
+                }
+                oss << "\n";
             }
 
             auto warning = oss.str();
