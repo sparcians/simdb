@@ -173,9 +173,8 @@ public:
             warning.pop_back(); // remove newline
 
             constexpr auto no_cid = 0;
-            db_mgr->INSERT(
-                SQL_TABLE("Notifications"),
-                SQL_VALUES(no_cid, warning, (int)NotifType::WARNING));
+            db_mgr->INSERT(SQL_TABLE("Notifications"), SQL_COLUMNS("SerializationCID", "NotifStr", "NotifType"),
+                           SQL_VALUES(no_cid, warning, (int)NotifType::WARNING));
         }
     }
 
