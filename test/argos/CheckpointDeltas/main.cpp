@@ -14,9 +14,9 @@ int main()
     const std::vector<char> payload_b{'X', 'Y', 'Z'};
     const std::vector<char> empty;
 
-    EXPECT_EQUAL(classifyScalarChange(empty, payload_a), ScalarDeltaKind::Changed);
-    EXPECT_EQUAL(classifyScalarChange(payload_a, payload_a), ScalarDeltaKind::Unchanged);
-    EXPECT_EQUAL(classifyScalarChange(payload_a, payload_b), ScalarDeltaKind::Changed);
+    EXPECT_EQUAL(classifyScalarChange(empty, payload_a), ScalarDeltaKind::CHANGED);
+    EXPECT_EQUAL(classifyScalarChange(payload_a, payload_a), ScalarDeltaKind::UNCHANGED);
+    EXPECT_EQUAL(classifyScalarChange(payload_a, payload_b), ScalarDeltaKind::CHANGED);
 
     REPORT_ERROR;
     return ERROR_CODE;
