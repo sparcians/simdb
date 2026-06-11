@@ -2,7 +2,6 @@
 
 #include "SimDBTester.hpp"
 #include "simdb/apps/argos/CheckpointPipelineStager.hpp"
-#include "simdb/utils/ConcurrentQueue.hpp"
 
 namespace {
 
@@ -32,20 +31,33 @@ std::vector<char> getPayload(const simdb::argos::CollectedData& data)
     return std::vector<char>(bytes.begin() + kCidBytes + kActionBytes, bytes.end());
 }
 
+void expectCheckpointAction(const QueueCollectionData& slot, uint16_t cid, Action action)
+{
+    auto it = slot.checkpoints.find(cid);
+    EXPECT_TRUE(it != slot.checkpoints.end());
+    auto data = it->second->getMinifiedData();
+    EXPECT_EQUAL(getActionByte(*data), static_cast<uint8_t>(action));
+}
+
+void expectCheckpointPayload(const QueueCollectionData& slot, uint16_t cid, const std::vector<char>& payload)
+{
+    auto it = slot.checkpoints.find(cid);
+    EXPECT_TRUE(it != slot.checkpoints.end());
+    auto data = it->second->getMinifiedData();
+    EXPECT_EQUAL(getPayload(*data), payload);
+}
+
 class TestHarness
 {
 public:
     TestHarness() :
-        stager_(kHeartbeat, &timestamp_, &pipeline_queue_)
+        stager_(kHeartbeat, &timestamp_, nullptr)
     {
         stager_.disableAutoSendMode(true);
         stager_.setScalarType(kCid);
     }
 
-    void setTime(uint64_t time)
-    {
-        sim_time_ = time;
-    }
+    void setTime(uint64_t time) { sim_time_ = time; }
 
     void stage(const std::vector<char>& payload) { stager_.stage(kCid, payload); }
 
@@ -53,34 +65,23 @@ public:
 
     void enable() { stager_.onEnabledChanged(kCid, true); }
 
-    void flush()
-    {
-        stager_.sendCollectedDataToPipeline();
-    }
-
     void advanceSlot() { stager_.advanceSimTimeSlot(); }
 
-    bool pop(QueueCollectionData& entry) { return pipeline_queue_.try_pop(entry); }
+    const std::vector<QueueCollectionData>& waitingQueue() const { return stager_.getWaitingQueue(); }
 
-    CheckpointPipelineStager& stager() { return stager_; }
+    const QueueCollectionData& backSlot() const
+    {
+        EXPECT_FALSE(waitingQueue().empty());
+        return waitingQueue().back();
+    }
+
+    void clearWaiting() { stager_.clearWaitingQueue(); }
 
 private:
     uint64_t sim_time_ = 0;
     simdb::argos::Timestamp timestamp_{&sim_time_};
-    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
     CheckpointPipelineStager stager_;
 };
-
-void expectSingleAction(const QueueCollectionData& entry, Action action)
-{
-    EXPECT_EQUAL(entry.collection_data.size(), 1u);
-    EXPECT_EQUAL(getActionByte(*entry.collection_data[0]), static_cast<uint8_t>(action));
-}
-
-void expectPayload(const QueueCollectionData& entry, const std::vector<char>& payload)
-{
-    EXPECT_EQUAL(getPayload(*entry.collection_data[0]), payload);
-}
 
 void testFullThenCarry()
 {
@@ -89,18 +90,14 @@ void testFullThenCarry()
     TestHarness harness;
     harness.setTime(100);
     harness.stage(payload);
-    harness.flush();
-
-    QueueCollectionData entry;
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::FULL);
-    expectPayload(entry, payload);
+    EXPECT_EQUAL(harness.waitingQueue().size(), 1u);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::FULL);
+    expectCheckpointPayload(harness.backSlot(), kCid, payload);
 
     harness.setTime(101);
     harness.stage(payload);
-    harness.flush();
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::CARRY);
+    EXPECT_EQUAL(harness.waitingQueue().size(), 2u);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::CARRY);
 }
 
 void testOnCollectionHeartbeat()
@@ -110,27 +107,20 @@ void testOnCollectionHeartbeat()
     TestHarness harness;
     harness.setTime(100);
     harness.stage(payload);
-    harness.flush();
-    QueueCollectionData entry;
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::FULL);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::FULL);
 
     harness.setTime(101);
     harness.stage(payload);
-    harness.flush();
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::CARRY);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::CARRY);
 
     harness.setTime(102);
     harness.stage(payload);
-    harness.flush();
-    EXPECT_FALSE(harness.pop(entry));
+    expectCheckpointAction(harness.backSlot(), kCid, Action::CARRY);
 
     harness.setTime(103);
     harness.stage(payload);
-    harness.flush();
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::FULL);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::FULL);
+    expectCheckpointPayload(harness.backSlot(), kCid, payload);
 }
 
 void testDisableAndReenable()
@@ -140,52 +130,44 @@ void testDisableAndReenable()
     TestHarness harness;
     harness.setTime(100);
     harness.stage(payload);
-    harness.flush();
-    QueueCollectionData entry;
-    EXPECT_TRUE(harness.pop(entry));
 
     harness.setTime(101);
     harness.disable();
-    harness.flush();
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::DISABLED);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::DISABLED);
 
     harness.setTime(102);
     harness.enable();
-    harness.flush();
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::FULL);
-    expectPayload(entry, payload);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::FULL);
+    expectCheckpointPayload(harness.backSlot(), kCid, payload);
 }
 
-void testMissingCidHeartbeatInject()
+void testLifecycleDoesNotMutateEarlierSlots()
 {
-    const std::vector<char> payload{'X'};
+    const std::vector<char> payload{'A', 'B', 'C'};
 
     TestHarness harness;
     harness.setTime(100);
     harness.stage(payload);
-    harness.flush();
-    QueueCollectionData entry;
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::FULL);
+
+    harness.setTime(101);
+    harness.disable();
+
+    EXPECT_EQUAL(harness.waitingQueue().size(), 2u);
+    expectCheckpointAction(harness.waitingQueue()[0], kCid, Action::FULL);
+    expectCheckpointAction(harness.waitingQueue()[1], kCid, Action::DISABLED);
+}
+
+void testEmptyTimeSlot()
+{
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage({'X'});
+    EXPECT_EQUAL(harness.backSlot().checkpoints.size(), 1u);
 
     harness.setTime(101);
     harness.advanceSlot();
-    harness.flush();
-    EXPECT_FALSE(harness.pop(entry));
-
-    harness.setTime(102);
-    harness.advanceSlot();
-    harness.flush();
-    EXPECT_FALSE(harness.pop(entry));
-
-    harness.setTime(103);
-    harness.advanceSlot();
-    harness.flush();
-    EXPECT_TRUE(harness.pop(entry));
-    expectSingleAction(entry, Action::FULL);
-    expectPayload(entry, payload);
+    EXPECT_EQUAL(harness.waitingQueue().size(), 2u);
+    EXPECT_TRUE(harness.backSlot().checkpoints.empty());
 }
 
 } // namespace
@@ -197,7 +179,8 @@ int main()
     testFullThenCarry();
     testOnCollectionHeartbeat();
     testDisableAndReenable();
-    testMissingCidHeartbeatInject();
+    testLifecycleDoesNotMutateEarlierSlots();
+    testEmptyTimeSlot();
 
     REPORT_ERROR;
     return ERROR_CODE;
