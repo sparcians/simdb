@@ -40,6 +40,50 @@ public:
 
     size_t getHeartbeat() const { return heartbeat_; }
 
+    void setScalarType(uint16_t cid)
+    {
+        scalar_cids_.insert(cid);
+    }
+
+    void setContainerType(uint16_t cid, bool sparse, size_t capacity)
+    {
+        container_cids_.insert(cid);
+        container_sparse_flags_[cid] = sparse;
+        container_capacities_[cid] = capacity;
+    }
+
+    void enableMinification(uint16_t cid, bool enable = true)
+    {
+        if (enable)
+        {
+            minified_cids_.insert(cid);
+        }
+    }
+
+    void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
+    {
+        // TODO XXX:
+        //   - capture delta checkpoint whether this is a heartbeat or not
+        //   - check if time has advanced; create new waiting queue slot if so
+        //   - waiting queue should hold onto a map<CID, Checkpoint>
+        (void)cid;
+        (void)scalar_bytes;
+    }
+
+    void stage(uint16_t cid, const std::vector<std::vector<char>>& contig_bin_bytes)
+    {
+        // TODO XXX: ditto above
+        (void)cid;
+        (void)contig_bin_bytes;
+    }
+
+    void stage(uint16_t cid, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+    {
+        // TODO XXX: ditto above
+        (void)cid;
+        (void)sparse_bin_bytes;
+    }
+
     void stage(const CollectedData& data)
     {
         auto cid = data.getCID();
@@ -476,6 +520,14 @@ private:
     std::queue<QueueCollectionData> waiting_queue_;
     ValidValue<uint64_t> last_stage_time_;
     bool auto_send_when_time_advances_ = true;
+
+    std::unordered_set<uint16_t> scalar_cids_;
+    std::unordered_set<uint16_t> container_cids_;
+    std::unordered_map<uint16_t, bool> container_sparse_flags_;
+    std::unordered_map<uint16_t, size_t> container_capacities_;
+    std::unordered_set<uint16_t> minified_cids_;
+    //std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
+
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
     std::unordered_map<uint16_t, size_t> countdowns_to_refresh_;

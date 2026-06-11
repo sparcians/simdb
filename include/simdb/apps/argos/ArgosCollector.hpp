@@ -286,10 +286,6 @@ public:
 
     void postTeardown() override
     {
-        for (auto& collector : collectors_)
-        {
-            collector->writeMetaOnPostTeardown(db_mgr_);
-        }
         resources_.writeMetaOnPostTeardown(db_mgr_);
 
         if (verbose())

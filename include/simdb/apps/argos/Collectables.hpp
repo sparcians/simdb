@@ -3,7 +3,6 @@
 #pragma once
 
 #include "simdb/apps/argos/ArgosResources.hpp"
-#include "simdb/apps/argos/Minifiers.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/Demangle.hpp"
@@ -23,7 +22,6 @@ public:
     CollectionEntryPoint(ArgosResources* resource_container, bool enable_minification = true) :
         stager_(resource_container->getStagerResource()),
         tiny_strings_(resource_container->getTinyStringsResource()),
-        argos_resources_(resource_container),
         enable_minification_(enable_minification)
     {
     }
@@ -102,7 +100,8 @@ public:
     {
         assert(collectable_type_name_.empty());
         collectable_type_name_ = dtype;
-        minifier_ = std::make_unique<Minifier>(argos_resources_, getID(), !enable_minification_);
+        stager_->setScalarType(getID());
+        stager_->enableMinification(getID(), enable_minification_);
     }
 
     /// TODO cnyce: Remove this method when Sparta collection code is moved to SimDB.
@@ -116,16 +115,9 @@ public:
         auto capacity = std::stoi(encoded_container_type.substr(pos + 1));
         assert(capacity <= UINT16_MAX);
 
-        if (encoded_container_type.find("_sparse") != std::string::npos)
-        {
-            minifier_ =
-                std::make_unique<Minifier>(argos_resources_, getID(), true, (uint16_t)capacity, !enable_minification_);
-        } else
-        {
-            assert(encoded_container_type.find("_contig") != std::string::npos);
-            minifier_ =
-                std::make_unique<Minifier>(argos_resources_, getID(), false, (uint16_t)capacity, !enable_minification_);
-        }
+        auto sparse = encoded_container_type.find("_sparse") != std::string::npos;
+        stager_->setContainerType(getID(), sparse, capacity);
+        stager_->enableMinification(getID(), enable_minification_);
     }
 
     std::string getEncodedCollectedType() const
@@ -144,82 +136,27 @@ public:
     //! the input data structure).
     void setScalarValueBytes(const std::vector<char>& bytes)
     {
-        if (!enabled())
+        if (enabled())
         {
-            return;
+            stager_->stage(getID(), bytes);
         }
-
-        minifier_->minifyAndSend(bytes);
     }
 
     //! \see setScalarValueBytes
-    void setContigContainerBinBytes(const std::vector<std::vector<char>>& bin_bytes)
+    void setContigContainerBinBytes(const std::vector<std::vector<char>>& contig_bin_bytes)
     {
-        if (!enabled())
+        if (enabled())
         {
-            return;
+            stager_->stage(getID(), contig_bin_bytes);
         }
-
-        // TODO cnyce: add this to the Minifier
-        uint64_t size = 0;
-        for (const auto& bytes : bin_bytes)
-        {
-            if (!bytes.empty())
-            {
-                ++size;
-            } else
-            {
-                break;
-            }
-        }
-
-        assert(size <= UINT16_MAX);
-        if (!max_container_size_seen_.isValid())
-        {
-            max_container_size_seen_ = size;
-        } else
-        {
-            max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
-        }
-
-        minifier_->minifyAndSend(bin_bytes);
     }
 
     //! \see setScalarValueBytes
-    void setSparseContainerBinBytes(const std::map<uint16_t, std::vector<char>>& bin_bytes)
+    void setSparseContainerBinBytes(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
     {
-        if (!enabled())
+        if (enabled())
         {
-            return;
-        }
-
-        // TODO cnyce: add this to the Minifier
-        uint64_t size = 0;
-        for (const auto& [_, bytes] : bin_bytes)
-        {
-            if (!bytes.empty())
-            {
-                ++size;
-            }
-        }
-
-        assert(size <= UINT16_MAX);
-        if (!max_container_size_seen_.isValid())
-        {
-            max_container_size_seen_ = size;
-        } else
-        {
-            max_container_size_seen_ = std::max(max_container_size_seen_.getValue(), (uint16_t)size);
-        }
-
-        minifier_->minifyAndSend(bin_bytes);
-    }
-
-    void writeMetaOnPostTeardown(DatabaseManager* db_mgr) const
-    {
-        if (max_container_size_seen_.isValid())
-        {
-            db_mgr->INSERT(SQL_TABLE("QueueMaxSizes"), SQL_VALUES((int)getID(), (int)max_container_size_seen_));
+            stager_->stage(getID(), sparse_bin_bytes);
         }
     }
 
@@ -246,12 +183,8 @@ private:
     bool quiet_ = false;
 
     std::string collectable_type_name_;
-    ValidValue<uint16_t> max_container_size_seen_;
-
     PipelineStagerResource& stager_;
     TinyStringsResource& tiny_strings_;
-    ArgosResources* const argos_resources_;
-    std::unique_ptr<Minifier> minifier_;
     const bool enable_minification_;
 };
 
