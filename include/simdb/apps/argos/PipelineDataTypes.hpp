@@ -8,7 +8,9 @@
 #include "simdb/utils/ValidValue.hpp"
 
 #include <iostream>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -17,6 +19,8 @@
 
 namespace simdb::argos {
 
+class Checkpoint;
+
 using CollectionDataAtTimePoint = std::vector<std::unique_ptr<CollectedData>>;
 using EnabledChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
@@ -24,6 +28,7 @@ using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
+    std::unordered_map<uint16_t, std::shared_ptr<Checkpoint>> checkpoints;
     CollectionDataAtTimePoint collection_data;
     EnabledChangedAtTimePoint enabled_changes;
     QuietChangedAtTimePoint quiet_changes;
