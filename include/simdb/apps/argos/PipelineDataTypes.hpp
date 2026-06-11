@@ -3,6 +3,7 @@
 #pragma once
 
 #include "simdb/Exceptions.hpp"
+#include "simdb/apps/argos/CollectedData.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/ValidValue.hpp"
 
@@ -23,7 +24,8 @@ class Checkpoint;
 struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
-    std::unordered_map<uint16_t, std::shared_ptr<const Checkpoint>> checkpoints;
+    std::unordered_map<uint16_t, std::shared_ptr<Checkpoint>> checkpoints;
+    std::vector<std::unique_ptr<CollectedData>> entries;
 };
 
 struct CompressedQueueCollectionData

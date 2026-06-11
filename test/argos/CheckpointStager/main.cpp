@@ -2,6 +2,7 @@
 
 #include "SimDBTester.hpp"
 #include "simdb/apps/argos/CheckpointPipelineStager.hpp"
+#include "simdb/utils/ConcurrentQueue.hpp"
 
 namespace {
 
@@ -47,11 +48,22 @@ void expectCheckpointPayload(const QueueCollectionData& slot, uint16_t cid, cons
     EXPECT_EQUAL(getPayload(*data), payload);
 }
 
+void expectSinglePipelineAction(const QueueCollectionData& entry, Action action)
+{
+    EXPECT_EQUAL(entry.entries.size(), 1u);
+    EXPECT_EQUAL(getActionByte(*entry.entries[0]), static_cast<uint8_t>(action));
+}
+
+void expectPipelinePayload(const QueueCollectionData& entry, const std::vector<char>& payload)
+{
+    EXPECT_EQUAL(getPayload(*entry.entries[0]), payload);
+}
+
 class TestHarness
 {
 public:
     TestHarness() :
-        stager_(kHeartbeat, &timestamp_, nullptr)
+        stager_(kHeartbeat, &timestamp_, &pipeline_queue_)
     {
         stager_.disableAutoSendMode(true);
         stager_.setScalarType(kCid);
@@ -67,6 +79,8 @@ public:
 
     void advanceSlot() { stager_.advanceSimTimeSlot(); }
 
+    void flush() { stager_.sendCollectedDataToPipeline(); }
+
     const std::vector<QueueCollectionData>& waitingQueue() const { return stager_.getWaitingQueue(); }
 
     const QueueCollectionData& backSlot() const
@@ -77,13 +91,23 @@ public:
 
     void clearWaiting() { stager_.clearWaitingQueue(); }
 
+    bool pop(QueueCollectionData& entry)
+    {
+        if (!pipeline_queue_.try_pop(entry))
+        {
+            return false;
+        }
+        return !entry.entries.empty();
+    }
+
 private:
     uint64_t sim_time_ = 0;
     simdb::argos::Timestamp timestamp_{&sim_time_};
+    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
     CheckpointPipelineStager stager_;
 };
 
-void testFullThenCarry()
+void testFullThenCarryWaitingQueue()
 {
     const std::vector<char> payload{'A', 'B', 'C'};
 
@@ -98,9 +122,43 @@ void testFullThenCarry()
     harness.stage(payload);
     EXPECT_EQUAL(harness.waitingQueue().size(), 2u);
     expectCheckpointAction(harness.backSlot(), kCid, Action::CARRY);
+
+    harness.setTime(102);
+    harness.stage(payload);
+    EXPECT_EQUAL(harness.waitingQueue().size(), 3u);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::CARRY);
+
+    // One more time. This is a heartbeat boundary, so we should
+    // get a FULL snapshot in a new 'waiting queue' entry.
+    harness.setTime(103);
+    harness.stage(payload);
+    EXPECT_EQUAL(harness.waitingQueue().size(), 4u);
+    expectCheckpointAction(harness.backSlot(), kCid, Action::FULL);
+    expectCheckpointPayload(harness.backSlot(), kCid, payload);
 }
 
-void testOnCollectionHeartbeat()
+void testFullThenCarryPipeline()
+{
+    const std::vector<char> payload{'A', 'B', 'C'};
+
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage(payload);
+    harness.flush();
+
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+    expectPipelinePayload(entry, payload);
+
+    harness.setTime(101);
+    harness.stage(payload);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::CARRY);
+}
+
+void testOnCollectionHeartbeatWaitingQueue()
 {
     const std::vector<char> payload{'G', 'H', 'I'};
 
@@ -123,7 +181,39 @@ void testOnCollectionHeartbeat()
     expectCheckpointPayload(harness.backSlot(), kCid, payload);
 }
 
-void testDisableAndReenable()
+void testOnCollectionHeartbeatPipeline()
+{
+    const std::vector<char> payload{'G', 'H', 'I'};
+
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage(payload);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+
+    harness.setTime(101);
+    harness.stage(payload);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::CARRY);
+
+    harness.setTime(102);
+    harness.stage(payload);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::CARRY);
+
+    harness.setTime(103);
+    harness.stage(payload);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+    expectPipelinePayload(entry, payload);
+}
+
+void testDisableAndReenableWaitingQueue()
 {
     const std::vector<char> payload{'G', 'H', 'I'};
 
@@ -139,6 +229,31 @@ void testDisableAndReenable()
     harness.enable();
     expectCheckpointAction(harness.backSlot(), kCid, Action::FULL);
     expectCheckpointPayload(harness.backSlot(), kCid, payload);
+}
+
+void testDisableAndReenablePipeline()
+{
+    const std::vector<char> payload{'G', 'H', 'I'};
+
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage(payload);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(101);
+    harness.disable();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::DISABLED);
+
+    harness.setTime(102);
+    harness.enable();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+    expectPipelinePayload(entry, payload);
 }
 
 void testLifecycleDoesNotMutateEarlierSlots()
@@ -170,17 +285,49 @@ void testEmptyTimeSlot()
     EXPECT_TRUE(harness.backSlot().checkpoints.empty());
 }
 
+void testMissingCidHeartbeatInject()
+{
+    const std::vector<char> payload{'X'};
+
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage(payload);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+
+    harness.setTime(101);
+    harness.advanceSlot();
+    harness.flush();
+    EXPECT_FALSE(harness.pop(entry));
+
+    harness.setTime(102);
+    harness.advanceSlot();
+    harness.flush();
+    EXPECT_FALSE(harness.pop(entry));
+
+    harness.setTime(103);
+    harness.advanceSlot();
+    harness.flush();
+    EXPECT_FALSE(harness.pop(entry));
+}
+
 } // namespace
 
 TEST_INIT;
 
 int main()
 {
-    testFullThenCarry();
-    testOnCollectionHeartbeat();
-    testDisableAndReenable();
+    testFullThenCarryWaitingQueue();
+    testFullThenCarryPipeline();
+    testOnCollectionHeartbeatWaitingQueue();
+    testOnCollectionHeartbeatPipeline();
+    testDisableAndReenableWaitingQueue();
+    testDisableAndReenablePipeline();
     testLifecycleDoesNotMutateEarlierSlots();
     testEmptyTimeSlot();
+    testMissingCidHeartbeatInject();
 
     REPORT_ERROR;
     return ERROR_CODE;

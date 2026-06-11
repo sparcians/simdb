@@ -58,27 +58,27 @@ int main()
     EXPECT_EQUAL(first->parent(), nullptr);
     expectMinifiedAction(first, Action::FULL);
     expectFullPayload(first, payload_a);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 0u);
+    EXPECT_EQUAL(first->getDistanceToSnapshot(), 0u);
 
     auto carry = checkpointer.createCheckpoint(payload_a);
     EXPECT_FALSE(carry->isSnapshot());
     EXPECT_EQUAL(carry->parent(), first);
     expectMinifiedAction(carry, Action::CARRY);
     expectFullPayload(carry, payload_a);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 1u);
+    EXPECT_EQUAL(carry->getDistanceToSnapshot(), 1u);
 
     auto carry_again = checkpointer.createCheckpoint(payload_a);
     EXPECT_FALSE(carry_again->isSnapshot());
     expectMinifiedAction(carry_again, Action::CARRY);
     expectFullPayload(carry_again, payload_a);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 2u);
+    EXPECT_EQUAL(carry_again->getDistanceToSnapshot(), 2u);
 
     auto changed = checkpointer.createCheckpoint(payload_b);
     EXPECT_TRUE(changed->isSnapshot());
     EXPECT_EQUAL(changed->parent(), carry_again);
     expectMinifiedAction(changed, Action::FULL);
     expectFullPayload(changed, payload_b);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 0u);
+    EXPECT_EQUAL(changed->getDistanceToSnapshot(), 0u);
 
     REPORT_ERROR;
     return ERROR_CODE;

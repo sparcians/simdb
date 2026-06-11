@@ -7,6 +7,8 @@
 #include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
 
+#include <algorithm>
+#include <cstring>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,8 +19,9 @@ namespace simdb::argos {
 //! \class CheckpointPipelineStager
 //! \brief Checkpoint-based collection stager.
 //!
-//! Phase A: enqueue-only. Each simulation time slot stores checkpoints; send logic
-//! is rebuilt in a follow-up PR. Internal state is intentionally minimal.
+//! Waiting-queue slots store checkpoints only. sendToPipeline_ derives wire records,
+//! refresh eligibility, and heartbeat inject from those checkpoints when flushing
+//! slots in order. Send-time bookkeeping is updated only during flush, never at enqueue.
 class CheckpointPipelineStager
 {
 public:
@@ -47,11 +50,29 @@ public:
     void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
     {
         assert(scalar_cids_.count(cid) > 0);
-
         advanceSimTimeSlot();
-
         auto& checkpointer = getOrCreateScalarCheckpointer_(cid);
         waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(scalar_bytes);
+    }
+
+    void onEnabledChanged(uint16_t cid, bool enabled)
+    {
+        if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
+        {
+            advanceSimTimeSlot();
+            waiting_queue_.back().checkpoints[cid] =
+                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
+        }
+    }
+
+    void onQuietChanged(uint16_t cid, bool quiet)
+    {
+        if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
+        {
+            advanceSimTimeSlot();
+            waiting_queue_.back().checkpoints[cid] =
+                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
+        }
     }
 
     void sendCollectedDataToPipeline()
@@ -65,8 +86,6 @@ public:
 
     void disableAutoSendMode(bool disable = true) { auto_send_when_time_advances_ = !disable; }
 
-    //! Create or extend the waiting-queue slot for the current simulation time without
-    //! recording collection data (used when a tick has lifecycle-only activity).
     void advanceSimTimeSlot()
     {
         if (advanceStageTime_())
@@ -77,29 +96,31 @@ public:
         }
     }
 
-    void onEnabledChanged(uint16_t cid, bool enabled)
-    {
-        advanceSimTimeSlot();
-
-        if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            waiting_queue_.back().checkpoints[cid] =
-                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
-        }
-    }
-
-    void onQuietChanged(uint16_t cid, bool quiet)
-    {
-        advanceSimTimeSlot();
-
-        if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            waiting_queue_.back().checkpoints[cid] =
-                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
-        }
-    }
-
 private:
+    static constexpr auto kCidBytes = sizeof(uint16_t);
+    static constexpr auto kActionBytes = sizeof(uint8_t);
+    static constexpr auto kHeaderBytes = kCidBytes + kActionBytes;
+
+    static bool isLifecycleAction_(const CollectedData& data)
+    {
+        const auto& bytes = data.getData();
+        if (bytes.size() < kCidBytes + kActionBytes)
+        {
+            return false;
+        }
+
+        uint8_t raw_action = 0;
+        memcpy(&raw_action, bytes.data() + kCidBytes, kActionBytes);
+        return raw_action < static_cast<uint8_t>(Action::FULL);
+    }
+
+    static Action getAction_(const CollectedData& data)
+    {
+        const auto& bytes = data.getData();
+        assert(bytes.size() >= kCidBytes + kActionBytes);
+        return static_cast<Action>(bytes[kCidBytes]);
+    }
+
     ScalarCheckpointer& getOrCreateScalarCheckpointer_(uint16_t cid)
     {
         auto it = scalar_checkpointers_.find(cid);
@@ -156,9 +177,100 @@ private:
 
     void sendToPipeline_(const QueueCollectionData& collection_at_time)
     {
-        // Phase B: derive wire records, heartbeat inject, and pipeline enqueue from checkpoints.
-        (void)collection_at_time;
-        (void)pipeline_head_;
+        QueueCollectionData to_send;
+        to_send.sim_time = collection_at_time.sim_time;
+
+        std::unordered_set<uint16_t> handled_cids;
+        for (const auto& [cid, checkpoint] : collection_at_time.checkpoints)
+        {
+            // First case: the checkpoint represents a FULL snapshot.
+            // Dump it as-is and remove the parent checkpoint chain
+            // so we don't consume memory forever.
+            //
+            // Note that this applies to just-enabled / just-awakened
+            // collectables too.
+            if (checkpoint->isSnapshot())
+            {
+                auto full_data = checkpoint->getFullData();
+                to_send.entries.emplace_back(std::move(full_data));
+                checkpoint->detachFromParent();
+                handled_cids.insert(cid);
+            }
+
+            // Second case: not a snapshot, and not a lifecycle event.
+            // Just a regular delta inside the heartbeat interval.
+            else if (!isLifecycleAction_(*checkpoint))
+            {
+                auto delta_data = checkpoint->getMinifiedData();
+                to_send.entries.emplace_back(std::move(delta_data));
+                handled_cids.insert(cid);
+            }
+
+            // Third case: we are disabling/quieting a collectable.
+            // Dump the minified data (cid+action only) and rebase
+            // the tip as a full snapshot.
+            else if (isVanishingLifecycle_(*checkpoint))
+            {
+                auto mini_data = checkpoint->getMinifiedData();
+                to_send.entries.emplace_back(std::move(mini_data));
+
+                auto rebased_chkpt = createTip_(*checkpoint);
+                scalar_checkpointers_[cid]->setNewTip(rebased_chkpt);
+                handled_cids.insert(cid);
+            }
+        }
+
+        // Now we have to replay FULL bytes for anything not handled
+        // in this flush that is about to leave the heartbeat interval.
+        for (const auto& [cid, checkpointer] : scalar_checkpointers_)
+        {
+            if (handled_cids.insert(cid).second)
+            {
+                auto checkpoint = checkpointer->tip();
+                auto force_refresh = checkpoint->getDistanceToSnapshot() + 1 >= heartbeat_;
+
+                if (force_refresh)
+                {
+                    auto full_data = checkpoint->getFullData();
+                    auto rebased_chkpt = createTip_(cid, *full_data);
+                    scalar_checkpointers_[cid]->setNewTip(rebased_chkpt);
+                }
+            }
+        }
+
+        if (!to_send.entries.empty() && pipeline_head_ != nullptr)
+        {
+            pipeline_head_->emplace(std::move(to_send));
+        }
+    }
+
+    static bool isLifecycleAction_(const Checkpoint& checkpoint)
+    {
+        auto action = checkpoint.getAction();
+        return static_cast<uint8_t>(action) < static_cast<uint8_t>(Action::FULL);
+    }
+
+    static bool isVanishingLifecycle_(const Checkpoint& checkpoint)
+    {
+        auto action = checkpoint.getAction();
+        return action == Action::DISABLED || action == Action::QUIETED;
+    }
+
+    static std::shared_ptr<Checkpoint> createTip_(const Checkpoint& checkpoint)
+    {
+        auto cid = checkpoint.getCID();
+        auto full_data = checkpoint.getFullData();
+        return createTip_(cid, *full_data);
+    }
+
+    static std::shared_ptr<Checkpoint> createTip_(uint16_t cid, const CollectedData& full_data)
+    {
+        const auto& buf = full_data.getData();
+        const auto ptr = &buf.at(kHeaderBytes);
+        const auto len = buf.size() - kHeaderBytes;
+
+        const std::vector<char> payload(ptr, ptr + len);
+        return std::make_shared<ScalarSnapshotCheckpoint>(cid, nullptr, payload);
     }
 
     const size_t heartbeat_;

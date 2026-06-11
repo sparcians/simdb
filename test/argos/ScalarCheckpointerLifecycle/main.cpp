@@ -10,6 +10,7 @@ using simdb::argos::Action;
 constexpr auto kCidBytes = sizeof(uint16_t);
 constexpr auto kActionBytes = sizeof(uint8_t);
 constexpr size_t kHeartbeat = 3;
+constexpr uint16_t kCid = 1;
 
 uint8_t getActionByte(const simdb::argos::CollectedData& data)
 {
@@ -51,38 +52,42 @@ void testOnCollectionHeartbeat()
 {
     const std::vector<char> payload{'G', 'H', 'I'};
 
-    simdb::argos::ScalarCheckpointer checkpointer(1, kHeartbeat);
+    simdb::argos::ScalarCheckpointer checkpointer(kCid, kHeartbeat);
 
     auto full = checkpointer.createCheckpoint(payload);
     expectMinifiedAction(full, Action::FULL);
     expectFullPayload(full, payload);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 0u);
+    EXPECT_EQUAL(full->getDistanceToSnapshot(), 0u);
 
     auto carry = checkpointer.createCheckpoint(payload);
     expectMinifiedAction(carry, Action::CARRY);
     expectFullPayload(carry, payload);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 1u);
+    EXPECT_EQUAL(carry->getDistanceToSnapshot(), 1u);
 
     auto carry_again = checkpointer.createCheckpoint(payload);
     expectMinifiedAction(carry_again, Action::CARRY);
     expectFullPayload(carry_again, payload);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 2u);
+    EXPECT_EQUAL(carry_again->getDistanceToSnapshot(), 2u);
 
     auto heartbeat_full = checkpointer.createCheckpoint(payload);
     EXPECT_TRUE(heartbeat_full->isSnapshot());
     expectMinifiedAction(heartbeat_full, Action::FULL);
     expectFullPayload(heartbeat_full, payload);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 0u);
+    EXPECT_EQUAL(heartbeat_full->getDistanceToSnapshot(), 0u);
 }
 
 void testDisableAndReenable()
 {
     const std::vector<char> payload{'G', 'H', 'I'};
 
-    simdb::argos::ScalarCheckpointer checkpointer(1, kHeartbeat);
+    simdb::argos::ScalarCheckpointer checkpointer(kCid, kHeartbeat);
 
     checkpointer.createCheckpoint(payload);
     checkpointer.createCheckpoint(payload);
+
+    // TODO XXX: Rewrite all tests to use CheckpointPipelineStager,
+    // and remove the public createDisabledCheckpoint() etc apis
+    // (make them private).
 
     auto disabled = checkpointer.createDisabledCheckpoint();
     EXPECT_FALSE(disabled->isSnapshot());
@@ -94,7 +99,7 @@ void testDisableAndReenable()
     EXPECT_TRUE(reenabled->isSnapshot());
     expectMinifiedAction(reenabled, Action::FULL);
     expectFullPayload(reenabled, payload);
-    EXPECT_EQUAL(checkpointer.getCyclesSinceLastFull(), 0u);
+    EXPECT_EQUAL(reenabled->getDistanceToSnapshot(), 0u);
 }
 
 void testQuietAndAwaken()
