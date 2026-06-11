@@ -50,7 +50,8 @@ int main()
     const std::vector<char> payload_b{'X', 'Y', 'Z'};
 
     const uint16_t cid = 1;
-    simdb::argos::ScalarCheckpointer checkpointer(cid);
+    constexpr size_t kLargeHeartbeat = 100;
+    simdb::argos::ScalarCheckpointer checkpointer(cid, kLargeHeartbeat);
 
     auto first = checkpointer.createCheckpoint(payload_a);
     EXPECT_TRUE(first->isSnapshot());
