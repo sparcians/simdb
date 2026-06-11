@@ -40,10 +40,7 @@ public:
 
     size_t getHeartbeat() const { return heartbeat_; }
 
-    void setScalarType(uint16_t cid)
-    {
-        scalar_cids_.insert(cid);
-    }
+    void setScalarType(uint16_t cid) { scalar_cids_.insert(cid); }
 
     void setContainerType(uint16_t cid, bool sparse, size_t capacity)
     {
@@ -526,7 +523,7 @@ private:
     std::unordered_map<uint16_t, bool> container_sparse_flags_;
     std::unordered_map<uint16_t, size_t> container_capacities_;
     std::unordered_set<uint16_t> minified_cids_;
-    //std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
+    // std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
 
     std::unordered_set<uint16_t> enabled_cids_;
     std::unordered_set<uint16_t> refreshable_cids_;
