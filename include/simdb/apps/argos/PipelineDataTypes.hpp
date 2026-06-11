@@ -28,7 +28,7 @@ using QuietChangedAtTimePoint = std::vector<std::pair<uint16_t, bool>>;
 struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
-    std::unordered_map<uint16_t, std::shared_ptr<Checkpoint>> checkpoints;
+    std::unordered_map<uint16_t, std::shared_ptr<const Checkpoint>> checkpoints;
     CollectionDataAtTimePoint collection_data;
     EnabledChangedAtTimePoint enabled_changes;
     QuietChangedAtTimePoint quiet_changes;
