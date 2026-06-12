@@ -33,6 +33,8 @@ inline void dumpTable(const std::string& table_name, const std::vector<std::stri
         col_sizes.push_back(h.size());
     }
 
+    auto num_dashes = std::accumulate(col_sizes.begin(), col_sizes.end(), 0);
+
     for (size_t i = 0; i < row_strings.size(); ++i)
     {
         for (size_t j = 0; j < row_strings[i].size(); ++j)
@@ -61,7 +63,6 @@ inline void dumpTable(const std::string& table_name, const std::vector<std::stri
     std::cout << "\n";
 
     // Print dashes
-    auto num_dashes = std::accumulate(col_sizes.begin(), col_sizes.end(), 0);
     std::cout << std::string(num_dashes, '-') << "\n";
 
     // Print rows
