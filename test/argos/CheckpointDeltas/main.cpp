@@ -3,12 +3,16 @@
 #include "SimDBTester.hpp"
 #include "simdb/apps/argos/CheckpointDeltas.hpp"
 
+#include <map>
+
 namespace {
 
 using simdb::argos::ContigDeltaKind;
 using simdb::argos::ScalarDeltaKind;
+using simdb::argos::SparseDeltaKind;
 using simdb::argos::classifyContigChange;
 using simdb::argos::classifyScalarChange;
+using simdb::argos::classifySparseChange;
 
 std::vector<std::vector<char>> bins(std::initializer_list<std::vector<char>> elems)
 {
@@ -92,6 +96,60 @@ void testContigFullFallback()
     EXPECT_EQUAL(result.kind, ContigDeltaKind::FULL);
 }
 
+std::map<uint16_t, std::vector<char>> sparseBins(
+    std::initializer_list<std::pair<const uint16_t, std::vector<char>>> elems)
+{
+    return std::map<uint16_t, std::vector<char>>(elems);
+}
+
+void testSparseEmptyPrev()
+{
+    const auto result = classifySparseChange({}, sparseBins({{3, {'A'}}}));
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::FULL);
+}
+
+void testSparseCarry()
+{
+    const auto prev = sparseBins({{1, {'A'}}, {5, {'B'}}});
+    const auto result = classifySparseChange(prev, prev);
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::CARRY);
+}
+
+void testSparseSwap()
+{
+    const auto prev = sparseBins({{1, {'A'}}, {5, {'B'}}});
+    auto curr = sparseBins({{1, {'A'}}, {5, {'X'}}});
+    const auto result = classifySparseChange(prev, curr);
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::SWAP);
+    EXPECT_EQUAL(result.bin_index, 5u);
+    EXPECT_EQUAL(result.payload, curr.at(5));
+}
+
+void testSparseRemove()
+{
+    const auto prev = sparseBins({{1, {'A'}}, {5, {'B'}}, {9, {'C'}}});
+    const auto curr = sparseBins({{1, {'A'}}, {9, {'C'}}});
+    const auto result = classifySparseChange(prev, curr);
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::REMOVE);
+    EXPECT_EQUAL(result.bin_index, 5u);
+}
+
+void testSparseFullFallback()
+{
+    const auto prev = sparseBins({{1, {'A'}}, {5, {'B'}}});
+    const auto curr = sparseBins({{1, {'X'}}, {5, {'Y'}}});
+    const auto result = classifySparseChange(prev, curr);
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::FULL);
+}
+
+void testSparseSizeChange()
+{
+    const auto prev = sparseBins({{1, {'A'}}});
+    const auto curr = sparseBins({{1, {'A'}}, {2, {'B'}}});
+    const auto result = classifySparseChange(prev, curr);
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::FULL);
+}
+
 } // namespace
 
 TEST_INIT;
@@ -108,6 +166,12 @@ int main()
     testContigArrive();
     testContigDepart();
     testContigFullFallback();
+    testSparseEmptyPrev();
+    testSparseCarry();
+    testSparseSwap();
+    testSparseRemove();
+    testSparseFullFallback();
+    testSparseSizeChange();
 
     REPORT_ERROR;
     return ERROR_CODE;

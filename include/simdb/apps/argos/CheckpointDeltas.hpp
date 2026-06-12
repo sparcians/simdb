@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <map>
 #include <vector>
 
 namespace simdb::argos {
@@ -58,7 +59,7 @@ struct ContigDeltaClassification
     std::vector<char> payload;
 };
 
-inline uint16_t countContigElements_(const std::vector<std::vector<char>>& contig_bins)
+inline uint16_t countContigElements(const std::vector<std::vector<char>>& contig_bins)
 {
     uint64_t count = 0;
     for (const auto& bytes : contig_bins)
@@ -90,8 +91,8 @@ inline ContigDeltaClassification classifyContigChange(const std::vector<std::vec
         return result;
     }
 
-    const auto curr_size = countContigElements_(curr);
-    const auto prev_size = countContigElements_(prev);
+    const auto curr_size = countContigElements(curr);
+    const auto prev_size = countContigElements(prev);
 
     if (curr_size == prev_size)
     {
@@ -203,6 +204,181 @@ inline std::ostream& operator<<(std::ostream& os, ContigDeltaKind kind)
         return os << "FULL";
     }
     throw DBException("Invalid ContigDeltaKind");
+}
+
+//! Sparse-container delta kinds (wire action without heartbeat forcing).
+enum class SparseDeltaKind {
+    CARRY,
+    SWAP,
+    REMOVE,
+    FULL,
+};
+
+//! Result of classifying a sparse container transition (no CID/action framing).
+struct SparseDeltaClassification
+{
+    SparseDeltaKind kind = SparseDeltaKind::FULL;
+    simdb::ValidValue<uint16_t> bin_index;
+    std::vector<char> payload;
+};
+
+inline uint16_t countSparseElements_(const std::map<uint16_t, std::vector<char>>& sparse_bins)
+{
+    uint64_t count = 0;
+    for (const auto& [_, bytes] : sparse_bins)
+    {
+        if (!bytes.empty())
+        {
+            ++count;
+        }
+    }
+    assert(count <= UINT16_MAX);
+    return static_cast<uint16_t>(count);
+}
+
+//! Classify how a sparse container changed between consecutive collections.
+//!
+//! Returns FULL when \p prev is empty (no baseline). Heartbeat forcing is handled
+//! by the checkpointer, not this helper.
+inline SparseDeltaClassification classifySparseChange(const std::map<uint16_t, std::vector<char>>& prev,
+                                                      const std::map<uint16_t, std::vector<char>>& curr)
+{
+    SparseDeltaClassification result;
+
+    if (prev.empty())
+    {
+        result.kind = SparseDeltaKind::FULL;
+        return result;
+    }
+
+    const auto curr_size = countSparseElements_(curr);
+    const auto prev_size = countSparseElements_(prev);
+
+    if (curr == prev)
+    {
+        result.kind = SparseDeltaKind::CARRY;
+        return result;
+    }
+
+    if (curr_size + 1 == prev_size)
+    {
+        ValidValue<uint16_t> removed_idx;
+        uint16_t removed_count = 0;
+        bool other_change = false;
+        for (const auto& [prev_idx, prev_bytes] : prev)
+        {
+            if (auto it = curr.find(prev_idx); it == curr.end())
+            {
+                ++removed_count;
+                removed_idx = prev_idx;
+            } else if (prev_bytes != it->second)
+            {
+                other_change = true;
+                break;
+            }
+        }
+
+        if (!other_change && removed_count == 1)
+        {
+            for (const auto& [curr_idx, _] : curr)
+            {
+                if (prev.find(curr_idx) == prev.end())
+                {
+                    other_change = true;
+                    break;
+                }
+            }
+        }
+
+        if (!other_change && removed_count == 1)
+        {
+            result.kind = SparseDeltaKind::REMOVE;
+            result.bin_index = removed_idx.getValue();
+            return result;
+        }
+    }
+
+    if (curr_size != prev_size)
+    {
+        result.kind = SparseDeltaKind::FULL;
+        return result;
+    }
+
+    std::vector<uint16_t> changed_idxs;
+    std::vector<uint16_t> removed_idxs;
+
+    auto too_many_changes = [&]() { return changed_idxs.size() + removed_idxs.size() > 1; };
+
+    for (const auto& [prev_idx, prev_bytes] : prev)
+    {
+        if (auto it = curr.find(prev_idx); it != curr.end())
+        {
+            if (prev_bytes != it->second)
+            {
+                changed_idxs.push_back(prev_idx);
+                if (too_many_changes())
+                {
+                    break;
+                }
+            }
+        } else
+        {
+            removed_idxs.push_back(prev_idx);
+            if (too_many_changes())
+            {
+                break;
+            }
+        }
+    }
+
+    if (too_many_changes())
+    {
+        for (const auto& [curr_idx, curr_bytes] : curr)
+        {
+            if (prev.find(curr_idx) == prev.end())
+            {
+                changed_idxs.push_back(curr_idx);
+                if (too_many_changes())
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (changed_idxs.size() == 1 && removed_idxs.empty())
+    {
+        result.kind = SparseDeltaKind::SWAP;
+        result.bin_index = changed_idxs[0];
+        result.payload = curr.at(changed_idxs[0]);
+        return result;
+    }
+
+    if (removed_idxs.size() == 1 && changed_idxs.empty())
+    {
+        result.kind = SparseDeltaKind::REMOVE;
+        result.bin_index = removed_idxs[0];
+        return result;
+    }
+
+    result.kind = SparseDeltaKind::FULL;
+    return result;
+}
+
+inline std::ostream& operator<<(std::ostream& os, SparseDeltaKind kind)
+{
+    switch (kind)
+    {
+    case SparseDeltaKind::CARRY:
+        return os << "CARRY";
+    case SparseDeltaKind::SWAP:
+        return os << "SWAP";
+    case SparseDeltaKind::REMOVE:
+        return os << "REMOVE";
+    case SparseDeltaKind::FULL:
+        return os << "FULL";
+    }
+    throw DBException("Invalid SparseDeltaKind");
 }
 
 } // namespace simdb::argos

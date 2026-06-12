@@ -4,6 +4,8 @@
 #include "simdb/apps/argos/CheckpointPipelineStager.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
 
+#include <cstring>
+
 namespace {
 
 using simdb::argos::Action;
@@ -432,6 +434,202 @@ void testMultiCidSameFlush()
     EXPECT_EQUAL(entry.entries.size(), 2u);
 }
 
+std::vector<std::vector<char>> contigBins(std::initializer_list<std::vector<char>> elems)
+{
+    return std::vector<std::vector<char>>(elems);
+}
+
+std::vector<char> instBytes(char tag)
+{
+    return {'I', 'n', 's', 't', tag};
+}
+
+uint16_t readUint16(const std::vector<char>& bytes, size_t offset)
+{
+    uint16_t value = 0;
+    std::memcpy(&value, bytes.data() + offset, sizeof(uint16_t));
+    return value;
+}
+
+uint16_t getEntryCid(const simdb::argos::CollectedData& data)
+{
+    const auto& bytes = data.getData();
+    EXPECT_TRUE(bytes.size() >= kCidBytes);
+    uint16_t cid = 0;
+    std::memcpy(&cid, bytes.data(), sizeof(cid));
+    return cid;
+}
+
+const simdb::argos::CollectedData* findPipelineEntry(const QueueCollectionData& entry, uint16_t cid)
+{
+    for (const auto& pipeline_entry : entry.entries)
+    {
+        if (getEntryCid(*pipeline_entry) == cid)
+        {
+            return pipeline_entry.get();
+        }
+    }
+    return nullptr;
+}
+
+class ContigTestHarness
+{
+public:
+    ContigTestHarness() :
+        stager_(kHeartbeat, &timestamp_, &pipeline_queue_)
+    {
+        stager_.disableAutoSendMode(true);
+        stager_.setContainerType(kContigCid, false, 64);
+    }
+
+    void setTime(uint64_t time) { sim_time_ = time; }
+
+    void stage(const std::vector<std::vector<char>>& bins) { stager_.stage(kContigCid, bins); }
+
+    void disable() { stager_.onEnabledChanged(kContigCid, false); }
+
+    void enable() { stager_.onEnabledChanged(kContigCid, true); }
+
+    void quiet() { stager_.onQuietChanged(kContigCid, true); }
+
+    void awaken() { stager_.onQuietChanged(kContigCid, false); }
+
+    void flush() { stager_.sendCollectedDataToPipeline(); }
+
+    bool pop(QueueCollectionData& entry)
+    {
+        if (!pipeline_queue_.try_pop(entry))
+        {
+            return false;
+        }
+        return !entry.entries.empty();
+    }
+
+private:
+    static constexpr uint16_t kContigCid = 7;
+
+    uint64_t sim_time_ = 0;
+    simdb::argos::Timestamp timestamp_{&sim_time_};
+    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
+    CheckpointPipelineStager stager_;
+};
+
+void testNotesContigEndToEnd()
+{
+    ContigTestHarness harness;
+    std::vector<std::vector<char>> initial;
+    for (char tag = '0'; tag <= '9'; ++tag)
+    {
+        initial.push_back(instBytes(tag));
+    }
+    initial.push_back(instBytes('A'));
+    initial.push_back(instBytes('B'));
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    const auto* full_entry = findPipelineEntry(entry, 7);
+    EXPECT_TRUE(full_entry != nullptr);
+    EXPECT_EQUAL(getActionByte(*full_entry), static_cast<uint8_t>(Action::FULL));
+    const auto full_payload = getPayload(*full_entry);
+    EXPECT_EQUAL(readUint16(full_payload, 0), 12u);
+
+    auto with_arrival = initial;
+    with_arrival.push_back(instBytes('C'));
+    harness.setTime(101);
+    harness.stage(with_arrival);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    const auto* arrive_entry = findPipelineEntry(entry, 7);
+    EXPECT_TRUE(arrive_entry != nullptr);
+    EXPECT_EQUAL(getActionByte(*arrive_entry), static_cast<uint8_t>(Action::CONTIG_CONTAINER_ARRIVE));
+    EXPECT_EQUAL(getPayload(*arrive_entry), instBytes('C'));
+}
+
+void testContigHeartbeatBookendsOverride()
+{
+    ContigTestHarness harness;
+    const auto initial = contigBins({instBytes('A'), instBytes('B'), instBytes('C'), instBytes('D')});
+    const auto shifted = contigBins({instBytes('B'), instBytes('C'), instBytes('D'), instBytes('E')});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(101);
+    harness.stage(initial);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(102);
+    harness.stage(initial);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(103);
+    harness.stage(shifted);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    const auto* pipeline_entry = findPipelineEntry(entry, 7);
+    EXPECT_TRUE(pipeline_entry != nullptr);
+    EXPECT_EQUAL(getActionByte(*pipeline_entry), static_cast<uint8_t>(Action::FULL));
+}
+
+void testContigDisableQuietPipeline()
+{
+    ContigTestHarness harness;
+    const auto initial = contigBins({instBytes('Q'), instBytes('U'), instBytes('I')});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 7)), static_cast<uint8_t>(Action::FULL));
+
+    harness.setTime(101);
+    harness.quiet();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 7)), static_cast<uint8_t>(Action::QUIETED));
+
+    harness.setTime(102);
+    harness.awaken();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 7)), static_cast<uint8_t>(Action::FULL));
+}
+
+void testScalarAndContigSameFlush()
+{
+    constexpr uint16_t kScalarCid = 1;
+    constexpr uint16_t kContigCid = 7;
+    const std::vector<char> scalar_payload{'S', 'C', 'A'};
+    const auto contig_payload = contigBins({instBytes('C'), instBytes('T')});
+
+    uint64_t sim_time = 100;
+    simdb::argos::Timestamp timestamp{&sim_time};
+    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue;
+    CheckpointPipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
+    stager.disableAutoSendMode(true);
+    stager.setScalarType(kScalarCid);
+    stager.setContainerType(kContigCid, false, 16);
+
+    stager.stage(kScalarCid, scalar_payload);
+    stager.stage(kContigCid, contig_payload);
+    stager.sendCollectedDataToPipeline();
+
+    QueueCollectionData entry;
+    EXPECT_TRUE(pipeline_queue.try_pop(entry));
+    EXPECT_EQUAL(entry.entries.size(), 2u);
+    EXPECT_TRUE(findPipelineEntry(entry, kScalarCid) != nullptr);
+    EXPECT_TRUE(findPipelineEntry(entry, kContigCid) != nullptr);
+}
+
 } // namespace
 
 TEST_INIT;
@@ -451,6 +649,10 @@ int main()
     testQuietAndAwakenPipeline();
     testChangedPayloadAtHeartbeatPipeline();
     testMultiCidSameFlush();
+    testNotesContigEndToEnd();
+    testContigHeartbeatBookendsOverride();
+    testContigDisableQuietPipeline();
+    testScalarAndContigSameFlush();
 
     REPORT_ERROR;
     return ERROR_CODE;

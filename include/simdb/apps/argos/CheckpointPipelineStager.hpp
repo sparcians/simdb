@@ -49,6 +49,13 @@ public:
 
     void setScalarType(uint16_t cid) { scalar_cids_.insert(cid); }
 
+    void setContainerType(uint16_t cid, bool sparse, size_t capacity)
+    {
+        (void)sparse;
+        (void)capacity;
+        container_cids_.insert(cid);
+    }
+
     void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
     {
         assert(scalar_cids_.count(cid) > 0);
@@ -57,9 +64,24 @@ public:
         waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(scalar_bytes);
     }
 
+    void stage(uint16_t cid, const std::vector<std::vector<char>>& contig_bin_bytes)
+    {
+        assert(container_cids_.count(cid) > 0);
+        advanceSimTimeSlot();
+        auto& checkpointer = getOrCreateContigCheckpointer_(cid);
+        waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(contig_bin_bytes);
+    }
+
     void onEnabledChanged(uint16_t cid, bool enabled)
     {
         if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
+        {
+            advanceSimTimeSlot();
+            waiting_queue_.back().checkpoints[cid] =
+                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
+            return;
+        }
+        if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
         {
             advanceSimTimeSlot();
             waiting_queue_.back().checkpoints[cid] =
@@ -70,6 +92,13 @@ public:
     void onQuietChanged(uint16_t cid, bool quiet)
     {
         if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
+        {
+            advanceSimTimeSlot();
+            waiting_queue_.back().checkpoints[cid] =
+                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
+            return;
+        }
+        if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
         {
             advanceSimTimeSlot();
             waiting_queue_.back().checkpoints[cid] =
@@ -101,12 +130,15 @@ public:
     //! Tip of the per-CID checkpoint chain after the latest flush/enqueue activity.
     std::shared_ptr<const Checkpoint> getTip(uint16_t cid) const
     {
-        auto it = scalar_checkpointers_.find(cid);
-        if (it == scalar_checkpointers_.end())
+        if (auto it = scalar_checkpointers_.find(cid); it != scalar_checkpointers_.end())
         {
-            return nullptr;
+            return it->second->tip();
         }
-        return it->second->tip();
+        if (auto it = contig_checkpointers_.find(cid); it != contig_checkpointers_.end())
+        {
+            return it->second->tip();
+        }
+        return nullptr;
     }
 
 private:
@@ -130,6 +162,26 @@ private:
     {
         auto it = scalar_checkpointers_.find(cid);
         if (it == scalar_checkpointers_.end())
+        {
+            return nullptr;
+        }
+        return it->second.get();
+    }
+
+    ContigCheckpointer& getOrCreateContigCheckpointer_(uint16_t cid)
+    {
+        auto it = contig_checkpointers_.find(cid);
+        if (it == contig_checkpointers_.end())
+        {
+            it = contig_checkpointers_.emplace(cid, std::make_unique<ContigCheckpointer>(cid, heartbeat_)).first;
+        }
+        return *it->second;
+    }
+
+    ContigCheckpointer* findContigCheckpointer_(uint16_t cid)
+    {
+        auto it = contig_checkpointers_.find(cid);
+        if (it == contig_checkpointers_.end())
         {
             return nullptr;
         }
@@ -235,6 +287,29 @@ private:
             }
         }
 
+        for (const auto& [cid, checkpointer] : contig_checkpointers_)
+        {
+            if (!handled_cids.insert(cid).second)
+            {
+                continue;
+            }
+
+            if (!checkpointer->isRefreshable())
+            {
+                continue;
+            }
+
+            if (checkpointer->isDueForWireRefresh())
+            {
+                auto full_data = checkpointer->tip()->getFullData();
+                to_send.entries.emplace_back(std::move(full_data));
+                checkpointer->rebaseTipAfterWireFull(*to_send.entries.back());
+            } else
+            {
+                checkpointer->recordMissedFlush();
+            }
+        }
+
         if (!to_send.entries.empty() && pipeline_head_ != nullptr)
         {
             pipeline_head_->emplace(std::move(to_send));
@@ -258,7 +333,9 @@ private:
     bool auto_send_when_time_advances_ = true;
 
     std::unordered_set<uint16_t> scalar_cids_;
+    std::unordered_set<uint16_t> container_cids_;
     std::unordered_map<uint16_t, std::unique_ptr<ScalarCheckpointer>> scalar_checkpointers_;
+    std::unordered_map<uint16_t, std::unique_ptr<ContigCheckpointer>> contig_checkpointers_;
 };
 
 } // namespace simdb::argos
