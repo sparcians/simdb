@@ -85,10 +85,6 @@ void testDisableAndReenable()
     checkpointer.createCheckpoint(payload);
     checkpointer.createCheckpoint(payload);
 
-    // TODO XXX: Rewrite all tests to use CheckpointPipelineStager,
-    // and remove the public createDisabledCheckpoint() etc apis
-    // (make them private).
-
     auto disabled = checkpointer.createDisabledCheckpoint();
     EXPECT_FALSE(disabled->isSnapshot());
     expectMinifiedAction(disabled, Action::DISABLED);

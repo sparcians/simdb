@@ -77,6 +77,10 @@ public:
 
     void enable() { stager_.onEnabledChanged(kCid, true); }
 
+    void quiet() { stager_.onQuietChanged(kCid, true); }
+
+    void awaken() { stager_.onQuietChanged(kCid, false); }
+
     void advanceSlot() { stager_.advanceSimTimeSlot(); }
 
     void flush() { stager_.sendCollectedDataToPipeline(); }
@@ -346,6 +350,88 @@ void testTimeAdvancesWhileVanished()
     }
 }
 
+void testQuietAndAwakenPipeline()
+{
+    const std::vector<char> payload{'Q', 'U', 'I'};
+
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage(payload);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+
+    harness.setTime(101);
+    harness.quiet();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::QUIETED);
+
+    harness.setTime(102);
+    harness.awaken();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+    expectPipelinePayload(entry, payload);
+}
+
+void testChangedPayloadAtHeartbeatPipeline()
+{
+    const std::vector<char> payload_a{'A', 'A', 'A'};
+    const std::vector<char> payload_b{'B', 'B', 'B'};
+
+    TestHarness harness;
+    harness.setTime(100);
+    harness.stage(payload_a);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+
+    harness.setTime(101);
+    harness.stage(payload_a);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::CARRY);
+
+    harness.setTime(102);
+    harness.stage(payload_a);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::CARRY);
+
+    harness.setTime(103);
+    harness.stage(payload_b);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectSinglePipelineAction(entry, Action::FULL);
+    expectPipelinePayload(entry, payload_b);
+}
+
+void testMultiCidSameFlush()
+{
+    constexpr uint16_t kCid2 = 2;
+    const std::vector<char> payload1{'O', 'N', 'E'};
+    const std::vector<char> payload2{'T', 'W', 'O'};
+
+    uint64_t sim_time = 100;
+    simdb::argos::Timestamp timestamp{&sim_time};
+    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue;
+    CheckpointPipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
+    stager.disableAutoSendMode(true);
+    stager.setScalarType(kCid);
+    stager.setScalarType(kCid2);
+
+    stager.stage(kCid, payload1);
+    stager.stage(kCid2, payload2);
+    stager.sendCollectedDataToPipeline();
+
+    QueueCollectionData entry;
+    EXPECT_TRUE(pipeline_queue.try_pop(entry));
+    EXPECT_EQUAL(entry.entries.size(), 2u);
+}
+
 } // namespace
 
 TEST_INIT;
@@ -362,6 +448,9 @@ int main()
     testEmptyTimeSlot();
     testMissingCidHeartbeatInject();
     testTimeAdvancesWhileVanished();
+    testQuietAndAwakenPipeline();
+    testChangedPayloadAtHeartbeatPipeline();
+    testMultiCidSameFlush();
 
     REPORT_ERROR;
     return ERROR_CODE;

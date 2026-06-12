@@ -8,7 +8,6 @@
 #include "simdb/utils/ConcurrentQueue.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -111,27 +110,10 @@ public:
     }
 
 private:
-    static constexpr auto kCidBytes = sizeof(uint16_t);
-    static constexpr auto kActionBytes = sizeof(uint8_t);
-
-    static bool isLifecycleAction_(const CollectedData& data)
+    static bool isLifecycleAction_(const Checkpoint& checkpoint)
     {
-        const auto& bytes = data.getData();
-        if (bytes.size() < kCidBytes + kActionBytes)
-        {
-            return false;
-        }
-
-        uint8_t raw_action = 0;
-        memcpy(&raw_action, bytes.data() + kCidBytes, kActionBytes);
-        return raw_action < static_cast<uint8_t>(Action::FULL);
-    }
-
-    static Action getAction_(const CollectedData& data)
-    {
-        const auto& bytes = data.getData();
-        assert(bytes.size() >= kCidBytes + kActionBytes);
-        return static_cast<Action>(bytes[kCidBytes]);
+        auto action = checkpoint.getAction();
+        return static_cast<uint8_t>(action) < static_cast<uint8_t>(Action::FULL);
     }
 
     ScalarCheckpointer& getOrCreateScalarCheckpointer_(uint16_t cid)
@@ -220,8 +202,7 @@ private:
             }
 
             // Third case: we are disabling/quieting a collectable.
-            // Dump the minified data (cid+action only) and rebase
-            // the tip as a full snapshot.
+            // Emit action-only wire bytes; tip stays VanishedCheckpoint.
             else if (isVanishingLifecycle_(*checkpoint))
             {
                 auto mini_data = checkpoint->getMinifiedData();
@@ -258,12 +239,6 @@ private:
         {
             pipeline_head_->emplace(std::move(to_send));
         }
-    }
-
-    static bool isLifecycleAction_(const Checkpoint& checkpoint)
-    {
-        auto action = checkpoint.getAction();
-        return static_cast<uint8_t>(action) < static_cast<uint8_t>(Action::FULL);
     }
 
     static bool isVanishingLifecycle_(const Checkpoint& checkpoint)
