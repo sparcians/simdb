@@ -8,8 +8,7 @@ add_subdirectory(ConcurrentApps)
 add_subdirectory(DatabaseWatchdog)
 add_subdirectory(PipelineSnoopers)
 add_subdirectory(AppFactory)
-# TODO cnyce: add this back when the PipelineStager redesign is done
-#add_subdirectory(ArgosCollector)
+add_subdirectory(ArgosCollector)
 
 # TODO cnyce: fix sporadic failures
 #add_subdirectory(MultiPortStages)

@@ -4,7 +4,6 @@
 
 #include "simdb/apps/argos/ArgosResources.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
-#include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include "simdb/utils/TypeTraits.hpp"
@@ -19,10 +18,9 @@ namespace simdb::argos {
 class CollectionEntryPoint
 {
 public:
-    CollectionEntryPoint(ArgosResources* resource_container, bool enable_minification = true) :
+    CollectionEntryPoint(ArgosResources* resource_container) :
         stager_(resource_container->getStagerResource()),
-        tiny_strings_(resource_container->getTinyStringsResource()),
-        enable_minification_(enable_minification)
+        tiny_strings_(resource_container->getTinyStringsResource())
     {
     }
 
@@ -101,7 +99,6 @@ public:
         assert(collectable_type_name_.empty());
         collectable_type_name_ = dtype;
         stager_->setScalarType(getID());
-        stager_->enableMinification(getID(), enable_minification_);
     }
 
     /// TODO cnyce: Remove this method when Sparta collection code is moved to SimDB.
@@ -117,7 +114,6 @@ public:
 
         auto sparse = encoded_container_type.find("_sparse") != std::string::npos;
         stager_->setContainerType(getID(), sparse, capacity);
-        stager_->enableMinification(getID(), enable_minification_);
     }
 
     std::string getEncodedCollectedType() const
@@ -185,7 +181,6 @@ private:
     std::string collectable_type_name_;
     PipelineStagerResource& stager_;
     TinyStringsResource& tiny_strings_;
-    const bool enable_minification_;
 };
 
 } // namespace simdb::argos

@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "simdb/apps/argos/CollectedData.hpp"
-#include "simdb/apps/argos/PipelineStager.hpp"
+#include "simdb/apps/argos/CheckpointPipelineStager.hpp"
+#include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/utils/SafeWeakPtr.hpp"
@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <unordered_set>
 
 //! There are collection classes that require things like DatabaseManager,
 //! collection heartbeat, etc. in order to be instantiated. We cannot know
@@ -20,7 +21,7 @@
 //!   - set the heartbeat value
 //!   - set the timestamp backpointer
 //!   - create the DatabaseManager         (now TinyStrings can be created)
-//!   - open pipelines                     (now PipelineStager can be created)
+//!   - open pipelines                     (now CheckpointPipelineStager can be created)
 //!
 //! But a unit test might do this:
 //!
@@ -33,7 +34,7 @@
 //! never have a TinyStrings (whose ctor takes a DatabaseManager).
 //!
 //! The classes below provide a way for Argos collection to freely use temporary
-//! resources like TinyStrings and PipelineStager until all required ctor args
+//! resources like TinyStrings and CheckpointPipelineStager until all required ctor args
 //! have been set, then the "live" resources like TinyStrings are created and
 //! pre-populated with any information gathered while the temporary objects
 //! were being used.
@@ -75,18 +76,82 @@ public:
 };
 
 //! \class PipelineStagerResource
-//! \brief Used to lazily create a "live" PipelineStager only when the
+//! \brief Used to lazily create a live CheckpointPipelineStager only when the
 //! heartbeat is known, the pipeline has been created, and the timestamp
 //! has been created. Those three bits of information can be set in any
 //! order. If one or more is never set, as in the case of some unit tests,
-//! then the ArgosCollector will be using a temporary PipelineStager.
+//! then type registrations and notifications are buffered until realization.
 class PipelineStagerResource : public HeartbeatResource, public PipelineResource, public TimestampResource
 {
 public:
+    class StagerProxy
+    {
+    public:
+        explicit StagerProxy(PipelineStagerResource* resource) :
+            resource_(resource)
+        {
+        }
+
+        void setScalarType(uint16_t cid) { resource_->setScalarType_(cid); }
+
+        void setContainerType(uint16_t cid, bool sparse, size_t capacity)
+        {
+            resource_->setContainerType_(cid, sparse, capacity);
+        }
+
+        void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
+        {
+            resource_->liveStager_().stage(cid, scalar_bytes);
+        }
+
+        void stage(uint16_t cid, const std::vector<std::vector<char>>& contig_bin_bytes)
+        {
+            resource_->liveStager_().stage(cid, contig_bin_bytes);
+        }
+
+        void stage(uint16_t cid, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+        {
+            resource_->liveStager_().stage(cid, sparse_bin_bytes);
+        }
+
+        void onEnabledChanged(uint16_t cid, bool enabled)
+        {
+            if (resource_->stager_)
+            {
+                resource_->stager_->onEnabledChanged(cid, enabled);
+            }
+        }
+
+        void onQuietChanged(uint16_t cid, bool quiet)
+        {
+            if (resource_->stager_)
+            {
+                resource_->stager_->onQuietChanged(cid, quiet);
+            }
+        }
+
+        void postNotif(uint16_t cid, const std::string& notif, NotifType type)
+        {
+            resource_->postNotif_(cid, notif, type);
+        }
+
+        void sendCollectedDataToPipeline()
+        {
+            if (resource_->stager_)
+            {
+                resource_->stager_->sendCollectedDataToPipeline();
+            }
+        }
+
+    private:
+        PipelineStagerResource* resource_;
+    };
+
     explicit PipelineStagerResource(ArgosResources* resource_container) :
         HeartbeatResource(resource_container),
         PipelineResource(resource_container),
-        TimestampResource(resource_container)
+        TimestampResource(resource_container),
+        proxy_(this)
     {
     }
 
@@ -111,14 +176,92 @@ public:
         checkReady_();
     }
 
-    //! Access the temporary/live PipelineStager. DO NOT cache this raw
-    //! pointer. If you accidentally cache the temporary stager, you will
-    //! see a crash if it gets reallocated to the live stager.
-    PipelineStager* operator->() const { return get().operator->(); }
+    //! Access the temporary/live stager proxy. DO NOT cache this raw pointer.
+    StagerProxy* operator->() const { return &proxy_; }
 
-    safe_weak_ptr<PipelineStager> get() const { return stager_; }
+    safe_weak_ptr<CheckpointPipelineStager> get() const { return stager_; }
+
+    void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
+    {
+        if (stager_)
+        {
+            stager_->writeMetaOnPostTeardown(db_mgr);
+        } else
+        {
+            CheckpointPipelineStager::writeMetaForSentCids(db_mgr, {});
+        }
+    }
 
 private:
+    void setScalarType_(uint16_t cid)
+    {
+        pending_scalar_cids_.insert(cid);
+        if (stager_)
+        {
+            stager_->setScalarType(cid);
+        }
+    }
+
+    void setContainerType_(uint16_t cid, bool sparse, size_t capacity)
+    {
+        (void)capacity;
+        if (sparse)
+        {
+            pending_sparse_cids_.insert(cid);
+        } else
+        {
+            pending_container_cids_.insert(cid);
+        }
+        if (stager_)
+        {
+            stager_->setContainerType(cid, sparse, capacity);
+        }
+    }
+
+    void postNotif_(uint16_t cid, const std::string& notif, NotifType type)
+    {
+        if (stager_)
+        {
+            stager_->postNotif(cid, notif, type);
+            return;
+        }
+
+        if (timestamp_)
+        {
+            Notification notification(cid, notif, type, timestamp_->getTime());
+            dummy_notif_head_.emplace(std::move(notification));
+        } else
+        {
+            Notification notification(cid, notif, type);
+            dummy_notif_head_.emplace(std::move(notification));
+        }
+    }
+
+    CheckpointPipelineStager& liveStager_()
+    {
+        if (!stager_)
+        {
+            throw DBException("Pipeline stager not ready - heartbeat, timestamp, and pipeline must be set first");
+        }
+        return *stager_;
+    }
+
+    void applyPendingRegistrations_()
+    {
+        for (const auto cid : pending_scalar_cids_)
+        {
+            stager_->setScalarType(cid);
+        }
+        for (const auto cid : pending_container_cids_)
+        {
+            stager_->setContainerType(cid, false, 0);
+        }
+        for (const auto cid : pending_sparse_cids_)
+        {
+            stager_->setContainerType(cid, true, 0);
+        }
+    }
+
     void checkNotReady_()
     {
         if (realized_)
@@ -134,12 +277,10 @@ private:
             auto pipeline_head = pipeline_->getInPortQueue<QueueCollectionData>("compressor.input_queue");
             auto notif_head = pipeline_->getInPortQueue<Notification>("writer.notif_queue");
             auto dyn_field_head = pipeline_->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-            stager_ =
-                std::make_shared<PipelineStager>(heartbeat_, timestamp_, pipeline_head, notif_head, dyn_field_head);
+            stager_ = std::make_shared<CheckpointPipelineStager>(heartbeat_.getValue(), timestamp_, pipeline_head,
+                                                                 notif_head, dyn_field_head);
+            applyPendingRegistrations_();
 
-            // Flush pending notifications. There are use cases where we might
-            // need to send warnings/errors to Argos before e.g. the pipeline
-            // was opened or before the heartbeat was known.
             Notification notif;
             while (dummy_notif_head_.try_pop(notif))
             {
@@ -154,14 +295,16 @@ private:
     pipeline::Pipeline* pipeline_ = nullptr;
     Timestamp* timestamp_ = nullptr;
 
-    //! Temporary queue for Notifications received while using the temp PipelineStager
     ConcurrentQueue<Notification> dummy_notif_head_;
 
-    //! PipelineStager - starts out as the temporary stager, reallocated when
-    //! we get everything we need for the live stager
-    std::shared_ptr<PipelineStager> stager_{
-        std::make_shared<PipelineStager>(0, nullptr, nullptr, &dummy_notif_head_, nullptr)};
+    std::shared_ptr<CheckpointPipelineStager> stager_;
     bool realized_ = false;
+
+    std::unordered_set<uint16_t> pending_scalar_cids_;
+    std::unordered_set<uint16_t> pending_container_cids_;
+    std::unordered_set<uint16_t> pending_sparse_cids_;
+
+    mutable StagerProxy proxy_;
 };
 
 //! This class is used to manage the TinyStrings resource before/after the
@@ -392,7 +535,7 @@ public:
     {
         tiny_strings_resource_->serialize();
         enum_map_resource_.serializeEnumMaps(db_mgr);
-        stager_resource_->writeMetaOnPostTeardown(db_mgr);
+        stager_resource_.writeMetaOnPostTeardown(db_mgr);
     }
 
 private:

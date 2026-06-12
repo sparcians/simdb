@@ -171,14 +171,7 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
-    void enableMinification(bool enable = true)
-    {
-        if (!collectors_.empty())
-        {
-            throw DBException("Cannot enable/disable minification once collectables are created");
-        }
-        enable_minification_ = enable;
-    }
+    void enableMinification(bool = true) {}
 
     //! TODO cnyce: Once the collection code from Sparta is moved to SimDB, change this
     //! to a template method so we can figure out the encoded data type name ourselves.
@@ -213,7 +206,7 @@ public:
     CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
                                                 const std::string& encoded_scalar_type)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_, enable_minification_);
+        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
         entry_point->setScalarDataType(encoded_scalar_type);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
@@ -231,7 +224,7 @@ public:
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
                                                    const std::string& encoded_container_type)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_, enable_minification_);
+        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
         entry_point->setContainerDataType(encoded_container_type);
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         collectors_.emplace_back(std::move(entry_point));
@@ -240,7 +233,7 @@ public:
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() { return resources_.getTinyStringsResource().get(); }
 
-    safe_weak_ptr<PipelineStager> getStager() { return resources_.getStagerResource().get(); }
+    safe_weak_ptr<CheckpointPipelineStager> getStager() { return resources_.getStagerResource().get(); }
 
     ArgosResources* getResources() { return &resources_; }
 
@@ -321,7 +314,7 @@ private:
             if (input_queue_->try_pop(collection_at_time))
             {
                 std::vector<char> uncompressed;
-                for (const auto& src : collection_at_time.collection_data)
+                for (const auto& src : collection_at_time.entries)
                 {
                     const auto& src_data = src->getData();
                     uncompressed.insert(uncompressed.end(), src_data.begin(), src_data.end());
@@ -452,7 +445,6 @@ private:
 
     DatabaseManager* const db_mgr_;
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
-    bool enable_minification_ = true;
 
     using ClockDescriptor = std::tuple<std::string, // clk name
                                        uint32_t,    // period
