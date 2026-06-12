@@ -2,122 +2,73 @@
 
 #pragma once
 
-#include "simdb/apps/argos/CheckpointerBase.hpp"
 #include "simdb/apps/argos/CheckpointDeltas.hpp"
+#include "simdb/apps/argos/CheckpointNodeBase.hpp"
+#include "simdb/apps/argos/CheckpointerBase.hpp"
 
 #include <cassert>
 #include <vector>
 
 namespace simdb::argos {
 
-class ContigSnapshotCheckpoint : public Checkpoint
+class ContigSnapshotCheckpoint : public SnapshotCheckpointBase
 {
 public:
     ContigSnapshotCheckpoint(uint16_t cid, std::shared_ptr<Checkpoint> parent, std::vector<std::vector<char>> bins) :
-        cid_(cid),
-        parent_(std::move(parent)),
+        SnapshotCheckpointBase(cid, std::move(parent)),
         bins_(std::move(bins))
     {
     }
 
-    uint16_t getCID() const override { return cid_; }
-
-    std::unique_ptr<CollectedData> getMinifiedData() const override { return getFullData(); }
-
-    std::unique_ptr<CollectedData> getFullData() const override
-    {
-        auto data = std::make_unique<CollectedData>(cid_);
-        auto& buf = data->getBuffer();
-        buf.append(Action::FULL);
-        buf.append(encodeContigFullTail_(bins_));
-        return data;
-    }
-
-    bool isSnapshot() const override { return true; }
-
-    std::shared_ptr<Checkpoint> parent() const override { return parent_; }
-
-    Action getAction() const override { return Action::FULL; }
-
-    void detachFromParent() override { parent_.reset(); }
-
     const std::vector<std::vector<char>>& bins() const { return bins_; }
 
 private:
-    static std::vector<char> encodeContigFullTail_(const std::vector<std::vector<char>>& bins)
+    void appendFullTail_(StreamBuffer& buf) const override
     {
-        std::vector<char> tail;
-        StreamBuffer buf(tail);
-
-        const auto size = countContigElements(bins);
+        const auto size = countContigElements(bins_);
         buf.append(size);
         for (uint16_t i = 0; i < size; ++i)
         {
-            buf.append(bins[i]);
+            buf.append(bins_[i]);
         }
-        return tail;
     }
 
-    uint16_t cid_;
-    std::shared_ptr<Checkpoint> parent_;
     std::vector<std::vector<char>> bins_;
 };
 
-class ContigDeltaCheckpoint : public Checkpoint
+class ContigDeltaCheckpoint : public IndexedDeltaCheckpointBase
 {
 public:
     ContigDeltaCheckpoint(uint16_t cid, std::shared_ptr<Checkpoint> parent, Action action,
                           const simdb::ValidValue<uint16_t>& swap_index, std::vector<char> payload) :
-        cid_(cid),
-        parent_(std::move(parent)),
-        action_(action),
-        payload_(std::move(payload))
+        IndexedDeltaCheckpointBase(cid, std::move(parent), action, swap_index, std::move(payload))
     {
-        assert(parent_ != nullptr);
-        if (swap_index.isValid())
-        {
-            swap_index_ = swap_index.getValue();
-        }
     }
 
-    uint16_t getCID() const override { return cid_; }
-
-    std::unique_ptr<CollectedData> getMinifiedData() const override
+private:
+    void appendMinifiedTail_(StreamBuffer& buf) const override
     {
-        auto data = std::make_unique<CollectedData>(cid_);
-        auto& buf = data->getBuffer();
-        buf.append(action_);
         if (action_ == Action::CONTIG_CONTAINER_SWAP)
         {
-            assert(swap_index_.isValid());
+            assert(bin_index_.isValid());
             assert(!payload_.empty());
-            buf.append(swap_index_.getValue());
+            buf.append(bin_index_.getValue());
             buf.append(payload_);
         } else if (action_ == Action::CONTIG_CONTAINER_ARRIVE || action_ == Action::CONTIG_CONTAINER_BOOKENDS)
         {
             assert(!payload_.empty());
             buf.append(payload_);
         }
-        return data;
     }
 
-    std::unique_ptr<CollectedData> getFullData() const override
+    std::unique_ptr<CollectedData> makeFullData_() const override
     {
         const auto parent_bins = reconstituteContigBins_(*parent_);
-        const auto full_bins = applyContigDelta_(parent_bins, action_, swap_index_, payload_);
+        const auto full_bins = applyContigDelta_(parent_bins, action_, bin_index_, payload_);
         auto snapshot = ContigSnapshotCheckpoint(cid_, nullptr, full_bins);
         return snapshot.getFullData();
     }
 
-    bool isSnapshot() const override { return false; }
-
-    std::shared_ptr<Checkpoint> parent() const override { return parent_; }
-
-    Action getAction() const override { return action_; }
-
-    void detachFromParent() override { throw DBException("Cannot detach checkpoint - not a snapshot"); }
-
-private:
     static std::vector<std::vector<char>> denseBins_(const std::vector<std::vector<char>>& bins)
     {
         std::vector<std::vector<char>> dense;
@@ -191,7 +142,7 @@ private:
         if (auto* delta = dynamic_cast<const ContigDeltaCheckpoint*>(&checkpoint))
         {
             const auto parent_bins = reconstituteContigBins_(*delta->parent_);
-            return applyContigDelta_(parent_bins, delta->action_, delta->swap_index_, delta->payload_);
+            return applyContigDelta_(parent_bins, delta->action_, delta->bin_index_, delta->payload_);
         }
         if (auto* vanished = dynamic_cast<const ScalarVanishedCheckpoint*>(&checkpoint))
         {
@@ -199,12 +150,6 @@ private:
         }
         throw DBException("Cannot reconstitute contig bins from checkpoint");
     }
-
-    uint16_t cid_;
-    std::shared_ptr<Checkpoint> parent_;
-    Action action_;
-    simdb::ValidValue<uint16_t> swap_index_;
-    std::vector<char> payload_;
 };
 
 //! Per-contig-CID checkpoint chain builder.

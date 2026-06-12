@@ -2,83 +2,38 @@
 
 #pragma once
 
-#include "simdb/apps/argos/CheckpointerBase.hpp"
 #include "simdb/apps/argos/CheckpointDeltas.hpp"
+#include "simdb/apps/argos/CheckpointNodeBase.hpp"
+#include "simdb/apps/argos/CheckpointerBase.hpp"
 
 #include <cassert>
 #include <vector>
 
 namespace simdb::argos {
 
-class ScalarSnapshotCheckpoint : public Checkpoint
+class ScalarSnapshotCheckpoint : public SnapshotCheckpointBase
 {
 public:
     ScalarSnapshotCheckpoint(uint16_t cid, std::shared_ptr<Checkpoint> parent, std::vector<char> payload) :
-        cid_(cid),
-        parent_(std::move(parent)),
+        SnapshotCheckpointBase(cid, std::move(parent)),
         payload_(std::move(payload))
     {
     }
 
-    uint16_t getCID() const override { return cid_; }
-
-    std::unique_ptr<CollectedData> getMinifiedData() const override { return getFullData(); }
-
-    std::unique_ptr<CollectedData> getFullData() const override
-    {
-        auto data = std::make_unique<CollectedData>(cid_);
-        auto& buf = data->getBuffer();
-        buf.append(Action::FULL);
-        buf.append(payload_);
-        return data;
-    }
-
-    bool isSnapshot() const override { return true; }
-
-    std::shared_ptr<Checkpoint> parent() const override { return parent_; }
-
-    Action getAction() const override { return Action::FULL; }
-
-    void detachFromParent() override { parent_.reset(); }
-
 private:
-    uint16_t cid_;
-    std::shared_ptr<Checkpoint> parent_;
+    void appendFullTail_(StreamBuffer& buf) const override { buf.append(payload_); }
+
     std::vector<char> payload_;
 };
 
-class ScalarDeltaCheckpoint : public Checkpoint
+class ScalarDeltaCheckpoint : public ActionOnlyCheckpointBase
 {
 public:
     ScalarDeltaCheckpoint(uint16_t cid, std::shared_ptr<Checkpoint> parent) :
-        cid_(cid),
-        parent_(std::move(parent))
+        ActionOnlyCheckpointBase(cid, std::move(parent), Action::CARRY)
     {
         assert(parent_ != nullptr);
     }
-
-    uint16_t getCID() const override { return cid_; }
-
-    std::unique_ptr<CollectedData> getMinifiedData() const override
-    {
-        auto data = std::make_unique<CollectedData>(cid_);
-        data->getBuffer().append(Action::CARRY);
-        return data;
-    }
-
-    std::unique_ptr<CollectedData> getFullData() const override { return parent_->getFullData(); }
-
-    bool isSnapshot() const override { return false; }
-
-    std::shared_ptr<Checkpoint> parent() const override { return parent_; }
-
-    Action getAction() const override { return Action::CARRY; }
-
-    void detachFromParent() override { throw DBException("Cannot detach checkpoint - not a snapshot"); }
-
-private:
-    uint16_t cid_;
-    std::shared_ptr<Checkpoint> parent_;
 };
 
 //! Per-scalar-CID checkpoint chain builder.

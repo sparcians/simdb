@@ -2,8 +2,9 @@
 
 #pragma once
 
-#include "simdb/apps/argos/CheckpointerBase.hpp"
 #include "simdb/apps/argos/CheckpointDeltas.hpp"
+#include "simdb/apps/argos/CheckpointNodeBase.hpp"
+#include "simdb/apps/argos/CheckpointerBase.hpp"
 
 #include <cassert>
 #include <map>
@@ -11,49 +12,24 @@
 
 namespace simdb::argos {
 
-class SparseSnapshotCheckpoint : public Checkpoint
+class SparseSnapshotCheckpoint : public SnapshotCheckpointBase
 {
 public:
     SparseSnapshotCheckpoint(uint16_t cid, std::shared_ptr<Checkpoint> parent,
                              std::map<uint16_t, std::vector<char>> bins) :
-        cid_(cid),
-        parent_(std::move(parent)),
+        SnapshotCheckpointBase(cid, std::move(parent)),
         bins_(std::move(bins))
     {
     }
 
-    uint16_t getCID() const override { return cid_; }
-
-    std::unique_ptr<CollectedData> getMinifiedData() const override { return getFullData(); }
-
-    std::unique_ptr<CollectedData> getFullData() const override
-    {
-        auto data = std::make_unique<CollectedData>(cid_);
-        auto& buf = data->getBuffer();
-        buf.append(Action::FULL);
-        buf.append(encodeSparseFullTail_(bins_));
-        return data;
-    }
-
-    bool isSnapshot() const override { return true; }
-
-    std::shared_ptr<Checkpoint> parent() const override { return parent_; }
-
-    Action getAction() const override { return Action::FULL; }
-
-    void detachFromParent() override { parent_.reset(); }
-
     const std::map<uint16_t, std::vector<char>>& bins() const { return bins_; }
 
 private:
-    static std::vector<char> encodeSparseFullTail_(const std::map<uint16_t, std::vector<char>>& bins)
+    void appendFullTail_(StreamBuffer& buf) const override
     {
-        std::vector<char> tail;
-        StreamBuffer buf(tail);
-
-        const auto size = countSparseElements_(bins);
+        const auto size = countSparseElements_(bins_);
         buf.append(size);
-        for (const auto& [bin_idx, bin_bytes] : bins)
+        for (const auto& [bin_idx, bin_bytes] : bins_)
         {
             if (!bin_bytes.empty())
             {
@@ -61,38 +37,23 @@ private:
                 buf.append(bin_bytes);
             }
         }
-        return tail;
     }
 
-    uint16_t cid_;
-    std::shared_ptr<Checkpoint> parent_;
     std::map<uint16_t, std::vector<char>> bins_;
 };
 
-class SparseDeltaCheckpoint : public Checkpoint
+class SparseDeltaCheckpoint : public IndexedDeltaCheckpointBase
 {
 public:
     SparseDeltaCheckpoint(uint16_t cid, std::shared_ptr<Checkpoint> parent, Action action,
                           const simdb::ValidValue<uint16_t>& bin_index, std::vector<char> payload) :
-        cid_(cid),
-        parent_(std::move(parent)),
-        action_(action),
-        payload_(std::move(payload))
+        IndexedDeltaCheckpointBase(cid, std::move(parent), action, bin_index, std::move(payload))
     {
-        assert(parent_ != nullptr);
-        if (bin_index.isValid())
-        {
-            bin_index_ = bin_index.getValue();
-        }
     }
 
-    uint16_t getCID() const override { return cid_; }
-
-    std::unique_ptr<CollectedData> getMinifiedData() const override
+private:
+    void appendMinifiedTail_(StreamBuffer& buf) const override
     {
-        auto data = std::make_unique<CollectedData>(cid_);
-        auto& buf = data->getBuffer();
-        buf.append(action_);
         if (action_ == Action::SPARSE_CONTAINER_SWAP || action_ == Action::SPARSE_CONTAINER_REMOVE)
         {
             assert(bin_index_.isValid());
@@ -103,10 +64,9 @@ public:
             assert(!payload_.empty());
             buf.append(payload_);
         }
-        return data;
     }
 
-    std::unique_ptr<CollectedData> getFullData() const override
+    std::unique_ptr<CollectedData> makeFullData_() const override
     {
         const auto parent_bins = reconstituteSparseBins_(*parent_);
         const auto full_bins = applySparseDelta_(parent_bins, action_, bin_index_, payload_);
@@ -114,15 +74,6 @@ public:
         return snapshot.getFullData();
     }
 
-    bool isSnapshot() const override { return false; }
-
-    std::shared_ptr<Checkpoint> parent() const override { return parent_; }
-
-    Action getAction() const override { return action_; }
-
-    void detachFromParent() override { throw DBException("Cannot detach checkpoint - not a snapshot"); }
-
-private:
     static std::map<uint16_t, std::vector<char>>
     applySparseDelta_(const std::map<uint16_t, std::vector<char>>& parent_bins, Action action,
                       simdb::ValidValue<uint16_t> bin_index, const std::vector<char>& payload)
@@ -164,12 +115,6 @@ private:
         }
         throw DBException("Cannot reconstitute sparse bins from checkpoint");
     }
-
-    uint16_t cid_;
-    std::shared_ptr<Checkpoint> parent_;
-    Action action_;
-    simdb::ValidValue<uint16_t> bin_index_;
-    std::vector<char> payload_;
 };
 
 //! Per-sparse-CID checkpoint chain builder.

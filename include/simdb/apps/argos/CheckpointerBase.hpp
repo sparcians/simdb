@@ -64,10 +64,7 @@ public:
         tip_ = makeCarryCheckpoint_();
     }
 
-    void rebaseTipAfterWireFull(const CollectedData& full)
-    {
-        setNewTip(makeRootSnapshotAfterWireFull_(full));
-    }
+    void rebaseTipAfterWireFull(const CollectedData& full) { setNewTip(makeRootSnapshotAfterWireFull_(full)); }
 
     std::shared_ptr<Checkpoint> createDisabledCheckpoint()
     {

@@ -86,6 +86,7 @@ public:
 
 } // namespace simdb::argos
 
+#include "simdb/apps/argos/CheckpointNodeBase.hpp"
 #include "simdb/apps/argos/CheckpointerBase.hpp"
 #include "simdb/apps/argos/CheckpointerCommon.hpp"
 #include "simdb/apps/argos/CheckpointerContig.hpp"
