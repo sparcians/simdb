@@ -245,6 +245,9 @@ public:
         return tip_->getDistanceToSnapshot();
     }
 
+    //! Whether Pass 2 may inject heartbeat FULLs for this CID (Option B TDD stub).
+    bool isRefreshable() const { return true; }
+
     std::shared_ptr<Checkpoint> createCheckpoint(const std::vector<char>& raw)
     {
         const auto kind = classifyScalarChange(last_scalar_bytes_, raw);

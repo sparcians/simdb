@@ -96,6 +96,29 @@ public:
         }
     }
 
+    //! Test-only accessor for Option B TDD (refreshable eligibility).
+    bool isScalarRefreshableForTest(uint16_t cid) const
+    {
+        auto it = scalar_checkpointers_.find(cid);
+        if (it == scalar_checkpointers_.end())
+        {
+            return false;
+        }
+        return it->second->isRefreshable();
+    }
+
+    //! Test-only accessor for Option A TDD (tip stays VanishedCheckpoint after disable/quiet).
+    bool isScalarTipVanishedForTest(uint16_t cid) const
+    {
+        auto it = scalar_checkpointers_.find(cid);
+        if (it == scalar_checkpointers_.end() || !it->second->tip())
+        {
+            return false;
+        }
+        const auto action = it->second->tip()->getAction();
+        return action == Action::DISABLED || action == Action::QUIETED;
+    }
+
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
     static constexpr auto kActionBytes = sizeof(uint8_t);
@@ -232,8 +255,8 @@ private:
                 if (force_refresh)
                 {
                     auto full_data = checkpoint->getFullData();
-                    auto rebased_chkpt = createTip_(cid, *full_data);
-                    scalar_checkpointers_[cid]->setNewTip(rebased_chkpt);
+                    to_send.entries.emplace_back(std::move(full_data));
+                    scalar_checkpointers_[cid]->setNewTip(createTip_(cid, *to_send.entries.back()));
                 }
             }
         }
