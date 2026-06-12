@@ -6,6 +6,7 @@
 #include "simdb/apps/argos/CheckpointNodeBase.hpp"
 #include "simdb/apps/argos/CheckpointerBase.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <vector>
 
@@ -160,6 +161,8 @@ public:
 
     std::shared_ptr<Checkpoint> createCheckpoint(const std::vector<std::vector<char>>& curr)
     {
+        max_container_size_seen_ = std::max(max_container_size_seen_, static_cast<size_t>(countContigElements(curr)));
+
         const bool force_full = isHeartbeatBoundary_();
         const auto classification = classifyContigChange(prev_contig_bins_, curr);
 
@@ -176,6 +179,8 @@ public:
         prev_contig_bins_ = curr;
         return checkpoint;
     }
+
+    size_t getMaxContainerSizeSeen() const { return max_container_size_seen_; }
 
 private:
     static Action contigActionFromKind_(ContigDeltaKind kind)
@@ -221,6 +226,7 @@ private:
     }
 
     std::vector<std::vector<char>> prev_contig_bins_;
+    size_t max_container_size_seen_ = 0;
 };
 
 } // namespace simdb::argos

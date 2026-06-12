@@ -173,7 +173,11 @@ public:
         dyn_field_head_->emplace(std::move(changes));
     }
 
-    void writeMetaOnPostTeardown(DatabaseManager* db_mgr) { writeMetaForSentCids(db_mgr, wire_sent_cids_); }
+    void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
+    {
+        writeMetaForSentCids(db_mgr, wire_sent_cids_);
+        writeQueueMaxSizes_(db_mgr);
+    }
 
     static void writeMetaForSentCids(DatabaseManager* db_mgr, const std::unordered_set<uint16_t>& wire_sent_cids)
     {
@@ -288,6 +292,21 @@ public:
     }
 
 private:
+    void writeQueueMaxSizes_(DatabaseManager* db_mgr)
+    {
+        auto inserter = db_mgr->prepareINSERT(SQL_TABLE("QueueMaxSizes"));
+        for (const auto& [cid, checkpointer] : contig_checkpointers_)
+        {
+            inserter->createRecordWithColValues(static_cast<int>(cid),
+                                                static_cast<int>(checkpointer->getMaxContainerSizeSeen()));
+        }
+        for (const auto& [cid, checkpointer] : sparse_checkpointers_)
+        {
+            inserter->createRecordWithColValues(static_cast<int>(cid),
+                                                static_cast<int>(checkpointer->getMaxContainerSizeSeen()));
+        }
+    }
+
     void recordWireSent_(const CollectedData& data) { wire_sent_cids_.insert(data.getCID()); }
 
     static bool isLifecycleAction_(const Checkpoint& checkpoint)
