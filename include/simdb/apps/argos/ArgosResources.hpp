@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "simdb/apps/argos/CheckpointPipelineStager.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
+#include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/utils/SafeWeakPtr.hpp"
@@ -21,7 +21,7 @@
 //!   - set the heartbeat value
 //!   - set the timestamp backpointer
 //!   - create the DatabaseManager         (now TinyStrings can be created)
-//!   - open pipelines                     (now CheckpointPipelineStager can be created)
+//!   - open pipelines                     (now PipelineStager can be created)
 //!
 //! But a unit test might do this:
 //!
@@ -34,7 +34,7 @@
 //! never have a TinyStrings (whose ctor takes a DatabaseManager).
 //!
 //! The classes below provide a way for Argos collection to freely use temporary
-//! resources like TinyStrings and CheckpointPipelineStager until all required ctor args
+//! resources like TinyStrings and PipelineStager until all required ctor args
 //! have been set, then the "live" resources like TinyStrings are created and
 //! pre-populated with any information gathered while the temporary objects
 //! were being used.
@@ -76,7 +76,7 @@ public:
 };
 
 //! \class PipelineStagerResource
-//! \brief Used to lazily create a live CheckpointPipelineStager only when the
+//! \brief Used to lazily create a live PipelineStager only when the
 //! heartbeat is known, the pipeline has been created, and the timestamp
 //! has been created. Those three bits of information can be set in any
 //! order. If one or more is never set, as in the case of some unit tests,
@@ -179,7 +179,7 @@ public:
     //! Access the temporary/live stager proxy. DO NOT cache this raw pointer.
     StagerProxy* operator->() const { return &proxy_; }
 
-    safe_weak_ptr<CheckpointPipelineStager> get() const { return stager_; }
+    safe_weak_ptr<PipelineStager> get() const { return stager_; }
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
@@ -188,7 +188,7 @@ public:
             stager_->writeMetaOnPostTeardown(db_mgr);
         } else
         {
-            CheckpointPipelineStager::writeMetaForSentCids(db_mgr, {});
+            PipelineStager::writeMetaForSentCids(db_mgr, {});
         }
     }
 
@@ -237,7 +237,7 @@ private:
         }
     }
 
-    CheckpointPipelineStager& liveStager_()
+    PipelineStager& liveStager_()
     {
         if (!stager_)
         {
@@ -277,8 +277,8 @@ private:
             auto pipeline_head = pipeline_->getInPortQueue<QueueCollectionData>("compressor.input_queue");
             auto notif_head = pipeline_->getInPortQueue<Notification>("writer.notif_queue");
             auto dyn_field_head = pipeline_->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-            stager_ = std::make_shared<CheckpointPipelineStager>(heartbeat_.getValue(), timestamp_, pipeline_head,
-                                                                 notif_head, dyn_field_head);
+            stager_ = std::make_shared<PipelineStager>(heartbeat_.getValue(), timestamp_, pipeline_head, notif_head,
+                                                       dyn_field_head);
             applyPendingRegistrations_();
 
             Notification notif;
@@ -297,7 +297,7 @@ private:
 
     ConcurrentQueue<Notification> dummy_notif_head_;
 
-    std::shared_ptr<CheckpointPipelineStager> stager_;
+    std::shared_ptr<PipelineStager> stager_;
     bool realized_ = false;
 
     std::unordered_set<uint16_t> pending_scalar_cids_;

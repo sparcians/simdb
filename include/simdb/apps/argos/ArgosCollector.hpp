@@ -233,7 +233,7 @@ public:
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() { return resources_.getTinyStringsResource().get(); }
 
-    safe_weak_ptr<CheckpointPipelineStager> getStager() { return resources_.getStagerResource().get(); }
+    safe_weak_ptr<PipelineStager> getStager() { return resources_.getStagerResource().get(); }
 
     ArgosResources* getResources() { return &resources_; }
 

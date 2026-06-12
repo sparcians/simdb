@@ -1,7 +1,7 @@
 // clang-format off
 
 #include "SimDBTester.hpp"
-#include "simdb/apps/argos/CheckpointPipelineStager.hpp"
+#include "simdb/apps/argos/PipelineStager.hpp"
 #include "simdb/utils/ConcurrentQueue.hpp"
 
 #include <cstring>
@@ -10,7 +10,7 @@
 namespace {
 
 using simdb::argos::Action;
-using simdb::argos::CheckpointPipelineStager;
+using simdb::argos::PipelineStager;
 using simdb::argos::QueueCollectionData;
 
 constexpr auto kCidBytes = sizeof(uint16_t);
@@ -113,7 +113,7 @@ private:
     uint64_t sim_time_ = 0;
     simdb::argos::Timestamp timestamp_{&sim_time_};
     simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
-    CheckpointPipelineStager stager_;
+    PipelineStager stager_;
 };
 
 void testFullThenCarryWaitingQueue()
@@ -421,7 +421,7 @@ void testMultiCidSameFlush()
     uint64_t sim_time = 100;
     simdb::argos::Timestamp timestamp{&sim_time};
     simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue;
-    CheckpointPipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
+    PipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
     stager.disableAutoSendMode(true);
     stager.setScalarType(kCid);
     stager.setScalarType(kCid2);
@@ -512,7 +512,7 @@ private:
     uint64_t sim_time_ = 0;
     simdb::argos::Timestamp timestamp_{&sim_time_};
     simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
-    CheckpointPipelineStager stager_;
+    PipelineStager stager_;
 };
 
 void testNotesContigEndToEnd()
@@ -615,7 +615,7 @@ void testScalarAndContigSameFlush()
     uint64_t sim_time = 100;
     simdb::argos::Timestamp timestamp{&sim_time};
     simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue;
-    CheckpointPipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
+    PipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
     stager.disableAutoSendMode(true);
     stager.setScalarType(kScalarCid);
     stager.setContainerType(kContigCid, false, 16);
@@ -677,7 +677,7 @@ private:
     uint64_t sim_time_ = 0;
     simdb::argos::Timestamp timestamp_{&sim_time_};
     simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
-    CheckpointPipelineStager stager_;
+    PipelineStager stager_;
 };
 
 void testSparseFirstCollectionFull()
@@ -811,7 +811,7 @@ void testScalarContigSparseSameFlush()
     uint64_t sim_time = 100;
     simdb::argos::Timestamp timestamp{&sim_time};
     simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue;
-    CheckpointPipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
+    PipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
     stager.disableAutoSendMode(true);
     stager.setScalarType(kScalarCid);
     stager.setContainerType(kContigCid, false, 16);

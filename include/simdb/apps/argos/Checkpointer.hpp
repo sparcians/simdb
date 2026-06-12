@@ -37,7 +37,7 @@ enum class Action : uint8_t {
 //! \class Checkpoint
 //! \brief One node in a per-CID checkpoint chain (Snapshot or Delta).
 //!
-//! Checkpoints are immutable once created. CheckpointPipelineStager and the waiting queue
+//! Checkpoints are immutable once created. PipelineStager and the waiting queue
 //! hold shared_ptr's to the same nodes; reconstitution walks parent() links.
 class Checkpoint
 {

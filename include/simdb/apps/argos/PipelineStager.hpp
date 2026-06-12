@@ -1,4 +1,4 @@
-// <CheckpointPipelineStager.hpp> -*- C++ -*-
+// <PipelineStager.hpp> -*- C++ -*-
 
 #pragma once
 
@@ -19,19 +19,18 @@
 
 namespace simdb::argos {
 
-//! \class CheckpointPipelineStager
+//! \class PipelineStager
 //! \brief Checkpoint-based collection stager.
 //!
 //! Waiting-queue slots store checkpoints only. sendToPipeline_ derives wire records,
 //! refresh eligibility, and heartbeat inject from those checkpoints when flushing
 //! slots in order. Send-time bookkeeping is updated only during flush, never at enqueue.
-class CheckpointPipelineStager
+class PipelineStager
 {
 public:
-    CheckpointPipelineStager(size_t heartbeat, Timestamp* timestamp,
-                             ConcurrentQueue<QueueCollectionData>* pipeline_head,
-                             ConcurrentQueue<Notification>* notif_head = nullptr,
-                             ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
+    PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
+                   ConcurrentQueue<Notification>* notif_head = nullptr,
+                   ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
         heartbeat_(heartbeat),
         timestamp_(timestamp),
         pipeline_head_(pipeline_head),
