@@ -96,9 +96,9 @@ public:
 
         auto& notif_tbl = schema.addTable("Notifications");
         notif_tbl.addColumn("SerializationCID", dt::int32_t);
-        notif_tbl.addColumn("NotifStr", dt::string_t);
-        notif_tbl.addColumn("NotifType", dt::int32_t);
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
+        notif_tbl.addColumn("NotifType", dt::int32_t);
+        notif_tbl.addColumn("NotifStr", dt::string_t);
 
         auto& dyn_field_type_changes_tbl = schema.addTable("DynamicFieldTypeChanges");
         dyn_field_type_changes_tbl.addColumn("SerializationCID", dt::int32_t);
@@ -379,12 +379,12 @@ private:
                 const auto notif_type = notification.type;
 
                 inserter->setColumnValue(0, (int)cid);
-                inserter->setColumnValue(1, notif_str);
-                inserter->setColumnValue(2, (int)notif_type);
                 if (notification.sim_time.isValid())
                 {
-                    inserter->setColumnValue(3, notification.sim_time.getValue());
+                    inserter->setColumnValue(1, notification.sim_time.getValue());
                 }
+                inserter->setColumnValue(2, (int)notif_type);
+                inserter->setColumnValue(3, notif_str);
                 inserter->createRecord();
             }
 
