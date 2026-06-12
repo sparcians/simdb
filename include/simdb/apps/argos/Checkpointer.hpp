@@ -98,7 +98,7 @@ public:
     {
     }
 
-    uint16_t getCID() const { return cid_; }
+    uint16_t getCID() const override { return cid_; }
 
     std::unique_ptr<CollectedData> getMinifiedData() const override
     {
@@ -140,7 +140,7 @@ public:
         assert(parent_ != nullptr);
     }
 
-    uint16_t getCID() const { return cid_; }
+    uint16_t getCID() const override { return cid_; }
 
     std::unique_ptr<CollectedData> getMinifiedData() const override
     {
@@ -186,7 +186,7 @@ public:
         assert(parent_ != nullptr);
     }
 
-    uint16_t getCID() const { return cid_; }
+    uint16_t getCID() const override { return cid_; }
 
     std::unique_ptr<CollectedData> getMinifiedData() const override
     {
