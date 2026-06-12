@@ -135,13 +135,13 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
             }
         }
 
-        std::string stringify() const
+        std::optional<std::string> stringify() const
         {
             std::string out;
             if (!detail::to_string(i, out) && !detail::to_string(I, out) && !detail::to_string(q, out) &&
                 !detail::to_string(Q, out) && !detail::to_string(d, out) && !detail::to_string(s, out))
             {
-                throw DBException("Cannot stringify - no value set");
+                return std::nullopt;
             }
             return out;
         }
@@ -175,7 +175,10 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
         std::vector<std::string> col_strings;
         for (const auto& col_result : selects)
         {
-            col_strings.push_back(col_result.stringify());
+            if (auto s = col_result.stringify(); s.has_value())
+            {
+                col_strings.push_back(s.value());
+            }
         }
         row_strings.emplace_back(std::move(col_strings));
     }
