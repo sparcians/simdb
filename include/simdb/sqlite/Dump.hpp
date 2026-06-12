@@ -169,9 +169,13 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
         std::vector<std::string> col_strings;
         for (const auto& col_result : selects)
         {
-            if (auto s = col_result.stringify(); s.has_value())
+            auto s = col_result.stringify();
+            if (s.has_value())
             {
                 col_strings.push_back(s.value());
+            } else
+            {
+                col_strings.push_back("<NULL>");
             }
         }
         row_strings.emplace_back(std::move(col_strings));
