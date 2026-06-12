@@ -171,8 +171,6 @@ public:
         resources_.setTimestamp(timestamp_.get());
     }
 
-    void enableMinification(bool = true) {}
-
     //! TODO cnyce: Once the collection code from Sparta is moved to SimDB, change this
     //! to a template method so we can figure out the encoded data type name ourselves.
     //! Scalar types are encoded as follows:
