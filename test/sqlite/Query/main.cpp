@@ -896,6 +896,64 @@ int main()
         }
     }
 
+    // Test std::optional<std::string> to distinguish SQL NULL from "".
+    {
+        simdb::Schema optional_string_schema;
+        optional_string_schema.addTable("OptionalStrings")
+            .addColumn("Label", dt::int32_t)
+            .addColumn("SomeString", dt::string_t);
+        db_mgr.appendSchema(optional_string_schema);
+
+        db_mgr.INSERT(SQL_TABLE("OptionalStrings"), SQL_COLUMNS("Label"), SQL_VALUES((int32_t)1));
+        db_mgr.INSERT(SQL_TABLE("OptionalStrings"), SQL_COLUMNS("Label", "SomeString"), SQL_VALUES((int32_t)2, ""));
+        db_mgr.INSERT(SQL_TABLE("OptionalStrings"), SQL_COLUMNS("Label", "SomeString"), SQL_VALUES((int32_t)3, "hello"));
+
+        int32_t label = 0;
+
+        // NULL columns are written as "" for plain std::string.
+        {
+            auto plain_query = db_mgr.createQuery("OptionalStrings");
+            std::string str;
+            plain_query->select("Label", label);
+            plain_query->select("SomeString", str);
+            plain_query->addConstraintForInt("Label", simdb::Constraints::EQUAL, 1);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 1);
+            EXPECT_EQUAL(str, "");
+            EXPECT_FALSE(result_set.getNextRecord());
+        }
+
+        // std::optional distinguishes SQL NULL from "".
+        {
+            auto opt_query = db_mgr.createQuery("OptionalStrings");
+            std::optional<std::string> opt_str;
+            opt_query->select("Label", label);
+            opt_query->select("SomeString", opt_str);
+            opt_query->orderBy("Label", simdb::QueryOrder::ASC);
+
+            EXPECT_EQUAL(opt_query->count(), 3);
+            auto result_set = opt_query->getResultSet();
+
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 1);
+            EXPECT_FALSE(opt_str.has_value());
+
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 2);
+            EXPECT_TRUE(opt_str.has_value());
+            EXPECT_EQUAL(opt_str.value(), "");
+
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 3);
+            EXPECT_TRUE(opt_str.has_value());
+            EXPECT_EQUAL(opt_str.value(), "hello");
+
+            EXPECT_FALSE(result_set.getNextRecord());
+        }
+    }
+
     REPORT_ERROR;
     return ERROR_CODE;
 }

@@ -331,14 +331,16 @@ private:
  * \brief Responsible for writing text record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterString : public ResultWriterBase
+template <typename StringT = std::string> class ResultWriterString : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<StringT, std::string>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterString(const char* col_name, std::string* user_var) :
+    ResultWriterString(const char* col_name, StringT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -348,14 +350,31 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
-        *user_var_ = (const char*)sqlite3_column_text(stmt, idx);
+        if constexpr (detail::is_optional_v<StringT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else if (detail::columnIsNull(stmt, idx))
+        {
+            *user_var_ = "";
+            return;
+        }
+
+        const char* text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, idx));
+        *user_var_ = text ? text : "";
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterString(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override
+    {
+        return new ResultWriterString<StringT>(getColName().c_str(), user_var_);
+    }
 
 private:
-    std::string* user_var_;
+    StringT* user_var_;
 };
 
 /*!

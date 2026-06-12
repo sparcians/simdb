@@ -493,11 +493,17 @@ public:
     ///     std::string val;
     ///     query->select("Col", val);
     ///
-    /// Note that this does not have a std::optional overload since std::string::empty()
-    /// makes NULL obvious.
+    /// NULL columns are written as the empty string. Use the std::optional overload
+    /// to distinguish SQL NULL from an explicitly stored empty string.
     void select(const char* col_name, std::string& user_var)
     {
         result_writers_.emplace_back(new ResultWriterString(col_name, &user_var));
+    }
+
+    /// Use std::optional overload to distinguish SQL NULL from "".
+    void select(const char* col_name, std::optional<std::string>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterString<std::optional<std::string>>(col_name, &user_var));
     }
 
     /// SELECT column values and write to the local variable on each iteration
