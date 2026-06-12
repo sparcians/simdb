@@ -89,15 +89,19 @@ class ViewSettings:
             dlg.ShowModal()
             dlg.Destroy()
             return
-        
-        with open(view_file, 'r') as fin:
-            settings = yaml.load(fin, Loader=yaml.FullLoader)
-            self._frame.explorer.queues_tree.ApplyViewSettings(settings['QueuesTree'])
-            self._frame.explorer.scalars_tree.ApplyViewSettings(settings['ScalarsTree'])
-            self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
-            self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
-            self._frame.inspector.ApplyViewSettings(settings['Inspector'])
-            self._frame.widget_renderer.ApplyViewSettings(settings['WidgetRenderer'])
+
+        try:
+            with open(view_file, 'r') as fin:
+                settings = yaml.load(fin, Loader=yaml.FullLoader)
+                self._frame.explorer.queues_tree.ApplyViewSettings(settings['QueuesTree'])
+                self._frame.explorer.scalars_tree.ApplyViewSettings(settings['ScalarsTree'])
+                self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
+                self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
+                self._frame.inspector.ApplyViewSettings(settings['Inspector'])
+                self._frame.widget_renderer.ApplyViewSettings(settings['WidgetRenderer'])
+        except Exception as ex:
+            print (f"Error loading view file '{view_file}': '{ex}'")
+            self.__ResetDefaultViewSettings()
 
         self._frame.inspector.RefreshWidgetsOnAllTabs()
         if set_as_current:
@@ -335,6 +339,7 @@ class ViewSettings:
         except Exception as ex:
             print (f"Error loading user settings. Deleting settings file. Error: '{ex}'")
             os.remove(settings_file)
+            self.__ResetDefaultViewSettings()
 
     def __AskToSaveChangesToCurrentView(self, prompt):
         dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons)
