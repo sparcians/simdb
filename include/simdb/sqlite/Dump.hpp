@@ -7,19 +7,19 @@
 namespace simdb {
 
 namespace detail {
-template <typename T> inline bool to_string(const ValidValue<T>& vv, std::string& out)
+template <typename T> inline bool to_string(const std::optional<T>& opt, std::string& out)
 {
-    if (!vv.isValid())
+    if (!opt.has_value())
     {
         return false;
     }
 
     if constexpr (std::is_same_v<T, std::string>)
     {
-        out = vv;
+        out = opt.value();
     } else
     {
-        out = std::to_string(vv.getValue());
+        out = std::to_string(opt.value());
     }
     return true;
 }
@@ -89,12 +89,12 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
 {
     struct SelectedValueUnion
     {
-        ValidValue<int32_t> i;
-        ValidValue<uint32_t> I;
-        ValidValue<int64_t> q;
-        ValidValue<uint64_t> Q;
-        ValidValue<double> d;
-        ValidValue<std::string> s;
+        std::optional<int32_t> i;
+        std::optional<uint32_t> I;
+        std::optional<int64_t> q;
+        std::optional<uint64_t> Q;
+        std::optional<double> d;
+        std::optional<std::string> s;
 
         SelectedValueUnion(SqlQuery* query, const Column* col) :
             SelectedValueUnion(query, col->getName(), col->getDataType())
@@ -107,28 +107,22 @@ inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
             switch (dtype)
             {
             case dt::int32_t:
-                i = 0;
-                query->select(col_name.c_str(), i.getValue());
+                query->select(col_name.c_str(), i);
                 break;
             case dt::uint32_t:
-                I = 0;
-                query->select(col_name.c_str(), I.getValue());
+                query->select(col_name.c_str(), I);
                 break;
             case dt::int64_t:
-                q = 0;
-                query->select(col_name.c_str(), q.getValue());
+                query->select(col_name.c_str(), q);
                 break;
             case dt::uint64_t:
-                Q = 0;
-                query->select(col_name.c_str(), Q.getValue());
+                query->select(col_name.c_str(), Q);
                 break;
             case dt::double_t:
-                d = 0;
-                query->select(col_name.c_str(), d.getValue());
+                query->select(col_name.c_str(), d);
                 break;
             case dt::string_t:
-                s = "";
-                query->select(col_name.c_str(), s.getValue());
+                query->select(col_name.c_str(), s);
                 break;
             default:
                 break;
