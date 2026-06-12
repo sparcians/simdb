@@ -894,6 +894,37 @@ int main()
             EXPECT_EQUAL(opt_i32.value(), 42);
             EXPECT_FALSE(opt_u64.has_value());
         }
+
+        // Non-optional SELECT throws on NULL columns instead of coercing to zero.
+        {
+            auto plain_query = db_mgr.createQuery("OptionalTypes");
+            uint32_t u32 = 999;
+            plain_query->select("SomeUInt32", u32);
+            plain_query->addConstraintForInt("SomeInt32", simdb::Constraints::EQUAL, 42);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_THROW(result_set.getNextRecord());
+        }
+        {
+            auto plain_query = db_mgr.createQuery("OptionalTypes");
+            uint64_t u64 = 999;
+            plain_query->select("SomeUInt64", u64);
+            plain_query->addConstraintForInt("SomeInt32", simdb::Constraints::EQUAL, 42);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_THROW(result_set.getNextRecord());
+        }
+        {
+            auto plain_query = db_mgr.createQuery("OptionalTypes");
+            uint32_t u32 = 0;
+            plain_query->select("SomeUInt32", u32);
+            plain_query->addConstraintForInt("SomeInt32", simdb::Constraints::EQUAL, 100);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(u32, 200u);
+            EXPECT_FALSE(result_set.getNextRecord());
+        }
     }
 
     // Test std::optional<std::string> to distinguish SQL NULL from "".

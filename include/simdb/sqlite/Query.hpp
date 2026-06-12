@@ -410,6 +410,9 @@ public:
     /// Reset the query constraints.
     void resetConstraints() { constraint_clauses_.clear(); }
 
+    /// Non-optional scalar SELECT overloads throw if a column value is SQL NULL.
+    /// Use the std::optional overloads when a column may be unset.
+    ///
     /// SELECT column values and write to the local variable on each iteration
     /// (int32_t).
     ///

@@ -49,6 +49,14 @@ inline bool columnIsNull(sqlite3_stmt* stmt, const int idx)
 {
     return sqlite3_column_type(stmt, idx) == SQLITE_NULL;
 }
+
+inline void requireNonNullColumn(sqlite3_stmt* stmt, const int idx, const std::string& col_name)
+{
+    if (columnIsNull(stmt, idx))
+    {
+        throw DBException("Column '") << col_name << "' is NULL; use std::optional overload";
+    }
+}
 } // namespace detail
 
 /*!
@@ -119,6 +127,9 @@ public:
                 *user_var_ = std::nullopt;
                 return;
             }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
         }
 
         *user_var_ = sqlite3_column_int(stmt, idx);
@@ -163,6 +174,9 @@ public:
                 *user_var_ = std::nullopt;
                 return;
             }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
         }
 
         sqlite3_int64 tmp = sqlite3_column_int64(stmt, idx);
@@ -214,6 +228,9 @@ public:
                 *user_var_ = std::nullopt;
                 return;
             }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
         }
 
         *user_var_ = sqlite3_column_int64(stmt, idx);
@@ -258,6 +275,9 @@ public:
                 *user_var_ = std::nullopt;
                 return;
             }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
         }
 
         const void* blob = sqlite3_column_text16(stmt, idx);
@@ -310,6 +330,9 @@ public:
                 *user_var_ = std::nullopt;
                 return;
             }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
         }
 
         *user_var_ = sqlite3_column_double(stmt, idx);
