@@ -8,6 +8,7 @@
 #include "simdb/utils/ConcurrentQueue.hpp"
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,9 +52,14 @@ public:
 
     void setContainerType(uint16_t cid, bool sparse, size_t capacity)
     {
-        (void)sparse;
         (void)capacity;
-        container_cids_.insert(cid);
+        if (sparse)
+        {
+            sparse_cids_.insert(cid);
+        } else
+        {
+            container_cids_.insert(cid);
+        }
     }
 
     void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
@@ -72,6 +78,14 @@ public:
         waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(contig_bin_bytes);
     }
 
+    void stage(uint16_t cid, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+    {
+        assert(sparse_cids_.count(cid) > 0);
+        advanceSimTimeSlot();
+        auto& checkpointer = getOrCreateSparseCheckpointer_(cid);
+        waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(sparse_bin_bytes);
+    }
+
     void onEnabledChanged(uint16_t cid, bool enabled)
     {
         if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
@@ -79,9 +93,12 @@ public:
             advanceSimTimeSlot();
             waiting_queue_.back().checkpoints[cid] =
                 enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
-            return;
-        }
-        if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
+        } else if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
+        {
+            advanceSimTimeSlot();
+            waiting_queue_.back().checkpoints[cid] =
+                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
+        } else if (auto* checkpointer = findSparseCheckpointer_(cid); checkpointer && checkpointer->tip())
         {
             advanceSimTimeSlot();
             waiting_queue_.back().checkpoints[cid] =
@@ -96,9 +113,12 @@ public:
             advanceSimTimeSlot();
             waiting_queue_.back().checkpoints[cid] =
                 quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
-            return;
-        }
-        if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
+        } else if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
+        {
+            advanceSimTimeSlot();
+            waiting_queue_.back().checkpoints[cid] =
+                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
+        } else if (auto* checkpointer = findSparseCheckpointer_(cid); checkpointer && checkpointer->tip())
         {
             advanceSimTimeSlot();
             waiting_queue_.back().checkpoints[cid] =
@@ -135,6 +155,10 @@ public:
             return it->second->tip();
         }
         if (auto it = contig_checkpointers_.find(cid); it != contig_checkpointers_.end())
+        {
+            return it->second->tip();
+        }
+        if (auto it = sparse_checkpointers_.find(cid); it != sparse_checkpointers_.end())
         {
             return it->second->tip();
         }
@@ -182,6 +206,26 @@ private:
     {
         auto it = contig_checkpointers_.find(cid);
         if (it == contig_checkpointers_.end())
+        {
+            return nullptr;
+        }
+        return it->second.get();
+    }
+
+    SparseCheckpointer& getOrCreateSparseCheckpointer_(uint16_t cid)
+    {
+        auto it = sparse_checkpointers_.find(cid);
+        if (it == sparse_checkpointers_.end())
+        {
+            it = sparse_checkpointers_.emplace(cid, std::make_unique<SparseCheckpointer>(cid, heartbeat_)).first;
+        }
+        return *it->second;
+    }
+
+    SparseCheckpointer* findSparseCheckpointer_(uint16_t cid)
+    {
+        auto it = sparse_checkpointers_.find(cid);
+        if (it == sparse_checkpointers_.end())
         {
             return nullptr;
         }
@@ -310,6 +354,29 @@ private:
             }
         }
 
+        for (const auto& [cid, checkpointer] : sparse_checkpointers_)
+        {
+            if (!handled_cids.insert(cid).second)
+            {
+                continue;
+            }
+
+            if (!checkpointer->isRefreshable())
+            {
+                continue;
+            }
+
+            if (checkpointer->isDueForWireRefresh())
+            {
+                auto full_data = checkpointer->tip()->getFullData();
+                to_send.entries.emplace_back(std::move(full_data));
+                checkpointer->rebaseTipAfterWireFull(*to_send.entries.back());
+            } else
+            {
+                checkpointer->recordMissedFlush();
+            }
+        }
+
         if (!to_send.entries.empty() && pipeline_head_ != nullptr)
         {
             pipeline_head_->emplace(std::move(to_send));
@@ -334,8 +401,10 @@ private:
 
     std::unordered_set<uint16_t> scalar_cids_;
     std::unordered_set<uint16_t> container_cids_;
+    std::unordered_set<uint16_t> sparse_cids_;
     std::unordered_map<uint16_t, std::unique_ptr<ScalarCheckpointer>> scalar_checkpointers_;
     std::unordered_map<uint16_t, std::unique_ptr<ContigCheckpointer>> contig_checkpointers_;
+    std::unordered_map<uint16_t, std::unique_ptr<SparseCheckpointer>> sparse_checkpointers_;
 };
 
 } // namespace simdb::argos

@@ -5,6 +5,7 @@
 #include "simdb/utils/ConcurrentQueue.hpp"
 
 #include <cstring>
+#include <map>
 
 namespace {
 
@@ -630,6 +631,205 @@ void testScalarAndContigSameFlush()
     EXPECT_TRUE(findPipelineEntry(entry, kContigCid) != nullptr);
 }
 
+std::map<uint16_t, std::vector<char>> sparseBins(
+    std::initializer_list<std::pair<const uint16_t, std::vector<char>>> elems)
+{
+    return std::map<uint16_t, std::vector<char>>(elems);
+}
+
+std::vector<char> sparseBinBytes(char tag)
+{
+    return {'B', 'i', 'n', tag};
+}
+
+class SparseTestHarness
+{
+public:
+    SparseTestHarness() :
+        stager_(kHeartbeat, &timestamp_, &pipeline_queue_)
+    {
+        stager_.disableAutoSendMode(true);
+        stager_.setContainerType(kSparseCid, true, 64);
+    }
+
+    void setTime(uint64_t time) { sim_time_ = time; }
+
+    void stage(const std::map<uint16_t, std::vector<char>>& bins) { stager_.stage(kSparseCid, bins); }
+
+    void quiet() { stager_.onQuietChanged(kSparseCid, true); }
+
+    void awaken() { stager_.onQuietChanged(kSparseCid, false); }
+
+    void flush() { stager_.sendCollectedDataToPipeline(); }
+
+    bool pop(QueueCollectionData& entry)
+    {
+        if (!pipeline_queue_.try_pop(entry))
+        {
+            return false;
+        }
+        return !entry.entries.empty();
+    }
+
+private:
+    static constexpr uint16_t kSparseCid = 9;
+
+    uint64_t sim_time_ = 0;
+    simdb::argos::Timestamp timestamp_{&sim_time_};
+    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue_;
+    CheckpointPipelineStager stager_;
+};
+
+void testSparseFirstCollectionFull()
+{
+    SparseTestHarness harness;
+    const auto initial = sparseBins({{1, sparseBinBytes('A')}, {5, sparseBinBytes('B')}});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+    const auto* full_entry = findPipelineEntry(entry, 9);
+    EXPECT_TRUE(full_entry != nullptr);
+    EXPECT_EQUAL(getActionByte(*full_entry), static_cast<uint8_t>(Action::FULL));
+    const auto payload = getPayload(*full_entry);
+    EXPECT_EQUAL(readUint16(payload, 0), 2u);
+    EXPECT_EQUAL(readUint16(payload, sizeof(uint16_t)), 1u);
+}
+
+void testSparseSwapPipeline()
+{
+    SparseTestHarness harness;
+    const auto initial = sparseBins({{1, sparseBinBytes('A')}, {5, sparseBinBytes('B')}});
+    const auto swapped = sparseBins({{1, sparseBinBytes('A')}, {5, sparseBinBytes('X')}});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(101);
+    harness.stage(swapped);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    const auto* swap_entry = findPipelineEntry(entry, 9);
+    EXPECT_TRUE(swap_entry != nullptr);
+    EXPECT_EQUAL(getActionByte(*swap_entry), static_cast<uint8_t>(Action::SPARSE_CONTAINER_SWAP));
+    const auto payload = getPayload(*swap_entry);
+    EXPECT_EQUAL(readUint16(payload, 0), 5u);
+    EXPECT_EQUAL(std::vector<char>(payload.begin() + sizeof(uint16_t), payload.end()), sparseBinBytes('X'));
+}
+
+void testSparseRemovePipeline()
+{
+    SparseTestHarness harness;
+    const auto initial = sparseBins({{1, sparseBinBytes('A')}, {5, sparseBinBytes('B')}, {9, sparseBinBytes('C')}});
+    const auto removed = sparseBins({{1, sparseBinBytes('A')}, {9, sparseBinBytes('C')}});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(101);
+    harness.stage(removed);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    const auto* remove_entry = findPipelineEntry(entry, 9);
+    EXPECT_TRUE(remove_entry != nullptr);
+    EXPECT_EQUAL(getActionByte(*remove_entry), static_cast<uint8_t>(Action::SPARSE_CONTAINER_REMOVE));
+    EXPECT_EQUAL(readUint16(getPayload(*remove_entry), 0), 5u);
+}
+
+void testSparseHeartbeatCarryToFull()
+{
+    SparseTestHarness harness;
+    const auto initial = sparseBins({{1, sparseBinBytes('A')}, {5, sparseBinBytes('B')}});
+    const auto swapped = sparseBins({{1, sparseBinBytes('A')}, {5, sparseBinBytes('X')}});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(101);
+    harness.stage(initial);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 9)), static_cast<uint8_t>(Action::CARRY));
+
+    harness.setTime(102);
+    harness.stage(initial);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 9)), static_cast<uint8_t>(Action::CARRY));
+
+    harness.setTime(103);
+    harness.stage(swapped);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 9)), static_cast<uint8_t>(Action::FULL));
+}
+
+void testSparseQuietAwakenPipeline()
+{
+    SparseTestHarness harness;
+    const auto initial = sparseBins({{2, sparseBinBytes('Q')}, {4, sparseBinBytes('U')}});
+
+    harness.setTime(100);
+    harness.stage(initial);
+    harness.flush();
+    QueueCollectionData entry;
+    EXPECT_TRUE(harness.pop(entry));
+
+    harness.setTime(101);
+    harness.quiet();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 9)), static_cast<uint8_t>(Action::QUIETED));
+
+    harness.setTime(102);
+    harness.awaken();
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(getActionByte(*findPipelineEntry(entry, 9)), static_cast<uint8_t>(Action::FULL));
+}
+
+void testScalarContigSparseSameFlush()
+{
+    constexpr uint16_t kScalarCid = 1;
+    constexpr uint16_t kContigCid = 7;
+    constexpr uint16_t kSparseCid = 9;
+    const std::vector<char> scalar_payload{'S', 'C', 'A'};
+    const auto contig_payload = contigBins({instBytes('C'), instBytes('T')});
+    const auto sparse_payload = sparseBins({{3, sparseBinBytes('S')}, {7, sparseBinBytes('P')}});
+
+    uint64_t sim_time = 100;
+    simdb::argos::Timestamp timestamp{&sim_time};
+    simdb::ConcurrentQueue<QueueCollectionData> pipeline_queue;
+    CheckpointPipelineStager stager(kHeartbeat, &timestamp, &pipeline_queue);
+    stager.disableAutoSendMode(true);
+    stager.setScalarType(kScalarCid);
+    stager.setContainerType(kContigCid, false, 16);
+    stager.setContainerType(kSparseCid, true, 16);
+
+    stager.stage(kScalarCid, scalar_payload);
+    stager.stage(kContigCid, contig_payload);
+    stager.stage(kSparseCid, sparse_payload);
+    stager.sendCollectedDataToPipeline();
+
+    QueueCollectionData entry;
+    EXPECT_TRUE(pipeline_queue.try_pop(entry));
+    EXPECT_EQUAL(entry.entries.size(), 3u);
+    EXPECT_TRUE(findPipelineEntry(entry, kScalarCid) != nullptr);
+    EXPECT_TRUE(findPipelineEntry(entry, kContigCid) != nullptr);
+    EXPECT_TRUE(findPipelineEntry(entry, kSparseCid) != nullptr);
+}
+
 } // namespace
 
 TEST_INIT;
@@ -653,6 +853,12 @@ int main()
     testContigHeartbeatBookendsOverride();
     testContigDisableQuietPipeline();
     testScalarAndContigSameFlush();
+    testSparseFirstCollectionFull();
+    testSparseSwapPipeline();
+    testSparseRemovePipeline();
+    testSparseHeartbeatCarryToFull();
+    testSparseQuietAwakenPipeline();
+    testScalarContigSparseSameFlush();
 
     REPORT_ERROR;
     return ERROR_CODE;
