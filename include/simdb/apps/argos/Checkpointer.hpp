@@ -245,8 +245,28 @@ public:
         return tip_->getDistanceToSnapshot();
     }
 
-    //! Whether Pass 2 may inject heartbeat FULLs for this CID (Option B TDD stub).
-    bool isRefreshable() const { return true; }
+    bool isRefreshable() const
+    {
+        if (!tip_)
+        {
+            return false;
+        }
+        const auto action = tip_->getAction();
+        return action != Action::DISABLED && action != Action::QUIETED;
+    }
+
+    bool isDueForWireRefresh() const { return isRefreshable() && (getDistanceToSnapshot() + 1 >= heartbeat_); }
+
+    void recordMissedFlush()
+    {
+        assert(isRefreshable());
+        tip_ = std::make_shared<ScalarDeltaCheckpoint>(cid_, tip_);
+    }
+
+    void rebaseTipAfterWireFull(const CollectedData& full)
+    {
+        setNewTip(std::make_shared<ScalarSnapshotCheckpoint>(cid_, nullptr, extractFullPayload_(full)));
+    }
 
     std::shared_ptr<Checkpoint> createCheckpoint(const std::vector<char>& raw)
     {

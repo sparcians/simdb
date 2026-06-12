@@ -37,6 +37,9 @@ public:
     {
         assert(heartbeat > 0);
         assert(timestamp != nullptr);
+
+        (void)notif_head_;
+        (void)dyn_field_head_;
     }
 
     size_t getHeartbeat() const { return heartbeat_; }
@@ -96,33 +99,20 @@ public:
         }
     }
 
-    //! Test-only accessor for Option B TDD (refreshable eligibility).
-    bool isScalarRefreshableForTest(uint16_t cid) const
+    //! Tip of the per-CID checkpoint chain after the latest flush/enqueue activity.
+    std::shared_ptr<const Checkpoint> getTip(uint16_t cid) const
     {
         auto it = scalar_checkpointers_.find(cid);
         if (it == scalar_checkpointers_.end())
         {
-            return false;
+            return nullptr;
         }
-        return it->second->isRefreshable();
-    }
-
-    //! Test-only accessor for Option A TDD (tip stays VanishedCheckpoint after disable/quiet).
-    bool isScalarTipVanishedForTest(uint16_t cid) const
-    {
-        auto it = scalar_checkpointers_.find(cid);
-        if (it == scalar_checkpointers_.end() || !it->second->tip())
-        {
-            return false;
-        }
-        const auto action = it->second->tip()->getAction();
-        return action == Action::DISABLED || action == Action::QUIETED;
+        return it->second->tip();
     }
 
 private:
     static constexpr auto kCidBytes = sizeof(uint16_t);
     static constexpr auto kActionBytes = sizeof(uint8_t);
-    static constexpr auto kHeaderBytes = kCidBytes + kActionBytes;
 
     static bool isLifecycleAction_(const CollectedData& data)
     {
@@ -236,28 +226,31 @@ private:
             {
                 auto mini_data = checkpoint->getMinifiedData();
                 to_send.entries.emplace_back(std::move(mini_data));
-
-                auto rebased_chkpt = createTip_(*checkpoint);
-                scalar_checkpointers_[cid]->setNewTip(rebased_chkpt);
                 handled_cids.insert(cid);
             }
         }
 
-        // Now we have to replay FULL bytes for anything not handled
-        // in this flush that is about to leave the heartbeat interval.
+        // Replay FULL bytes for refreshable CIDs not handled in this flush.
         for (const auto& [cid, checkpointer] : scalar_checkpointers_)
         {
-            if (handled_cids.insert(cid).second)
+            if (!handled_cids.insert(cid).second)
             {
-                auto checkpoint = checkpointer->tip();
-                auto force_refresh = checkpoint->getDistanceToSnapshot() + 1 >= heartbeat_;
+                continue;
+            }
 
-                if (force_refresh)
-                {
-                    auto full_data = checkpoint->getFullData();
-                    to_send.entries.emplace_back(std::move(full_data));
-                    scalar_checkpointers_[cid]->setNewTip(createTip_(cid, *to_send.entries.back()));
-                }
+            if (!checkpointer->isRefreshable())
+            {
+                continue;
+            }
+
+            if (checkpointer->isDueForWireRefresh())
+            {
+                auto full_data = checkpointer->tip()->getFullData();
+                to_send.entries.emplace_back(std::move(full_data));
+                checkpointer->rebaseTipAfterWireFull(*to_send.entries.back());
+            } else
+            {
+                checkpointer->recordMissedFlush();
             }
         }
 
@@ -277,23 +270,6 @@ private:
     {
         auto action = checkpoint.getAction();
         return action == Action::DISABLED || action == Action::QUIETED;
-    }
-
-    static std::shared_ptr<Checkpoint> createTip_(const Checkpoint& checkpoint)
-    {
-        auto cid = checkpoint.getCID();
-        auto full_data = checkpoint.getFullData();
-        return createTip_(cid, *full_data);
-    }
-
-    static std::shared_ptr<Checkpoint> createTip_(uint16_t cid, const CollectedData& full_data)
-    {
-        const auto& buf = full_data.getData();
-        const auto ptr = &buf.at(kHeaderBytes);
-        const auto len = buf.size() - kHeaderBytes;
-
-        const std::vector<char> payload(ptr, ptr + len);
-        return std::make_shared<ScalarSnapshotCheckpoint>(cid, nullptr, payload);
     }
 
     const size_t heartbeat_;
