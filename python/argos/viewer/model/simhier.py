@@ -2,7 +2,7 @@ import copy, re
 import sqlite3
 
 class SimHierarchy:
-    def __init__(self, db, dtype_inspector):
+    def __init__(self, db, dtype_inspector, show_in_ui_only=True):
         full_paths = []
         metas_by_path = {}
 
@@ -12,10 +12,10 @@ class SimHierarchy:
         #    --> This means that we only show collectables that were actually collected.
         #        The database has all the metadata to add everything to the hierarchy,
         #        but without any collected data it just looks cluttered.
-        cursor.execute(
-            "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes "
-            "WHERE ShowInUI=1"
-        )
+        cmd = "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes"
+        if show_in_ui_only:
+            cmd += " WHERE ShowInUI=1"
+        cursor.execute(cmd)
         rows = [(r[0], r[1], r[2], r[3]) for r in cursor.fetchall()]
 
         for full_path, cid, clk_id, type_name in rows:

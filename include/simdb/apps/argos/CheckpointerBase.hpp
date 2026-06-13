@@ -53,18 +53,22 @@ public:
             return false;
         }
         const auto action = tip_->getAction();
-        return action != Action::DISABLED && action != Action::QUIETED;
+        if (action == Action::DISABLED || action == Action::QUIETED)
+        {
+            return false;
+        }
+        return getDistanceToSnapshot() + lagging_counter_ + 1 >= heartbeat_;
     }
-
-    bool isDueForWireRefresh() const { return isRefreshable() && (getDistanceToSnapshot() + 1 >= heartbeat_); }
 
     void recordMissedFlush()
     {
-        assert(isRefreshable());
-        tip_ = makeCarryCheckpoint_();
+        ++lagging_counter_;
     }
 
-    void rebaseTipAfterWireFull(const CollectedData& full) { setNewTip(makeRootSnapshotAfterWireFull_(full)); }
+    void upToDate()
+    {
+        lagging_counter_ = 0;
+    }
 
     std::shared_ptr<Checkpoint> createDisabledCheckpoint()
     {
@@ -86,7 +90,7 @@ public:
     }
 
 protected:
-    bool isHeartbeatBoundary_() const { return (getDistanceToSnapshot() + 1) % heartbeat_ == 0; }
+    bool isLaggingTooMuch_() const { return (getDistanceToSnapshot() + lagging_counter_ + 1) >= heartbeat_; }
 
     std::shared_ptr<Checkpoint> appendLifecycleCheckpoint_(ScalarVanishedCheckpoint::Kind kind)
     {
@@ -101,9 +105,9 @@ protected:
     std::shared_ptr<Checkpoint> tip_;
 
 private:
-    virtual std::shared_ptr<Checkpoint> makeCarryCheckpoint_() = 0;
     virtual std::shared_ptr<Checkpoint> makeRootSnapshotAfterWireFull_(const CollectedData& full) = 0;
     virtual std::shared_ptr<Checkpoint> makeReenabledSnapshot_() = 0;
+    size_t lagging_counter_ = 0;
 };
 
 } // namespace simdb::argos

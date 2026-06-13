@@ -150,6 +150,15 @@ void testSparseSizeChange()
     EXPECT_EQUAL(result.kind, SparseDeltaKind::FULL);
 }
 
+void testSparseBinRelocate()
+{
+    const std::vector<char> payload{'I', 'n', 's', 't'};
+    const auto prev = sparseBins({{0, payload}});
+    const auto curr = sparseBins({{1, payload}});
+    const auto result = classifySparseChange(prev, curr);
+    EXPECT_EQUAL(result.kind, SparseDeltaKind::FULL);
+}
+
 } // namespace
 
 TEST_INIT;
@@ -172,6 +181,7 @@ int main()
     testSparseRemove();
     testSparseFullFallback();
     testSparseSizeChange();
+    testSparseBinRelocate();
 
     REPORT_ERROR;
     return ERROR_CODE;

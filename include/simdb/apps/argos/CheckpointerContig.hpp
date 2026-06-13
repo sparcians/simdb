@@ -163,8 +163,13 @@ public:
     {
         max_container_size_seen_ = std::max(max_container_size_seen_, static_cast<size_t>(countContigElements(curr)));
 
-        const bool force_full = isHeartbeatBoundary_();
+        const bool force_full = isLaggingTooMuch_();
         const auto classification = classifyContigChange(prev_contig_bins_, curr);
+
+        if (!force_full && classification == ContigDeltaKind::CARRY)
+        {
+            return nullptr;
+        }
 
         std::shared_ptr<Checkpoint> checkpoint;
         if (classification.kind == ContigDeltaKind::FULL || force_full)
@@ -207,12 +212,6 @@ private:
     {
         return std::make_shared<ContigDeltaCheckpoint>(cid_, tip_, contigActionFromKind_(classification.kind),
                                                        classification.swap_index, classification.payload);
-    }
-
-    std::shared_ptr<Checkpoint> makeCarryCheckpoint_() override
-    {
-        return std::make_shared<ContigDeltaCheckpoint>(cid_, tip_, Action::CARRY, simdb::ValidValue<uint16_t>{},
-                                                       std::vector<char>{});
     }
 
     std::shared_ptr<Checkpoint> makeRootSnapshotAfterWireFull_(const CollectedData& /*full*/) override

@@ -66,7 +66,10 @@ public:
         assert(scalar_cids_.count(cid) > 0);
         advanceSimTimeSlot();
         auto& checkpointer = getOrCreateScalarCheckpointer_(cid);
-        waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(scalar_bytes);
+        if (auto chkpt = checkpointer.createCheckpoint(scalar_bytes))
+        {
+            waiting_queue_.back().checkpoints[cid] = chkpt;
+        }
     }
 
     void stage(uint16_t cid, const std::vector<std::vector<char>>& contig_bin_bytes)
@@ -74,7 +77,10 @@ public:
         assert(container_cids_.count(cid) > 0);
         advanceSimTimeSlot();
         auto& checkpointer = getOrCreateContigCheckpointer_(cid);
-        waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(contig_bin_bytes);
+        if (auto chkpt = checkpointer.createCheckpoint(contig_bin_bytes))
+        {
+            waiting_queue_.back().checkpoints[cid] = chkpt;
+        }
     }
 
     void stage(uint16_t cid, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
@@ -82,7 +88,10 @@ public:
         assert(sparse_cids_.count(cid) > 0);
         advanceSimTimeSlot();
         auto& checkpointer = getOrCreateSparseCheckpointer_(cid);
-        waiting_queue_.back().checkpoints[cid] = checkpointer.createCheckpoint(sparse_bin_bytes);
+        if (auto chkpt = checkpointer.createCheckpoint(sparse_bin_bytes))
+        {
+            waiting_queue_.back().checkpoints[cid] = chkpt;
+        }
     }
 
     void onEnabledChanged(uint16_t cid, bool enabled)
@@ -463,18 +472,13 @@ private:
 
             if (!checkpointer->isRefreshable())
             {
-                continue;
-            }
-
-            if (checkpointer->isDueForWireRefresh())
+                checkpointer->recordMissedFlush();
+            } else
             {
                 auto full_data = checkpointer->tip()->getFullData();
                 recordWireSent_(*full_data);
                 to_send.entries.emplace_back(std::move(full_data));
-                checkpointer->rebaseTipAfterWireFull(*to_send.entries.back());
-            } else
-            {
-                checkpointer->recordMissedFlush();
+                checkpointer->upToDate();
             }
         }
 
@@ -487,18 +491,13 @@ private:
 
             if (!checkpointer->isRefreshable())
             {
-                continue;
-            }
-
-            if (checkpointer->isDueForWireRefresh())
+                checkpointer->recordMissedFlush();
+            } else
             {
                 auto full_data = checkpointer->tip()->getFullData();
                 recordWireSent_(*full_data);
                 to_send.entries.emplace_back(std::move(full_data));
-                checkpointer->rebaseTipAfterWireFull(*to_send.entries.back());
-            } else
-            {
-                checkpointer->recordMissedFlush();
+                checkpointer->upToDate();
             }
         }
 
@@ -511,18 +510,13 @@ private:
 
             if (!checkpointer->isRefreshable())
             {
-                continue;
-            }
-
-            if (checkpointer->isDueForWireRefresh())
+                checkpointer->recordMissedFlush();
+            } else
             {
                 auto full_data = checkpointer->tip()->getFullData();
                 recordWireSent_(*full_data);
                 to_send.entries.emplace_back(std::move(full_data));
-                checkpointer->rebaseTipAfterWireFull(*to_send.entries.back());
-            } else
-            {
-                checkpointer->recordMissedFlush();
+                checkpointer->upToDate();
             }
         }
 

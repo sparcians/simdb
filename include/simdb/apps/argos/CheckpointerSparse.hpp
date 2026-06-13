@@ -128,8 +128,13 @@ public:
     {
         max_container_size_seen_ = std::max(max_container_size_seen_, static_cast<size_t>(countSparseElements_(curr)));
 
-        const bool force_full = isHeartbeatBoundary_();
+        const bool force_full = isLaggingTooMuch_();
         const auto classification = classifySparseChange(prev_sparse_bins_, curr);
+
+        if (!force_full && classification == SparseDeltaKind::CARRY)
+        {
+            return nullptr;
+        }
 
         std::shared_ptr<Checkpoint> checkpoint;
         if (classification.kind == SparseDeltaKind::FULL || force_full)
@@ -168,17 +173,6 @@ private:
     {
         return std::make_shared<SparseDeltaCheckpoint>(cid_, tip_, sparseActionFromKind_(classification.kind),
                                                        classification.bin_index, classification.payload);
-    }
-
-    std::shared_ptr<Checkpoint> makeCarryCheckpoint_() override
-    {
-        return std::make_shared<SparseDeltaCheckpoint>(cid_, tip_, Action::CARRY, simdb::ValidValue<uint16_t>{},
-                                                       std::vector<char>{});
-    }
-
-    std::shared_ptr<Checkpoint> makeRootSnapshotAfterWireFull_(const CollectedData& /*full*/) override
-    {
-        return std::make_shared<SparseSnapshotCheckpoint>(cid_, nullptr, prev_sparse_bins_);
     }
 
     std::shared_ptr<Checkpoint> makeReenabledSnapshot_() override

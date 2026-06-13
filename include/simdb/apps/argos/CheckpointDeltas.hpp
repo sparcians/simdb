@@ -356,6 +356,15 @@ inline SparseDeltaClassification classifySparseChange(const std::map<uint16_t, s
 
     if (removed_idxs.size() == 1 && changed_idxs.empty())
     {
+        for (const auto& [curr_idx, _] : curr)
+        {
+            if (prev.find(curr_idx) == prev.end())
+            {
+                result.kind = SparseDeltaKind::FULL;
+                return result;
+            }
+        }
+
         result.kind = SparseDeltaKind::REMOVE;
         result.bin_index = removed_idxs[0];
         return result;

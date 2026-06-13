@@ -44,11 +44,16 @@ public:
 
     std::shared_ptr<Checkpoint> createCheckpoint(const std::vector<char>& raw)
     {
-        const auto kind = classifyScalarChange(last_scalar_bytes_, raw);
-        const bool force_full = isHeartbeatBoundary_();
+        const auto classification = classifyScalarChange(last_scalar_bytes_, raw);
+        const bool force_full = isLaggingTooMuch_();
+
+        if (!force_full && classification == ScalarDeltaKind::UNCHANGED)
+        {
+            return nullptr;
+        }
 
         std::shared_ptr<Checkpoint> checkpoint;
-        if (kind == ScalarDeltaKind::CHANGED || force_full)
+        if (classification == ScalarDeltaKind::CHANGED || force_full)
         {
             checkpoint = std::make_shared<ScalarSnapshotCheckpoint>(cid_, tip_, raw);
         } else
@@ -71,16 +76,6 @@ private:
             return {};
         }
         return std::vector<char>(bytes.begin() + static_cast<std::ptrdiff_t>(kHeaderBytes), bytes.end());
-    }
-
-    std::shared_ptr<Checkpoint> makeCarryCheckpoint_() override
-    {
-        return std::make_shared<ScalarDeltaCheckpoint>(cid_, tip_);
-    }
-
-    std::shared_ptr<Checkpoint> makeRootSnapshotAfterWireFull_(const CollectedData& full) override
-    {
-        return std::make_shared<ScalarSnapshotCheckpoint>(cid_, nullptr, extractFullPayload_(full));
     }
 
     std::shared_ptr<Checkpoint> makeReenabledSnapshot_() override
