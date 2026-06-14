@@ -19,12 +19,9 @@
 
 namespace simdb::argos {
 
-class Checkpoint;
-
 struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
-    std::unordered_map<uint16_t, std::shared_ptr<Checkpoint>> checkpoints;
     std::vector<std::unique_ptr<CollectedData>> entries;
 };
 
