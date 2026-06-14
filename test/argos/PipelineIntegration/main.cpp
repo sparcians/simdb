@@ -33,7 +33,6 @@ constexpr uint16_t kFastSparseCid = 47;
 constexpr uint16_t kSlowSparseCid = 57;
 
 constexpr uint64_t kDefaultSeed = 0xC0FFEEULL;
-constexpr const char* kCondaEnv = "sparta";
 
 std::filesystem::path findRepoRoot()
 {
@@ -613,8 +612,7 @@ public:
 
     bool testerAvailable() const
     {
-        return std::system(condaArgosCmd("python3 -c \"from viewer.model.data_retriever import DataRetriever\"").c_str()) ==
-               0;
+        return std::system(pythonArgosCmd("-c \"from viewer.model.data_retriever import DataRetriever\"").c_str()) == 0;
     }
 
     void compareRuns(size_t hb_a, size_t hb_b, const ScenarioScript& script)
@@ -622,14 +620,14 @@ public:
         if (!testerAvailable())
         {
             throw simdb::DBException(
-                std::string("conda env '") + kCondaEnv +
-                "' is unavailable or missing python/argos dependencies; run: conda activate " + kCondaEnv);
+                "python3 could not import viewer.model.data_retriever; "
+                "ensure python3 is on PATH and run from the SimDB repo");
         }
 
         const auto db_a = run(hb_a, script, "a");
         const auto db_b = run(hb_b, script, "b");
 
-        const auto cmd = condaArgosCmd("python3 tester.py " + db_a.string() + " " + db_b.string());
+        const auto cmd = pythonArgosCmd("tester.py " + db_a.string() + " " + db_b.string());
 
         const int rc = std::system(cmd.c_str());
         EXPECT_EQUAL(rc, 0);
@@ -649,15 +647,15 @@ public:
         if (!testerAvailable())
         {
             throw simdb::DBException(
-                std::string("conda env '") + kCondaEnv +
-                "' is unavailable or missing python/argos dependencies; run: conda activate " + kCondaEnv);
+                "python3 could not import viewer.model.data_retriever; "
+                "ensure python3 is on PATH and run from the SimDB repo");
         }
 
         const auto script = ScenarioScript::generateDualClock();
         const auto db_a = run(hb_a, script, "dual_a", true);
         const auto db_b = run(hb_b, script, "dual_b", true);
 
-        const auto cmd = condaArgosCmd("python3 tester.py " + db_a.string() + " " + db_b.string());
+        const auto cmd = pythonArgosCmd("tester.py " + db_a.string() + " " + db_b.string());
 
         const int rc = std::system(cmd.c_str());
         EXPECT_EQUAL(rc, 0);
@@ -674,11 +672,10 @@ public:
     const ScenarioScript& randomScript() const { return random_script_; }
 
 private:
-    std::string condaArgosCmd(const std::string& inner_cmd) const
+    std::string pythonArgosCmd(const std::string& inner_cmd) const
     {
         std::ostringstream cmd;
-        cmd << "conda run -n " << kCondaEnv << " bash -lc 'cd "
-            << (repo_root_ / "python" / "argos").string() << " && " << inner_cmd << "'";
+        cmd << "cd " << (repo_root_ / "python" / "argos").string() << " && PYTHONPATH=. python3 " << inner_cmd;
         return cmd.str();
     }
 

@@ -1,5 +1,5 @@
 import zlib, copy, sqlite3
-from viewer.gui.view_settings import DirtyReasons
+from viewer.model.dirty_reasons import DirtyReasons
 from viewer.model.data_deserializers import ContigContainerDeserializer
 from viewer.model.data_deserializers import SparseContainerDeserializer
 from viewer.model.data_deserializers import StructDeserializer

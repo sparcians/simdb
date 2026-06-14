@@ -1,39 +1,5 @@
-import wx, yaml, os, enum, shutil, tempfile
-
-class DirtyReasons(enum.Enum):
-    WidgetDropped = 1
-    WidgetSplit = 2
-    CanvasExploded = 3
-    TabAdded = 4
-    TabRenamed = 5
-    TabDeleted = 6
-    QueueUtilizDispQueueChanged = 10
-    TimeseriesPlotSettingsChanged = 11
-    QueueTableDispColsChanged = 12
-    QueueTableAutoColorizeChanged = 13
-    SchedulingLinesWidgetChanged = 14
-    SashPositionChanged = 15
-    WidgetRemoved = 16,
-    TrackedPacketChanged = 17
-    SummaryViewsWidgetChanged = 18
-
-DIRTY_REASONS = {
-    DirtyReasons.WidgetDropped: 'A widget was dropped onto the widget canvas',
-    DirtyReasons.WidgetSplit: 'A widget was split horizontally or vertically',
-    DirtyReasons.CanvasExploded: 'Widget canvas was exploded',
-    DirtyReasons.TabAdded: 'A new tab was added',
-    DirtyReasons.TabRenamed: 'A tab was renamed',
-    DirtyReasons.TabDeleted: 'A tab was deleted',
-    DirtyReasons.QueueUtilizDispQueueChanged: 'The displayed queues in a Queue Utilization widget were changed',
-    DirtyReasons.TimeseriesPlotSettingsChanged: 'Settings were changed for a timeseries plot',
-    DirtyReasons.QueueTableDispColsChanged: 'Displayed columns were changed for a Queue Table widget',
-    DirtyReasons.QueueTableAutoColorizeChanged: 'Auto-colorize column was changed for a Queue Table widget',
-    DirtyReasons.SchedulingLinesWidgetChanged: 'Displayed queues were changed for a Scheduling Lines widget',
-    DirtyReasons.SashPositionChanged: 'Widget canvas splitter window sash position changed',
-    DirtyReasons.WidgetRemoved: 'A widget was removed from the inspector canvas',
-    DirtyReasons.TrackedPacketChanged: 'Changes were made to tracked packet(s)',
-    DirtyReasons.SummaryViewsWidgetChanged: 'Displayed collectables were changed for a Summary Views widget'
-}
+import wx, yaml, os, shutil, tempfile
+from viewer.model.dirty_reasons import DIRTY_REASONS, DirtyReasons
 
 class ViewSettings:
     def __init__(self):
