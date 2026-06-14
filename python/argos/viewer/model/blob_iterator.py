@@ -208,10 +208,11 @@ class BlobIterator:
         assert self._final_tick is not None, 'Iterate() never called'
         return self._final_tick
 
-    def Iterate(self, handler: BlobHandler, time_range: Any = None, lookback: bool = False):
+    def Iterate(self, handler: BlobHandler, time_range: Any = None, lookback: bool = False,
+                clock_ids: Any = None):
         cursor = self.connection.cursor()
         if time_range is None:
-            rows = self._fetch_all_rows(cursor)
+            rows = self._fetch_all_rows(cursor, clock_ids)
         else:
             if isinstance(time_range, int):
                 time_range = [time_range, time_range]
@@ -224,9 +225,9 @@ class BlobIterator:
             if lookback:
                 cursor.execute('SELECT Heartbeat FROM CollectionGlobals')
                 heartbeat = int(cursor.fetchone()[0])
-                rows = self._fetch_lookback_rows(cursor, lo, hi, heartbeat)
+                rows = self._fetch_lookback_rows(cursor, lo, hi, heartbeat, clock_ids)
             else:
-                rows = self._fetch_time_range_rows(cursor, lo, hi)
+                rows = self._fetch_time_range_rows(cursor, lo, hi, clock_ids)
 
         resources = Resources(self._dtype_inspector, self._simhier, handler)
         context = Context()
@@ -241,47 +242,114 @@ class BlobIterator:
 
         self._final_tick = context.current_tick
 
-    def _fetch_all_rows(self, cursor):
+    def _has_timestamp_clocks(self, cursor):
         cursor.execute(
-            'SELECT t.Id, t.Timestamp, cr.Records '
-            'FROM Timestamps t '
-            'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
-            'ORDER BY t.Id ASC'
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='TimestampClocks'"
         )
+        return cursor.fetchone() is not None
+
+    def _normalize_clock_ids(self, clock_ids):
+        if clock_ids is None:
+            return None
+        if isinstance(clock_ids, int):
+            return [clock_ids]
+        return list(clock_ids)
+
+    def _use_clock_filter(self, cursor, clock_ids):
+        clock_ids = self._normalize_clock_ids(clock_ids)
+        return bool(clock_ids) and self._has_timestamp_clocks(cursor)
+
+    def _fetch_all_rows(self, cursor, clock_ids=None):
+        clock_ids = self._normalize_clock_ids(clock_ids)
+        if self._use_clock_filter(cursor, clock_ids):
+            placeholders = ','.join('?' for _ in clock_ids)
+            cursor.execute(
+                'SELECT DISTINCT t.Id, t.Timestamp, cr.Records '
+                'FROM Timestamps t '
+                'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                'INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id '
+                f'WHERE tc.ClockID IN ({placeholders}) '
+                'ORDER BY t.Id ASC',
+                tuple(clock_ids),
+            )
+        else:
+            cursor.execute(
+                'SELECT DISTINCT t.Id, t.Timestamp, cr.Records '
+                'FROM Timestamps t '
+                'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                'ORDER BY t.Id ASC'
+            )
         return cursor.fetchall()
 
-    def _fetch_time_range_rows(self, cursor, lo, hi):
-        cursor.execute(
-            'SELECT t.Id, t.Timestamp, cr.Records '
-            'FROM Timestamps t '
-            'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
-            'WHERE CAST(t.Timestamp AS INTEGER) >= ? AND CAST(t.Timestamp AS INTEGER) <= ? '
-            'ORDER BY t.Id ASC',
-            (lo, hi),
-        )
+    def _fetch_time_range_rows(self, cursor, lo, hi, clock_ids=None):
+        clock_ids = self._normalize_clock_ids(clock_ids)
+        if self._use_clock_filter(cursor, clock_ids):
+            placeholders = ','.join('?' for _ in clock_ids)
+            cursor.execute(
+                'SELECT DISTINCT t.Id, t.Timestamp, cr.Records '
+                'FROM Timestamps t '
+                'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                'INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id '
+                f'WHERE tc.ClockID IN ({placeholders}) '
+                'AND CAST(t.Timestamp AS INTEGER) >= ? AND CAST(t.Timestamp AS INTEGER) <= ? '
+                'ORDER BY t.Id ASC',
+                tuple(clock_ids) + (lo, hi),
+            )
+        else:
+            cursor.execute(
+                'SELECT DISTINCT t.Id, t.Timestamp, cr.Records '
+                'FROM Timestamps t '
+                'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                'WHERE CAST(t.Timestamp AS INTEGER) >= ? AND CAST(t.Timestamp AS INTEGER) <= ? '
+                'ORDER BY t.Id ASC',
+                (lo, hi),
+            )
         return cursor.fetchall()
 
-    def _fetch_lookback_rows(self, cursor, start_tick, end_tick, heartbeat):
-        # Last <heartbeat> collection records with Timestamp <= start_tick, then
-        # every record through end_tick (single-clock every-tick data matches
-        # the old [T-heartbeat+1:T] calendar window when records are contiguous).
-        cursor.execute(
-            'WITH warmup AS ('
-            '  SELECT t.Id '
-            '  FROM Timestamps t '
-            '  INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
-            '  WHERE CAST(t.Timestamp AS INTEGER) <= ? '
-            '  ORDER BY t.Id DESC '
-            '  LIMIT ?'
-            ') '
-            'SELECT t.Id, t.Timestamp, cr.Records '
-            'FROM Timestamps t '
-            'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
-            'WHERE t.Id >= (SELECT MIN(Id) FROM warmup) '
-            '  AND CAST(t.Timestamp AS INTEGER) <= ? '
-            'ORDER BY t.Id ASC',
-            (start_tick, heartbeat, end_tick),
-        )
+    def _fetch_lookback_rows(self, cursor, start_tick, end_tick, heartbeat, clock_ids=None):
+        clock_ids = self._normalize_clock_ids(clock_ids)
+        if self._use_clock_filter(cursor, clock_ids):
+            placeholders = ','.join('?' for _ in clock_ids)
+            params = tuple(clock_ids) + (start_tick, heartbeat) + tuple(clock_ids) + (end_tick,)
+            cursor.execute(
+                'WITH eligible AS ('
+                '  SELECT DISTINCT t.Id '
+                '  FROM Timestamps t '
+                '  INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                '  INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id '
+                f'  WHERE tc.ClockID IN ({placeholders}) '
+                '    AND CAST(t.Timestamp AS INTEGER) <= ?'
+                '), warmup AS ('
+                '  SELECT Id FROM eligible ORDER BY Id DESC LIMIT ?'
+                ') '
+                'SELECT t.Id, t.Timestamp, cr.Records '
+                'FROM Timestamps t '
+                'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                'INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id '
+                f'WHERE tc.ClockID IN ({placeholders}) '
+                '  AND t.Id >= (SELECT MIN(Id) FROM warmup) '
+                '  AND CAST(t.Timestamp AS INTEGER) <= ? '
+                'ORDER BY t.Id ASC',
+                params,
+            )
+        else:
+            cursor.execute(
+                'WITH warmup AS ('
+                '  SELECT t.Id '
+                '  FROM Timestamps t '
+                '  INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                '  WHERE CAST(t.Timestamp AS INTEGER) <= ? '
+                '  ORDER BY t.Id DESC '
+                '  LIMIT ?'
+                ') '
+                'SELECT t.Id, t.Timestamp, cr.Records '
+                'FROM Timestamps t '
+                'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+                'WHERE t.Id >= (SELECT MIN(Id) FROM warmup) '
+                '  AND CAST(t.Timestamp AS INTEGER) <= ? '
+                'ORDER BY t.Id ASC',
+                (start_tick, heartbeat, end_tick),
+            )
         return cursor.fetchall()
 
 def main():

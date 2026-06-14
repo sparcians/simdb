@@ -30,6 +30,17 @@ CheckpointT* getAnchorForWindow(uint64_t window_id, const std::shared_ptr<Checkp
 }
 
 template <typename CheckpointT>
+inline bool participatedInWindow(uint64_t window_id, const std::shared_ptr<CheckpointT>& tail)
+{
+    if (!tail)
+    {
+        return false;
+    }
+    auto* anchor = getAnchorForWindow(window_id, tail);
+    return anchor && anchor->getWindowID() == window_id;
+}
+
+template <typename CheckpointT>
 std::shared_ptr<CheckpointT> getSharedCheckpoint(CheckpointT* raw, const std::shared_ptr<CheckpointT>& head)
 {
     std::shared_ptr<CheckpointT> sp = head;
@@ -108,6 +119,8 @@ public:
 
     virtual std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                           uint16_t cid) = 0;
+
+    virtual bool participatedInWindow(uint64_t window_id) const = 0;
 
     virtual void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager*) { (void)cid; }
 
@@ -208,6 +221,11 @@ public:
     }
 
     void onQuietChanged(uint64_t window_id, bool quiet) override { onEnabledChanged(window_id, quiet); }
+
+    bool participatedInWindow(uint64_t window_id) const override
+    {
+        return detail::participatedInWindow(window_id, tail_);
+    }
 
     std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                   uint16_t cid) override
@@ -343,6 +361,11 @@ public:
     }
 
     void onQuietChanged(uint64_t window_id, bool quiet) override { onEnabledChanged(window_id, quiet); }
+
+    bool participatedInWindow(uint64_t window_id) const override
+    {
+        return detail::participatedInWindow(window_id, tail_);
+    }
 
     std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                   uint16_t cid) override
@@ -502,6 +525,11 @@ public:
     }
 
     void onQuietChanged(uint64_t window_id, bool quiet) override { onEnabledChanged(window_id, quiet); }
+
+    bool participatedInWindow(uint64_t window_id) const override
+    {
+        return detail::participatedInWindow(window_id, tail_);
+    }
 
     std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                   uint16_t cid) override

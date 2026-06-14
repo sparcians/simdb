@@ -74,6 +74,11 @@ void writeCollectionRecord(simdb::DatabaseManager* db_mgr, const QueueCollection
 
     const auto timestamp_id = Timestamp::createTimestampInDatabase(db_mgr, entry.sim_time.getValue());
     db_mgr->INSERT(SQL_TABLE("CollectionRecords"), SQL_VALUES(timestamp_id, compressed));
+
+    for (const auto clock_id : entry.clock_ids)
+    {
+        db_mgr->INSERT(SQL_TABLE("TimestampClocks"), SQL_VALUES(timestamp_id, static_cast<int>(clock_id)));
+    }
 }
 
 void drainPipelineQueue(simdb::ConcurrentQueue<QueueCollectionData>* queue, simdb::DatabaseManager* db_mgr)
@@ -169,6 +174,12 @@ void bootstrapDatabaseSchema(simdb::DatabaseManager* db_mgr)
     collection_records_tbl.ensureUnique("TimestampID");
     collection_records_tbl.unsetPrimaryKey();
 
+    auto& timestamp_clocks_tbl = schema.addTable("TimestampClocks");
+    timestamp_clocks_tbl.addColumn("TimestampID", dt::int32_t);
+    timestamp_clocks_tbl.addColumn("ClockID", dt::int32_t);
+    timestamp_clocks_tbl.createCompoundIndexOn({"TimestampID", "ClockID"});
+    timestamp_clocks_tbl.unsetPrimaryKey();
+
     auto& queue_max_sizes_tbl = schema.addTable("QueueMaxSizes");
     queue_max_sizes_tbl.addColumn("SerializationCID", dt::int32_t);
     queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
@@ -210,6 +221,27 @@ void bootstrapMetadata(simdb::DatabaseManager* db_mgr, size_t heartbeat)
     {
         ctn_inserter->createRecordWithColValues(static_cast<int>(spec.cid), spec.path, clk_id, spec.dtype, 0);
     }
+}
+
+void bootstrapMetadataDualClock(simdb::DatabaseManager* db_mgr, size_t heartbeat)
+{
+    db_mgr->INSERT(SQL_TABLE("CollectionGlobals"), SQL_VALUES(static_cast<int>(heartbeat)));
+
+    const auto fast_clk_id = db_mgr->INSERT(SQL_TABLE("Clocks"), SQL_VALUES("fast", 1, 0, 0))->getId();
+    const auto slow_clk_id = db_mgr->INSERT(SQL_TABLE("Clocks"), SQL_VALUES("slow", 5, 0, 0))->getId();
+
+    auto ctn_inserter = db_mgr->prepareINSERT(SQL_TABLE("CollectableTreeNodes"));
+    for (const auto& spec : collectableSpecs())
+    {
+        const auto is_fast = std::string(spec.path).find(".fast_") != std::string::npos;
+        const auto clk_id = is_fast ? fast_clk_id : slow_clk_id;
+        ctn_inserter->createRecordWithColValues(static_cast<int>(spec.cid), spec.path, clk_id, spec.dtype, 0);
+    }
+}
+
+bool isFastCollectablePath(const char* path)
+{
+    return std::string(path).find(".fast_") != std::string::npos;
 }
 
 std::vector<char> scalarByte(char tag)
@@ -305,6 +337,20 @@ public:
             makeStageScalar(102, kFastScalarCid, scalarByte('F')),
             makeStageContig(102, kFastContigCid, contigFromLiteral("AXC")),
         };
+        return script;
+    }
+
+    static ScenarioScript generateDualClock()
+    {
+        ScenarioScript script(kDefaultSeed);
+        for (uint64_t sim_time = 100; sim_time <= 124; ++sim_time)
+        {
+            script.events_.push_back(makeStageScalar(sim_time, kFastScalarCid, scalarByte('F')));
+            if (sim_time % 5 == 0)
+            {
+                script.events_.push_back(makeStageScalar(sim_time, kSlowScalarCid, scalarByte('S')));
+            }
+        }
         return script;
     }
 
@@ -444,10 +490,16 @@ public:
         bootstrapDatabaseSchema(&db_mgr_);
     }
 
-    void configure(size_t heartbeat)
+    void configure(size_t heartbeat, bool dual_clock = false)
     {
         heartbeat_ = heartbeat;
-        bootstrapMetadata(&db_mgr_, heartbeat_);
+        if (dual_clock)
+        {
+            bootstrapMetadataDualClock(&db_mgr_, heartbeat_);
+        } else
+        {
+            bootstrapMetadata(&db_mgr_, heartbeat_);
+        }
 
         timestamp_ = std::make_unique<Timestamp>(&sim_time_);
         stager_ = std::make_unique<PipelineStager>(heartbeat_, timestamp_.get(), &pipeline_queue_);
@@ -459,6 +511,14 @@ public:
             } else
             {
                 stager_->setContainerType(spec.cid, spec.sparse, kContainerCapacity);
+            }
+
+            if (dual_clock)
+            {
+                stager_->setCollectableClock(spec.cid, isFastCollectablePath(spec.path) ? 1u : 2u);
+            } else
+            {
+                stager_->setCollectableClock(spec.cid, 1u);
             }
         }
     }
@@ -538,14 +598,15 @@ public:
     {
     }
 
-    std::filesystem::path run(size_t heartbeat, const ScenarioScript& script, const std::string& tag)
+    std::filesystem::path run(size_t heartbeat, const ScenarioScript& script, const std::string& tag,
+                              bool dual_clock = false)
     {
         const auto db_path =
             work_dir_ / ("integration_hb" + std::to_string(heartbeat) + "_" + tag + ".db");
         std::filesystem::remove(db_path);
 
         IntegrationRun run(db_path);
-        run.configure(heartbeat);
+        run.configure(heartbeat, dual_clock);
         run.replay(script);
         return run.dbPath();
     }
@@ -582,6 +643,32 @@ public:
     }
 
     void compareRuns(size_t hb_a, size_t hb_b) { compareRuns(hb_a, hb_b, random_script_); }
+
+    void compareDualClockRuns(size_t hb_a, size_t hb_b)
+    {
+        if (!testerAvailable())
+        {
+            throw simdb::DBException(
+                std::string("conda env '") + kCondaEnv +
+                "' is unavailable or missing python/argos dependencies; run: conda activate " + kCondaEnv);
+        }
+
+        const auto script = ScenarioScript::generateDualClock();
+        const auto db_a = run(hb_a, script, "dual_a", true);
+        const auto db_b = run(hb_b, script, "dual_b", true);
+
+        const auto cmd = condaArgosCmd("python3 tester.py " + db_a.string() + " " + db_b.string());
+
+        const int rc = std::system(cmd.c_str());
+        EXPECT_EQUAL(rc, 0);
+        if (rc != 0)
+        {
+            std::ostringstream msg;
+            msg << "tester.py failed (exit=" << rc << ") comparing dual-clock hb " << hb_a << " vs " << hb_b
+                << "\nCommand: " << cmd;
+            throw simdb::DBException(msg.str());
+        }
+    }
 
     const ScenarioScript& smokeScript() const { return smoke_script_; }
     const ScenarioScript& randomScript() const { return random_script_; }
@@ -625,6 +712,12 @@ void testIntegrationCompare_7_100()
     harness.compareRuns(7, 100);
 }
 
+void testIntegrationDualClockCompare_3_10()
+{
+    IntegrationHarness harness;
+    harness.compareDualClockRuns(3, 10);
+}
+
 } // namespace
 
 TEST_INIT;
@@ -635,6 +728,7 @@ int main()
     testIntegrationCompare_3_10();
     testIntegrationCompare_1_10();
     testIntegrationCompare_7_100();
+    testIntegrationDualClockCompare_3_10();
 
     REPORT_ERROR;
     return ERROR_CODE;

@@ -99,6 +99,8 @@ public:
             resource_->setContainerType_(cid, sparse, capacity);
         }
 
+        void setCollectableClock(uint16_t cid, uint32_t clock_id) { resource_->setCollectableClock_(cid, clock_id); }
+
         void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
         {
             resource_->liveStager_().stage(cid, scalar_bytes);
@@ -217,6 +219,15 @@ private:
         }
     }
 
+    void setCollectableClock_(uint16_t cid, uint32_t clock_id)
+    {
+        pending_clock_ids_[cid] = clock_id;
+        if (stager_)
+        {
+            stager_->setCollectableClock(cid, clock_id);
+        }
+    }
+
     void postNotif_(uint16_t cid, const std::string& notif, NotifType type)
     {
         if (stager_)
@@ -258,6 +269,10 @@ private:
         for (const auto& [cid, capacity] : pending_sparse_capacities_)
         {
             stager_->setContainerType(cid, true, capacity);
+        }
+        for (const auto& [cid, clock_id] : pending_clock_ids_)
+        {
+            stager_->setCollectableClock(cid, clock_id);
         }
     }
 
@@ -302,6 +317,7 @@ private:
     std::unordered_set<uint16_t> pending_scalar_cids_;
     std::unordered_map<uint16_t, size_t> pending_contig_capacities_;
     std::unordered_map<uint16_t, size_t> pending_sparse_capacities_;
+    std::unordered_map<uint16_t, uint32_t> pending_clock_ids_;
 
     mutable StagerProxy proxy_;
 };

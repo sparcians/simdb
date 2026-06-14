@@ -88,6 +88,12 @@ public:
         collection_records_tbl.ensureUnique("TimestampID");
         collection_records_tbl.unsetPrimaryKey();
 
+        auto& timestamp_clocks_tbl = schema.addTable("TimestampClocks");
+        timestamp_clocks_tbl.addColumn("TimestampID", dt::int32_t);
+        timestamp_clocks_tbl.addColumn("ClockID", dt::int32_t);
+        timestamp_clocks_tbl.createCompoundIndexOn({"TimestampID", "ClockID"});
+        timestamp_clocks_tbl.unsetPrimaryKey();
+
         auto& queue_max_sizes_tbl = schema.addTable("QueueMaxSizes");
         queue_max_sizes_tbl.addColumn("SerializationCID", dt::int32_t);
         queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
@@ -270,6 +276,7 @@ public:
             const auto clk_id = clk_ids.at(clk_name);
             const auto dtype_name = collector->getEncodedCollectedType();
             ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
+            pipeline_stager_->setCollectableClock(collector->getID(), getClockId_(clk_name));
         }
     }
 
@@ -321,6 +328,7 @@ private:
                 CompressedQueueCollectionData compressed;
                 compressData(uncompressed, compressed.compressed_collection_data);
                 compressed.sim_time = collection_at_time.sim_time;
+                compressed.clock_ids = collection_at_time.clock_ids;
                 output_queue_->emplace(std::move(compressed));
                 return pipeline::PipelineAction::PROCEED;
             }
@@ -357,6 +365,15 @@ private:
                 auto inserter = getTableInserter_("CollectionRecords");
                 const auto& bytes = collection_at_time.compressed_collection_data;
                 inserter->createRecordWithColValues(id, bytes);
+
+                if (!collection_at_time.clock_ids.empty())
+                {
+                    auto clk_inserter = getTableInserter_("TimestampClocks");
+                    for (const auto clock_id : collection_at_time.clock_ids)
+                    {
+                        clk_inserter->createRecordWithColValues(id, static_cast<int>(clock_id));
+                    }
+                }
 
                 action = pipeline::PipelineAction::PROCEED;
             }
@@ -455,6 +472,18 @@ private:
                                        std::string  // clk name
                                        >;
     std::map<uint16_t, CollectableMeta> meta_by_cid_;
+
+    uint32_t getClockId_(const std::string& clk_name) const
+    {
+        for (size_t i = 0; i < clocks_.size(); ++i)
+        {
+            if (std::get<0>(clocks_[i]) == clk_name)
+            {
+                return static_cast<uint32_t>(i + 1);
+            }
+        }
+        throw DBException("Unknown clock: ") << clk_name;
+    }
 
     std::unique_ptr<Timestamp> timestamp_;
     std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;

@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -23,12 +24,14 @@ struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
     std::vector<std::unique_ptr<CollectedData>> entries;
+    std::unordered_set<uint32_t> clock_ids;
 };
 
 struct CompressedQueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
     std::vector<char> compressed_collection_data;
+    std::unordered_set<uint32_t> clock_ids;
 };
 
 enum class NotifType { WARNING, ERROR, MESSAGE, __INVALID__ };

@@ -39,6 +39,12 @@ public:
 
     size_t getHeartbeat() const { return heartbeat_; }
 
+    void setCollectableClock(uint16_t cid, uint32_t clock_id)
+    {
+        collectable_clock_ids_[cid] = clock_id;
+        clock_ids_.insert(clock_id);
+    }
+
     void setScalarType(uint16_t cid) { checkpointers_[cid] = std::make_unique<ScalarCheckpointer>(heartbeat_); }
 
     void setContainerType(uint16_t cid, bool sparse, size_t capacity)
@@ -250,18 +256,31 @@ private:
         return current_time;
     }
 
+    bool hasMultipleCollectableClocks_() const { return clock_ids_.size() > 1; }
+
     void sendToPipeline_(uint64_t sim_time, uint64_t window_id)
     {
         QueueCollectionData to_send;
         to_send.sim_time = sim_time;
 
+        const bool multi_clock = hasMultipleCollectableClocks_();
+
         for (auto& [cid, checkpointer] : checkpointers_)
         {
+            if (multi_clock && !checkpointer->participatedInWindow(window_id))
+            {
+                continue;
+            }
+
             auto wires = checkpointer->encodeForPipeline(window_id, sim_time, cid);
             for (auto& entry : wires)
             {
                 wire_sent_cids_.insert(cid);
                 to_send.entries.emplace_back(std::move(entry));
+                if (const auto clk_it = collectable_clock_ids_.find(cid); clk_it != collectable_clock_ids_.end())
+                {
+                    to_send.clock_ids.insert(clk_it->second);
+                }
             }
         }
 
@@ -279,7 +298,9 @@ private:
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
 
     std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
+    std::unordered_map<uint16_t, uint32_t> collectable_clock_ids_;
     std::unordered_set<uint16_t> wire_sent_cids_;
+    std::unordered_set<uint32_t> clock_ids_;
 
     struct Ready
     {

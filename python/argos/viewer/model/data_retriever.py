@@ -178,6 +178,47 @@ class DataRetriever:
         dtype = self._dtypes_by_elem_path[elem_path]
         return self.dtype_inspector.GetDeserializer(dtype)
 
+    def _has_timestamp_clocks(self):
+        self.cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='TimestampClocks'"
+        )
+        return self.cursor.fetchone() is not None
+
+    def _clock_collected_at_tick(self, clock_id, tick):
+        if clock_id is None or not self._has_timestamp_clocks():
+            return True
+
+        self.cursor.execute(
+            'SELECT 1 FROM Timestamps t '
+            'INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id '
+            'WHERE tc.ClockID = ? AND CAST(t.Timestamp AS INTEGER) = ? '
+            'LIMIT 1',
+            (clock_id, int(tick)),
+        )
+        return self.cursor.fetchone() is not None
+
+    def _database_has_multiple_clocks(self):
+        self.cursor.execute('SELECT COUNT(*) FROM Clocks')
+        return int(self.cursor.fetchone()[0]) > 1
+
+    def _clock_ids_for_elem_paths(self, elem_paths):
+        if not self._database_has_multiple_clocks():
+            return None
+
+        clock_ids = set()
+        for elem_path in elem_paths:
+            clk_id = self.simhier.GetMetaAtPath(elem_path, 'ClkID')
+            if clk_id is not None:
+                clock_ids.add(int(clk_id))
+        return sorted(clock_ids) if clock_ids else None
+
+    def _clock_id_for_elem_path(self, elem_path):
+        if not self._database_has_multiple_clocks():
+            return None
+
+        clk_id = self.simhier.GetMetaAtPath(elem_path, 'ClkID')
+        return int(clk_id) if clk_id is not None else None
+
     def GetIterableSizesByCollectionID(self, time_val):
         if self._cached_utiliz_time_val is not None and time_val == self._cached_utiliz_time_val:
             return self._cached_utiliz_sizes
@@ -185,7 +226,8 @@ class DataRetriever:
         tick = int(time_val)
         iterator = BlobIterator(self.dtype_inspector, self.simhier)
         handler = DataExtractionHandler(self.simhier)
-        iterator.Iterate(handler, tick, lookback=True)
+        clock_ids = self._clock_ids_for_elem_paths(self.simhier.GetContainerElemPaths())
+        iterator.Iterate(handler, tick, lookback=True, clock_ids=clock_ids)
 
         sizes_by_cid = {}
         for cid in self.simhier.GetContainerIDs():
@@ -199,9 +241,10 @@ class DataRetriever:
     def Unpack(self, elem_path, tick):
         iterator = BlobIterator(self.dtype_inspector, self.simhier)
         handler = DataExtractionHandler(self.simhier)
-        iterator.Iterate(handler, tick, lookback=True)
+        clock_id = self._clock_id_for_elem_path(elem_path)
+        iterator.Iterate(handler, tick, lookback=True, clock_ids=clock_id)
 
-        if handler.HasDataFor(elem_path):
+        if handler.HasDataFor(elem_path) and self._clock_collected_at_tick(clock_id, tick):
             unpacked = {
                 'TimeVals': [iterator.GetFinalTick()],
                 'DataVals': [handler.GetFinalValue(elem_path)]
@@ -223,14 +266,16 @@ class DataRetriever:
         # start_tick is fully reconstructed (same lookback Unpack() uses).
         iterator = BlobIterator(self.dtype_inspector, self.simhier)
         handler = DataExtractionHandler(self.simhier, snapshot_cids=cids)
-        iterator.Iterate(handler, [int(start_tick), int(end_tick)], lookback=True)
+        clock_ids = self._clock_ids_for_elem_paths(elem_paths)
+        iterator.Iterate(handler, [int(start_tick), int(end_tick)], lookback=True, clock_ids=clock_ids)
 
         unpacked = {}
         for elem_path in elem_paths:
             values_by_tick = handler.GetValuesByTick(elem_path)
+            clock_id = self._clock_id_for_elem_path(elem_path)
             time_vals, data_vals = [], []
             for tick in sorted(values_by_tick.keys()):
-                if start_tick <= tick <= end_tick:
+                if start_tick <= tick <= end_tick and self._clock_collected_at_tick(clock_id, tick):
                     time_vals.append(tick)
                     data_vals.append(values_by_tick[tick])
             unpacked[elem_path] = {'TimeVals': time_vals, 'DataVals': data_vals}

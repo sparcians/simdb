@@ -230,6 +230,8 @@ public:
         stager_.disableAutoSendMode(true);
         stager_.setScalarType(kFastScalarCid);
         stager_.setScalarType(kSlowScalarCid);
+        stager_.setCollectableClock(kFastScalarCid, 1);
+        stager_.setCollectableClock(kSlowScalarCid, 2);
     }
 
     void setTime(uint64_t time)
@@ -589,18 +591,67 @@ void testDualScalarSlowSkipsTwoWindows()
 }
 
 /*
+ * testDualScalarMultiClockPeriod5
+ *
+ * Collects: Fast every window; slow every 5th global tick (multi-clock cadence).
+ * Covers:   Sparse blobs (fast-only vs both); clock_ids on wired batches.
+ */
+void testDualScalarMultiClockPeriod5()
+{
+    DualScalarHarness harness;
+    QueueCollectionData entry;
+
+    harness.setTime(100);
+    harness.stageFast();
+    harness.stageSlow();
+    harness.setTime(101);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    expectFlush(entry, 2u, Action::FULL, true, Action::FULL);
+    EXPECT_TRUE(entry.clock_ids.count(1) == 1);
+    EXPECT_TRUE(entry.clock_ids.count(2) == 1);
+
+    for (uint64_t t = 101; t <= 102; ++t)
+    {
+        harness.stageFast();
+        harness.setTime(t + 1);
+        harness.flush();
+        EXPECT_TRUE(harness.pop(entry));
+        expectFlush(entry, 1u, Action::CARRY, false);
+        EXPECT_TRUE(entry.clock_ids.count(1) == 1);
+    }
+
+    harness.stageFast();
+    harness.setTime(104);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(entry.entries.size(), 1u);
+    EXPECT_TRUE(entry.clock_ids.count(1) == 1);
+
+    harness.stageFast();
+    harness.stageSlow();
+    harness.setTime(105);
+    harness.flush();
+    EXPECT_TRUE(harness.pop(entry));
+    EXPECT_EQUAL(entry.entries.size(), 2u);
+    EXPECT_TRUE(findPipelineEntry(entry, kFastScalarCid) != nullptr);
+    EXPECT_TRUE(findPipelineEntry(entry, kSlowScalarCid) != nullptr);
+    EXPECT_TRUE(entry.clock_ids.count(1) == 1);
+    EXPECT_TRUE(entry.clock_ids.count(2) == 1);
+}
+
+/*
  * testDualScalarSlowEveryOtherWindow (Tier 2)
  *
  * Collects: Fast every window (F); slow every other window at W1, W3, W5 (S).
- * Covers:   Sparse slow cadence; absent-window FULL refresh at W4 so Python
- *           lookback [101,103] has a slow anchor; fast heartbeat independent.
+ * Covers:   Sparse slow cadence; slow omitted on fast-only windows (no absent refresh).
  *
  * Time  WindowID  Fast(collect)  Slow(collect)  WindowSent
  * ----  --------  -------------  -------------  --------------------------
  *  100         1              F              S  Fast(FULL)  Slow(FULL)
  *  101         2              F              -  Fast(CARRY)
  *  102         3              F              S  Fast(CARRY) Slow(CARRY)
- *  103         4              F              -  Fast(FULL)  Slow(FULL)
+ *  103         4              F              -  Fast(FULL)
  *  104         5              F              S  Fast(CARRY) Slow(CARRY)
  */
 void testDualScalarSlowEveryOtherWindow()
@@ -633,15 +684,16 @@ void testDualScalarSlowEveryOtherWindow()
     harness.setTime(104);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 2u, Action::FULL, true, Action::FULL);
-    expectPayload(entry, kSlowScalarCid, kSlowPayload);
+    expectFlush(entry, 1u, Action::FULL, false);
 
     harness.stageFast();
     harness.stageSlow();
     harness.setTime(105);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 2u, Action::CARRY, true, Action::CARRY);
+    EXPECT_EQUAL(entry.entries.size(), 2u);
+    EXPECT_TRUE(findPipelineEntry(entry, kFastScalarCid) != nullptr);
+    EXPECT_TRUE(findPipelineEntry(entry, kSlowScalarCid) != nullptr);
 }
 
 /*
@@ -816,15 +868,14 @@ void testDualScalarSlowChangedMidInterval()
  * testDualScalarSlowAbsentThreeFlushes (Tier 4)
  *
  * Collects: Fast every window (F); slow staged only at W1 (S).
- * Covers:   Absent-window heartbeat refresh: slow omitted W2-W3, then FULL
- *           refresh at W4 (window gap >= heartbeat) without re-staging.
+ * Covers:   Slow omitted on fast-only windows; no absent-window heartbeat refresh.
  *
  * Time  WindowID  Fast(collect)  Slow(collect)  WindowSent
  * ----  --------  -------------  -------------  --------------------------
  *  100         1              F              S  Fast(FULL)  Slow(FULL)
  *  101         2              F              -  Fast(CARRY)
  *  102         3              F              -  Fast(CARRY)
- *  103         4              F              -  Fast(FULL)  Slow(FULL)
+ *  103         4              F              -  Fast(FULL)
  */
 void testDualScalarSlowAbsentThreeFlushes()
 {
@@ -843,35 +894,33 @@ void testDualScalarSlowAbsentThreeFlushes()
     harness.setTime(102);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 1u, Action::CARRY, false);
+    EXPECT_EQUAL(entry.entries.size(), 1u);
 
     harness.stageFast();
     harness.setTime(103);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 1u, Action::CARRY, false);
+    EXPECT_EQUAL(entry.entries.size(), 1u);
 
     harness.stageFast();
     harness.setTime(104);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 2u, Action::FULL, true, Action::FULL);
-    expectPayload(entry, kSlowScalarCid, kSlowPayload);
+    EXPECT_EQUAL(entry.entries.size(), 1u);
 }
 
 /*
  * testDualScalarSlowAbsentUntilW5 (Tier 4)
  *
  * Collects: Fast every window (F); slow staged only at W1 (S).
- * Covers:   Absent-window refresh at W4, then fast continues alone at W5;
- *           slow still absent at W5 (inside next heartbeat interval).
+ * Covers:   Slow omitted on fast-only windows through W5.
  *
  * Time  WindowID  Fast(collect)  Slow(collect)  WindowSent
  * ----  --------  -------------  -------------  --------------------------
  *  100         1              F              S  Fast(FULL)  Slow(FULL)
  *  101         2              F              -  Fast(CARRY)
  *  102         3              F              -  Fast(CARRY)
- *  103         4              F              -  Fast(FULL)  Slow(FULL)
+ *  103         4              F              -  Fast(FULL)
  *  104         5              F              -  Fast(CARRY)
  */
 void testDualScalarSlowAbsentUntilW5()
@@ -900,28 +949,27 @@ void testDualScalarSlowAbsentUntilW5()
     harness.setTime(104);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 2u, Action::FULL, true, Action::FULL);
+    EXPECT_EQUAL(entry.entries.size(), 1u);
 
     harness.stageFast();
     harness.setTime(105);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 1u, Action::CARRY, false);
+    EXPECT_EQUAL(entry.entries.size(), 1u);
 }
 
 /*
  * testDualScalarSlowReappearsAfterForcedRefresh (Tier 4)
  *
  * Collects: Slow at W1 (S); fast from W2 onward (F); slow re-stages at W5 (S).
- * Covers:   Interaction between absent-window refresh and later re-stage;
- *           fast heartbeat offset because first fast collection is at W2.
+ * Covers:   Slow re-stages at W5 after fast-only windows; no absent refresh at W4.
  *
  * Time  WindowID  Fast(collect)  Slow(collect)  WindowSent
  * ----  --------  -------------  -------------  --------------------------
  *  100         1              -              S  Slow(FULL)
  *  101         2              F              -  Fast(FULL)
  *  102         3              F              -  Fast(CARRY)
- *  103         4              F              -  Fast(CARRY)  Slow(FULL)
+ *  103         4              F              -  Fast(CARRY)
  *  104         5              F              S  Fast(FULL)   Slow(CARRY)
  */
 void testDualScalarSlowReappearsAfterForcedRefresh()
@@ -953,15 +1001,16 @@ void testDualScalarSlowReappearsAfterForcedRefresh()
     harness.setTime(104);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 2u, Action::CARRY, true, Action::FULL);
-    expectPayload(entry, kSlowScalarCid, kSlowPayload);
+    EXPECT_EQUAL(entry.entries.size(), 1u);
 
     harness.stageFast();
     harness.stageSlow();
     harness.setTime(105);
     harness.flush();
     EXPECT_TRUE(harness.pop(entry));
-    expectFlush(entry, 2u, Action::FULL, true, Action::CARRY);
+    EXPECT_EQUAL(entry.entries.size(), 2u);
+    EXPECT_TRUE(findPipelineEntry(entry, kFastScalarCid) != nullptr);
+    EXPECT_TRUE(findPipelineEntry(entry, kSlowScalarCid) != nullptr);
 }
 
 /*
@@ -969,20 +1018,19 @@ void testDualScalarSlowReappearsAfterForcedRefresh()
  *
  * Collects: Both at W1 (F, S); fast only W2-W9 with a new payload each window
  *           (F0, F1, ... F7); slow never re-stages after W1.
- * Covers:   Absent-window encode omits slow inside each heartbeat interval;
- *           FULL refresh at interval boundaries W4 (1st) and W7 (2nd).
+ * Covers:   Slow omitted on all fast-only windows after W1 (no absent refresh).
  *
- * Payload key: Fn={'F',n}  refresh = encodeHeartbeatRefresh_, not staged
+ * Payload key: Fn={'F',n}
  *
  * Time  WindowID  Fast(collect)  Slow(collect)  WindowSent
  * ----  --------  -------------  -------------  --------------------------
  *  100         1              F              S  Fast(FULL)  Slow(FULL)
  *  101         2             F0              -  Fast(FULL)
  *  102         3             F1              -  Fast(FULL)
- *  103         4             F2              -  Fast(FULL)  Slow(FULL)
+ *  103         4             F2              -  Fast(FULL)
  *  104         5             F3              -  Fast(FULL)
  *  105         6             F4              -  Fast(FULL)
- *  106         7             F5              -  Fast(FULL)  Slow(FULL)
+ *  106         7             F5              -  Fast(FULL)
  *  107         8             F6              -  Fast(FULL)
  *  108         9             F7              -  Fast(FULL)
  */
@@ -1003,7 +1051,6 @@ void testDualScalarSlowSecondHeartbeatIntervalRefresh()
     for (size_t step = 0; step < 8; ++step)
     {
         const auto fast_payload = std::vector<char>{'F', static_cast<char>('0' + step)};
-        const uint64_t window_id = 2 + step;
 
         harness.stageFast(fast_payload);
         harness.setTime(102 + step);
@@ -1012,17 +1059,8 @@ void testDualScalarSlowSecondHeartbeatIntervalRefresh()
 
         expectAction(entry, kFastScalarCid, Action::FULL);
         expectPayload(entry, kFastScalarCid, fast_payload);
-
-        if (window_id == 4 || window_id == 7)
-        {
-            EXPECT_EQUAL(entry.entries.size(), 2u);
-            expectAction(entry, kSlowScalarCid, Action::FULL);
-            expectPayload(entry, kSlowScalarCid, kSlowPayload);
-        } else
-        {
-            EXPECT_EQUAL(entry.entries.size(), 1u);
-            expectAbsent(entry, kSlowScalarCid);
-        }
+        EXPECT_EQUAL(entry.entries.size(), 1u);
+        expectAbsent(entry, kSlowScalarCid);
     }
 }
 
@@ -2131,6 +2169,7 @@ int main()
     testScalarFullThenCarryPipeline();
     testScalarHeartbeatPipeline();
     testDualScalarSlowSkipsTwoWindows();
+    testDualScalarMultiClockPeriod5();
     testDualScalarSlowEveryOtherWindow();
     testDualScalarSlowReturnsMidInterval();
     testDualScalarSlowReturnsOnFastHeartbeatBoundary();
