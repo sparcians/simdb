@@ -1,7 +1,6 @@
 import os, sys, zlib
 from typing import Any
 from functools import partial
-from collections import OrderedDict
 
 _PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _PACKAGE_ROOT not in sys.path:
@@ -209,48 +208,31 @@ class BlobIterator:
         assert self._final_tick is not None, 'Iterate() never called'
         return self._final_tick
 
-    def Iterate(self, handler: BlobHandler, time_range: Any = None):
+    def Iterate(self, handler: BlobHandler, time_range: Any = None, lookback: bool = False):
         cursor = self.connection.cursor()
         if time_range is None:
-            cmd = 'SELECT MIN(Timestamp),MAX(Timestamp) FROM Timestamps'
-            cursor.execute(cmd)
-            lo, hi = cursor.fetchone()
-            time_range = [int(lo), int(hi)]
+            rows = self._fetch_all_rows(cursor)
+        else:
+            if isinstance(time_range, int):
+                time_range = [time_range, time_range]
+            elif not isinstance(time_range, list):
+                time_range = list(time_range)
+                if len(time_range) == 1:
+                    time_range *= 2
 
-        if isinstance(time_range, int):
-            time_range = [time_range, time_range]
-        elif not isinstance(time_range, list):
-            time_range = list(time_range)
-            if len(time_range) == 1:
-                time_range *= 2
-
-        lo, hi = time_range[0], time_range[1]
-        cmd = 'SELECT Id,Timestamp FROM Timestamps '
-        cmd += f'WHERE CAST(Timestamp AS INTEGER)>={lo} AND CAST(Timestamp AS INTEGER)<={hi} '
-        cmd += 'ORDER BY Id ASC'
-        cursor.execute(cmd)
-        timestamp_dict = OrderedDict(
-            (tsid, int(ts))
-            for tsid, ts in cursor.fetchall()
-        )
-
-        placeholders = ",".join("?" for _ in timestamp_dict.keys())
-        cmd = (
-            "SELECT TimestampID,Records FROM CollectionRecords "
-            f"WHERE TimestampID IN ({placeholders}) ORDER BY TimestampID ASC"
-        )
-        cursor.execute(cmd, tuple(sorted(timestamp_dict.keys())))
-        records_dict = OrderedDict(
-            (tsid, record)
-            for tsid,record in cursor.fetchall()
-        )
+            lo, hi = int(time_range[0]), int(time_range[1])
+            if lookback:
+                cursor.execute('SELECT Heartbeat FROM CollectionGlobals')
+                heartbeat = int(cursor.fetchone()[0])
+                rows = self._fetch_lookback_rows(cursor, lo, hi, heartbeat)
+            else:
+                rows = self._fetch_time_range_rows(cursor, lo, hi)
 
         resources = Resources(self._dtype_inspector, self._simhier, handler)
         context = Context()
-        for tsid,ts in timestamp_dict.items():
-            compressed_blob = records_dict[tsid]
+        for tsid, ts, compressed_blob in rows:
             resources.buf = ByteBuffer(zlib.decompress(compressed_blob))
-            context.current_tick = ts
+            context.current_tick = int(ts)
 
             handler_func = HandleCID
             while handler_func:
@@ -258,6 +240,49 @@ class BlobIterator:
             handler.SnapshotTick(context)
 
         self._final_tick = context.current_tick
+
+    def _fetch_all_rows(self, cursor):
+        cursor.execute(
+            'SELECT t.Id, t.Timestamp, cr.Records '
+            'FROM Timestamps t '
+            'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+            'ORDER BY t.Id ASC'
+        )
+        return cursor.fetchall()
+
+    def _fetch_time_range_rows(self, cursor, lo, hi):
+        cursor.execute(
+            'SELECT t.Id, t.Timestamp, cr.Records '
+            'FROM Timestamps t '
+            'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+            'WHERE CAST(t.Timestamp AS INTEGER) >= ? AND CAST(t.Timestamp AS INTEGER) <= ? '
+            'ORDER BY t.Id ASC',
+            (lo, hi),
+        )
+        return cursor.fetchall()
+
+    def _fetch_lookback_rows(self, cursor, start_tick, end_tick, heartbeat):
+        # Last <heartbeat> collection records with Timestamp <= start_tick, then
+        # every record through end_tick (single-clock every-tick data matches
+        # the old [T-heartbeat+1:T] calendar window when records are contiguous).
+        cursor.execute(
+            'WITH warmup AS ('
+            '  SELECT t.Id '
+            '  FROM Timestamps t '
+            '  INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+            '  WHERE CAST(t.Timestamp AS INTEGER) <= ? '
+            '  ORDER BY t.Id DESC '
+            '  LIMIT ?'
+            ') '
+            'SELECT t.Id, t.Timestamp, cr.Records '
+            'FROM Timestamps t '
+            'INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id '
+            'WHERE t.Id >= (SELECT MIN(Id) FROM warmup) '
+            '  AND CAST(t.Timestamp AS INTEGER) <= ? '
+            'ORDER BY t.Id ASC',
+            (start_tick, heartbeat, end_tick),
+        )
+        return cursor.fetchall()
 
 def main():
     from viewer.model.dtype_inspector import DataTypeInspector
@@ -278,15 +303,10 @@ def main():
         handler = SmokeTestHandler()
         iterator.Iterate(handler)
 
-    # Tick provided? Use [tick-heartbeat+1 : tick] time range with data extraction handler.
+    # Tick provided? Use the last <heartbeat> collection records at or before tick.
     else:
-        cursor = dtype_inspector.connection.cursor()
-        cursor.execute('SELECT Heartbeat FROM CollectionGlobals')
-        heartbeat = cursor.fetchone()[0]
-        tick_range = [args.tick-heartbeat+1, args.tick]
-
         handler = DataExtractionHandler(simhier)
-        iterator.Iterate(handler, tick_range)
+        iterator.Iterate(handler, args.tick, lookback=True)
         print(handler.GetAllFinalValues())
 
 if __name__ == '__main__':

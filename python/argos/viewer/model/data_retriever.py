@@ -183,10 +183,9 @@ class DataRetriever:
             return self._cached_utiliz_sizes
 
         tick = int(time_val)
-        tick_range = [tick-self._heartbeat+1, tick]
         iterator = BlobIterator(self.dtype_inspector, self.simhier)
         handler = DataExtractionHandler(self.simhier)
-        iterator.Iterate(handler, tick_range)
+        iterator.Iterate(handler, tick, lookback=True)
 
         sizes_by_cid = {}
         for cid in self.simhier.GetContainerIDs():
@@ -198,10 +197,9 @@ class DataRetriever:
         return sizes_by_cid
 
     def Unpack(self, elem_path, tick):
-        tick_range = [tick-self._heartbeat+1, tick]
         iterator = BlobIterator(self.dtype_inspector, self.simhier)
         handler = DataExtractionHandler(self.simhier)
-        iterator.Iterate(handler, tick_range)
+        iterator.Iterate(handler, tick, lookback=True)
 
         if handler.HasDataFor(elem_path):
             unpacked = {
@@ -223,10 +221,9 @@ class DataRetriever:
 
         # Warm up one heartbeat before the requested start so the value at
         # start_tick is fully reconstructed (same lookback Unpack() uses).
-        iter_lo = int(start_tick) - self._heartbeat + 1
         iterator = BlobIterator(self.dtype_inspector, self.simhier)
         handler = DataExtractionHandler(self.simhier, snapshot_cids=cids)
-        iterator.Iterate(handler, [iter_lo, int(end_tick)])
+        iterator.Iterate(handler, [int(start_tick), int(end_tick)], lookback=True)
 
         unpacked = {}
         for elem_path in elem_paths:
