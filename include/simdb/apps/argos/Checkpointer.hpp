@@ -342,8 +342,6 @@ public:
     void createCheckpoint(uint64_t window_id, const std::vector<std::vector<char>>& contig_bin_bytes) override
     {
         max_container_size_ = std::max(max_container_size_, getSize_(contig_bin_bytes));
-        assert(max_container_size_ <= capacity_);
-
         head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, contig_bin_bytes);
         if (!tail_)
         {
@@ -469,7 +467,7 @@ private:
         tail_ = sp;
     }
 
-    static size_t getSize_(const std::vector<std::vector<char>>& contig_bin_bytes)
+    size_t getSize_(const std::vector<std::vector<char>>& contig_bin_bytes) const
     {
         size_t size = 0;
         for (const auto& bin_bytes : contig_bin_bytes)
@@ -483,6 +481,8 @@ private:
             }
         }
         assert(size <= UINT16_MAX);
+        assert(size <= capacity_);
+        (void)capacity_;
         return size;
     }
 
@@ -506,8 +506,6 @@ public:
     void createCheckpoint(uint64_t window_id, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes) override
     {
         max_container_size_ = std::max(max_container_size_, getSize_(sparse_bin_bytes));
-        assert(max_container_size_ <= capacity_);
-
         head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, sparse_bin_bytes);
         if (!tail_)
         {
@@ -633,7 +631,7 @@ private:
         tail_ = sp;
     }
 
-    static size_t getSize_(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+    size_t getSize_(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes) const
     {
         size_t size = 0;
         for (const auto& [_, bin_bytes] : sparse_bin_bytes)
@@ -643,6 +641,9 @@ private:
                 ++size;
             }
         }
+        assert(size <= UINT16_MAX);
+        assert(size <= capacity_);
+        (void)capacity_;
         return size;
     }
 
