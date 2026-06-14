@@ -26,7 +26,10 @@ inline void compressData(const void* data_ptr, size_t num_bytes, std::vector<cha
 {
     if (num_bytes == 0)
     {
-        out.clear();
+        // zlib wrapper for an empty payload; Python zlib.decompress(b"") expects this form.
+        static const unsigned char zlib_empty[] = {0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01};
+        out.assign(reinterpret_cast<const char*>(zlib_empty),
+                   reinterpret_cast<const char*>(zlib_empty) + sizeof(zlib_empty));
         return;
     }
 

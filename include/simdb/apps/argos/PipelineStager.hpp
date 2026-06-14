@@ -21,10 +21,6 @@ namespace simdb::argos {
 
 //! \class PipelineStager
 //! \brief Checkpoint-based collection stager.
-//!
-//! Waiting-queue slots store checkpoints only. sendToPipeline_ derives wire records,
-//! refresh eligibility, and heartbeat inject from those checkpoints when flushing
-//! slots in order. Send-time bookkeeping is updated only during flush, never at enqueue.
 class PipelineStager
 {
 public:
@@ -37,123 +33,68 @@ public:
         notif_head_(notif_head),
         dyn_field_head_(dyn_field_head)
     {
-        assert(heartbeat > 0);
-        assert(timestamp != nullptr);
+        assert(heartbeat_ > 0);
+        assert(timestamp_ != nullptr);
     }
 
     size_t getHeartbeat() const { return heartbeat_; }
 
-    const std::vector<QueueCollectionData>& getWaitingQueue() const { return waiting_queue_; }
-
-    void clearWaitingQueue() { waiting_queue_.clear(); }
-
-    void setScalarType(uint16_t cid) { scalar_cids_.insert(cid); }
+    void setScalarType(uint16_t cid) { checkpointers_[cid] = std::make_unique<ScalarCheckpointer>(heartbeat_); }
 
     void setContainerType(uint16_t cid, bool sparse, size_t capacity)
     {
-        (void)capacity;
         if (sparse)
         {
-            sparse_cids_.insert(cid);
+            checkpointers_[cid] = std::make_unique<SparseContainerCheckpointer>(heartbeat_, capacity);
         } else
         {
-            container_cids_.insert(cid);
+            checkpointers_[cid] = std::make_unique<ContigContainerCheckpointer>(heartbeat_, capacity);
         }
     }
 
     void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
     {
-        assert(scalar_cids_.count(cid) > 0);
-        advanceSimTimeSlot();
-        auto& checkpointer = getOrCreateScalarCheckpointer_(cid);
-        if (auto chkpt = checkpointer.createCheckpoint(scalar_bytes))
-        {
-            waiting_queue_.back().checkpoints[cid] = chkpt;
-        }
+        getCurrentTime_();
+        checkpointers_.at(cid)->createCheckpoint(current_window_id_, scalar_bytes);
     }
 
     void stage(uint16_t cid, const std::vector<std::vector<char>>& contig_bin_bytes)
     {
-        assert(container_cids_.count(cid) > 0);
-        advanceSimTimeSlot();
-        auto& checkpointer = getOrCreateContigCheckpointer_(cid);
-        if (auto chkpt = checkpointer.createCheckpoint(contig_bin_bytes))
-        {
-            waiting_queue_.back().checkpoints[cid] = chkpt;
-        }
+        getCurrentTime_();
+        checkpointers_.at(cid)->createCheckpoint(current_window_id_, contig_bin_bytes);
     }
 
     void stage(uint16_t cid, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
     {
-        assert(sparse_cids_.count(cid) > 0);
-        advanceSimTimeSlot();
-        auto& checkpointer = getOrCreateSparseCheckpointer_(cid);
-        if (auto chkpt = checkpointer.createCheckpoint(sparse_bin_bytes))
-        {
-            waiting_queue_.back().checkpoints[cid] = chkpt;
-        }
+        getCurrentTime_();
+        checkpointers_.at(cid)->createCheckpoint(current_window_id_, sparse_bin_bytes);
     }
 
     void onEnabledChanged(uint16_t cid, bool enabled)
     {
-        if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            advanceSimTimeSlot();
-            waiting_queue_.back().checkpoints[cid] =
-                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
-        } else if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            advanceSimTimeSlot();
-            waiting_queue_.back().checkpoints[cid] =
-                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
-        } else if (auto* checkpointer = findSparseCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            advanceSimTimeSlot();
-            waiting_queue_.back().checkpoints[cid] =
-                enabled ? checkpointer->createReenabledCheckpoint() : checkpointer->createDisabledCheckpoint();
-        }
+        getCurrentTime_();
+        checkpointers_.at(cid)->onEnabledChanged(current_window_id_, enabled);
     }
 
     void onQuietChanged(uint16_t cid, bool quiet)
     {
-        if (auto* checkpointer = findScalarCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            advanceSimTimeSlot();
-            waiting_queue_.back().checkpoints[cid] =
-                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
-        } else if (auto* checkpointer = findContigCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            advanceSimTimeSlot();
-            waiting_queue_.back().checkpoints[cid] =
-                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
-        } else if (auto* checkpointer = findSparseCheckpointer_(cid); checkpointer && checkpointer->tip())
-        {
-            advanceSimTimeSlot();
-            waiting_queue_.back().checkpoints[cid] =
-                quiet ? checkpointer->createQuietedCheckpoint() : checkpointer->createReenabledCheckpoint();
-        }
+        getCurrentTime_();
+        checkpointers_.at(cid)->onQuietChanged(current_window_id_, quiet);
     }
 
     void sendCollectedDataToPipeline()
     {
-        while (!waiting_queue_.empty())
+        while (!ready_queue_.empty())
         {
-            sendToPipeline_(waiting_queue_.front());
-            waiting_queue_.erase(waiting_queue_.begin());
+            const auto& ready = ready_queue_.front();
+            sendToPipeline_(ready.sim_time, ready.window_id);
+            ready_queue_.pop();
         }
     }
 
-    void disableAutoSendMode(bool disable = true) { auto_send_when_time_advances_ = !disable; }
+    void disableAutoSendMode(bool disable = true) { auto_send_ = !disable; }
 
-    void advanceSimTimeSlot()
-    {
-        if (advanceStageTime_())
-        {
-            QueueCollectionData entry;
-            entry.sim_time = last_stage_time_.getValue();
-            waiting_queue_.push_back(std::move(entry));
-        }
-    }
+    void advanceSimTimeSlot() { getCurrentTime_(); }
 
     void postNotif(uint16_t cid, const std::string& notif, NotifType type)
     {
@@ -176,7 +117,6 @@ public:
     void postDynamicFieldChanges(uint16_t cid, const std::vector<std::string>& field_names,
                                  const std::vector<MinimalType>& field_types)
     {
-        assert(timestamp_ != nullptr);
         assert(dyn_field_head_ != nullptr);
         DynamicFieldChanges changes(cid, field_names, field_types, timestamp_->getTime());
         dyn_field_head_->emplace(std::move(changes));
@@ -185,7 +125,10 @@ public:
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
         writeMetaForSentCids(db_mgr, wire_sent_cids_);
-        writeQueueMaxSizes_(db_mgr);
+        for (const auto& [cid, checkpointer] : checkpointers_)
+        {
+            checkpointer->writeMetaOnPostTeardown(cid, db_mgr);
+        }
     }
 
     static void writeMetaForSentCids(DatabaseManager* db_mgr, const std::unordered_set<uint16_t>& wire_sent_cids)
@@ -282,273 +225,75 @@ public:
         }
     }
 
-    //! Tip of the per-CID checkpoint chain after the latest flush/enqueue activity.
-    std::shared_ptr<const Checkpoint> getTip(uint16_t cid) const
-    {
-        if (auto it = scalar_checkpointers_.find(cid); it != scalar_checkpointers_.end())
-        {
-            return it->second->tip();
-        }
-        if (auto it = contig_checkpointers_.find(cid); it != contig_checkpointers_.end())
-        {
-            return it->second->tip();
-        }
-        if (auto it = sparse_checkpointers_.find(cid); it != sparse_checkpointers_.end())
-        {
-            return it->second->tip();
-        }
-        return nullptr;
-    }
-
 private:
-    void writeQueueMaxSizes_(DatabaseManager* db_mgr)
+    uint64_t getCurrentTime_()
     {
-        auto inserter = db_mgr->prepareINSERT(SQL_TABLE("QueueMaxSizes"));
-        for (const auto& [cid, checkpointer] : contig_checkpointers_)
+        auto current_time = timestamp_->getTime();
+        if (!current_stage_time_.isValid())
         {
-            inserter->createRecordWithColValues(static_cast<int>(cid),
-                                                static_cast<int>(checkpointer->getMaxContainerSizeSeen()));
-        }
-        for (const auto& [cid, checkpointer] : sparse_checkpointers_)
-        {
-            inserter->createRecordWithColValues(static_cast<int>(cid),
-                                                static_cast<int>(checkpointer->getMaxContainerSizeSeen()));
-        }
-    }
-
-    void recordWireSent_(const CollectedData& data) { wire_sent_cids_.insert(data.getCID()); }
-
-    static bool isLifecycleAction_(const Checkpoint& checkpoint)
-    {
-        auto action = checkpoint.getAction();
-        return static_cast<uint8_t>(action) < static_cast<uint8_t>(Action::FULL);
-    }
-
-    ScalarCheckpointer& getOrCreateScalarCheckpointer_(uint16_t cid)
-    {
-        auto it = scalar_checkpointers_.find(cid);
-        if (it == scalar_checkpointers_.end())
-        {
-            it = scalar_checkpointers_.emplace(cid, std::make_unique<ScalarCheckpointer>(cid, heartbeat_)).first;
-        }
-        return *it->second;
-    }
-
-    ScalarCheckpointer* findScalarCheckpointer_(uint16_t cid)
-    {
-        auto it = scalar_checkpointers_.find(cid);
-        if (it == scalar_checkpointers_.end())
-        {
-            return nullptr;
-        }
-        return it->second.get();
-    }
-
-    ContigCheckpointer& getOrCreateContigCheckpointer_(uint16_t cid)
-    {
-        auto it = contig_checkpointers_.find(cid);
-        if (it == contig_checkpointers_.end())
-        {
-            it = contig_checkpointers_.emplace(cid, std::make_unique<ContigCheckpointer>(cid, heartbeat_)).first;
-        }
-        return *it->second;
-    }
-
-    ContigCheckpointer* findContigCheckpointer_(uint16_t cid)
-    {
-        auto it = contig_checkpointers_.find(cid);
-        if (it == contig_checkpointers_.end())
-        {
-            return nullptr;
-        }
-        return it->second.get();
-    }
-
-    SparseCheckpointer& getOrCreateSparseCheckpointer_(uint16_t cid)
-    {
-        auto it = sparse_checkpointers_.find(cid);
-        if (it == sparse_checkpointers_.end())
-        {
-            it = sparse_checkpointers_.emplace(cid, std::make_unique<SparseCheckpointer>(cid, heartbeat_)).first;
-        }
-        return *it->second;
-    }
-
-    SparseCheckpointer* findSparseCheckpointer_(uint16_t cid)
-    {
-        auto it = sparse_checkpointers_.find(cid);
-        if (it == sparse_checkpointers_.end())
-        {
-            return nullptr;
-        }
-        return it->second.get();
-    }
-
-    bool advanceStageTime_()
-    {
-        const uint64_t current_time = timestamp_->getTime();
-        if (!last_stage_time_.isValid() || current_time >= last_stage_time_.getValue())
-        {
-            last_stage_time_ = current_time;
-        } else
+            current_stage_time_ = current_time;
+        } else if (current_time < current_stage_time_.getValue())
         {
             throw DBException("Time must be monotonically increasing");
+        } else if (current_time > current_stage_time_.getValue())
+        {
+            Ready ready(current_stage_time_, current_window_id_++);
+            ready_queue_.emplace(std::move(ready));
+
+            if (auto_send_)
+            {
+                sendCollectedDataToPipeline();
+            }
         }
 
-        if (waiting_queue_.empty())
-        {
-            return true;
-        }
-
-        const auto prev_slot_time = waiting_queue_.back().sim_time;
-        if (current_time == prev_slot_time)
-        {
-            return false;
-        }
-        if (current_time < prev_slot_time)
-        {
-            throw DBException("Time must be monotonically increasing");
-        }
-
-        if (auto_send_when_time_advances_)
-        {
-            sendCollectedDataToPipeline();
-        }
-
-        return true;
+        current_stage_time_ = current_time;
+        return current_time;
     }
 
-    void sendToPipeline_(const QueueCollectionData& collection_at_time)
+    void sendToPipeline_(uint64_t sim_time, uint64_t window_id)
     {
         QueueCollectionData to_send;
-        to_send.sim_time = collection_at_time.sim_time;
+        to_send.sim_time = sim_time;
 
-        std::unordered_set<uint16_t> handled_cids;
-        for (const auto& [cid, checkpoint] : collection_at_time.checkpoints)
+        for (auto& [cid, checkpointer] : checkpointers_)
         {
-            // First case: the checkpoint represents a FULL snapshot.
-            // Dump it as-is and remove the parent checkpoint chain
-            // so we don't consume memory forever.
-            //
-            // Note that this applies to just-enabled / just-awakened
-            // collectables too.
-            if (checkpoint->isSnapshot())
+            auto wires = checkpointer->encodeForPipeline(window_id, sim_time, cid);
+            for (auto& entry : wires)
             {
-                auto full_data = checkpoint->getFullData();
-                recordWireSent_(*full_data);
-                to_send.entries.emplace_back(std::move(full_data));
-                checkpoint->detachFromParent();
-                handled_cids.insert(cid);
-            }
-
-            // Second case: not a snapshot, and not a lifecycle event.
-            // Just a regular delta inside the heartbeat interval.
-            else if (!isLifecycleAction_(*checkpoint))
-            {
-                auto delta_data = checkpoint->getMinifiedData();
-                recordWireSent_(*delta_data);
-                to_send.entries.emplace_back(std::move(delta_data));
-                handled_cids.insert(cid);
-            }
-
-            // Third case: we are disabling/quieting a collectable.
-            // Emit action-only wire bytes; tip stays VanishedCheckpoint.
-            else if (isVanishingLifecycle_(*checkpoint))
-            {
-                auto mini_data = checkpoint->getMinifiedData();
-                recordWireSent_(*mini_data);
-                to_send.entries.emplace_back(std::move(mini_data));
-                handled_cids.insert(cid);
+                wire_sent_cids_.insert(cid);
+                to_send.entries.emplace_back(std::move(entry));
             }
         }
 
-        // Replay FULL bytes for refreshable CIDs not handled in this flush.
-        for (const auto& [cid, checkpointer] : scalar_checkpointers_)
-        {
-            if (!handled_cids.insert(cid).second)
-            {
-                continue;
-            }
-
-            if (!checkpointer->isRefreshable())
-            {
-                checkpointer->recordMissedFlush();
-            } else
-            {
-                auto full_data = checkpointer->tip()->getFullData();
-                recordWireSent_(*full_data);
-                to_send.entries.emplace_back(std::move(full_data));
-                checkpointer->upToDate();
-            }
-        }
-
-        for (const auto& [cid, checkpointer] : contig_checkpointers_)
-        {
-            if (!handled_cids.insert(cid).second)
-            {
-                continue;
-            }
-
-            if (!checkpointer->isRefreshable())
-            {
-                checkpointer->recordMissedFlush();
-            } else
-            {
-                auto full_data = checkpointer->tip()->getFullData();
-                recordWireSent_(*full_data);
-                to_send.entries.emplace_back(std::move(full_data));
-                checkpointer->upToDate();
-            }
-        }
-
-        for (const auto& [cid, checkpointer] : sparse_checkpointers_)
-        {
-            if (!handled_cids.insert(cid).second)
-            {
-                continue;
-            }
-
-            if (!checkpointer->isRefreshable())
-            {
-                checkpointer->recordMissedFlush();
-            } else
-            {
-                auto full_data = checkpointer->tip()->getFullData();
-                recordWireSent_(*full_data);
-                to_send.entries.emplace_back(std::move(full_data));
-                checkpointer->upToDate();
-            }
-        }
-
-        if (!to_send.entries.empty() && pipeline_head_ != nullptr)
-        {
-            pipeline_head_->emplace(std::move(to_send));
-        }
-    }
-
-    static bool isVanishingLifecycle_(const Checkpoint& checkpoint)
-    {
-        auto action = checkpoint.getAction();
-        return action == Action::DISABLED || action == Action::QUIETED;
+        pipeline_head_->emplace(std::move(to_send));
     }
 
     const size_t heartbeat_;
     Timestamp* const timestamp_;
+    ValidValue<uint64_t> current_stage_time_;
+    uint64_t current_window_id_ = 1;
+    bool auto_send_ = true;
+
     ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
     ConcurrentQueue<Notification>* const notif_head_;
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
 
-    std::vector<QueueCollectionData> waiting_queue_;
-    ValidValue<uint64_t> last_stage_time_;
-    bool auto_send_when_time_advances_ = true;
-
-    std::unordered_set<uint16_t> scalar_cids_;
-    std::unordered_set<uint16_t> container_cids_;
-    std::unordered_set<uint16_t> sparse_cids_;
-    std::unordered_map<uint16_t, std::unique_ptr<ScalarCheckpointer>> scalar_checkpointers_;
-    std::unordered_map<uint16_t, std::unique_ptr<ContigCheckpointer>> contig_checkpointers_;
-    std::unordered_map<uint16_t, std::unique_ptr<SparseCheckpointer>> sparse_checkpointers_;
+    std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
     std::unordered_set<uint16_t> wire_sent_cids_;
+
+    struct Ready
+    {
+        uint64_t sim_time = 0;
+        uint64_t window_id = 0;
+
+        Ready(uint64_t sim_time, uint64_t window_id) :
+            sim_time(sim_time),
+            window_id(window_id)
+        {
+        }
+    };
+
+    std::queue<Ready> ready_queue_;
 };
 
 } // namespace simdb::argos

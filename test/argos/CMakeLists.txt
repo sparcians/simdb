@@ -5,4 +5,5 @@
 #simdb_test(ScalarCheckpointerLifecycle ScalarCheckpointerLifecycle/main.cpp)
 #simdb_test(CheckpointStager CheckpointStager/main.cpp)
 simdb_test(PipelineStager PipelineStager/main.cpp)
+simdb_test(PipelineIntegration PipelineIntegration/main.cpp)
 

@@ -204,13 +204,12 @@ private:
 
     void setContainerType_(uint16_t cid, bool sparse, size_t capacity)
     {
-        (void)capacity;
         if (sparse)
         {
-            pending_sparse_cids_.insert(cid);
+            pending_sparse_capacities_[cid] = capacity;
         } else
         {
-            pending_container_cids_.insert(cid);
+            pending_contig_capacities_[cid] = capacity;
         }
         if (stager_)
         {
@@ -252,13 +251,13 @@ private:
         {
             stager_->setScalarType(cid);
         }
-        for (const auto cid : pending_container_cids_)
+        for (const auto& [cid, capacity] : pending_contig_capacities_)
         {
-            stager_->setContainerType(cid, false, 0);
+            stager_->setContainerType(cid, false, capacity);
         }
-        for (const auto cid : pending_sparse_cids_)
+        for (const auto& [cid, capacity] : pending_sparse_capacities_)
         {
-            stager_->setContainerType(cid, true, 0);
+            stager_->setContainerType(cid, true, capacity);
         }
     }
 
@@ -301,8 +300,8 @@ private:
     bool realized_ = false;
 
     std::unordered_set<uint16_t> pending_scalar_cids_;
-    std::unordered_set<uint16_t> pending_container_cids_;
-    std::unordered_set<uint16_t> pending_sparse_cids_;
+    std::unordered_map<uint16_t, size_t> pending_contig_capacities_;
+    std::unordered_map<uint16_t, size_t> pending_sparse_capacities_;
 
     mutable StagerProxy proxy_;
 };
