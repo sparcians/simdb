@@ -211,7 +211,7 @@ public:
         }
     }
 
-    using CollectableCheckpointer::createCheckpoint;  // un-hide the other two
+    using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
     void onEnabledChanged(uint64_t window_id, bool enabled) override
     {
@@ -351,7 +351,7 @@ public:
         }
     }
 
-    using CollectableCheckpointer::createCheckpoint;  // un-hide the other two
+    using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
     void onEnabledChanged(uint64_t window_id, bool enabled) override
     {
@@ -517,7 +517,7 @@ public:
         }
     }
 
-    using CollectableCheckpointer::createCheckpoint;  // un-hide the other two
+    using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
     void onEnabledChanged(uint64_t window_id, bool enabled) override
     {
