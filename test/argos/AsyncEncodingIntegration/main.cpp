@@ -46,10 +46,6 @@ std::map<uint16_t, std::vector<char>> sparseBytes(uint16_t idx, uint8_t val)
 
 std::filesystem::path runSimulation(const bool async_encoding)
 {
-    const auto tic = std::chrono::high_resolution_clock::now();
-    std::cout << "tic runSimulation (async_encoding=" << std::boolalpha << async_encoding << ", ticks=" << kRunTicks
-              << ")\n";
-
     simdb::argos::CollectionEntryPoint::resetCIDs();
 
     const auto db_name = async_encoding ? "async_encoding.db" : "sync_encoding.db";
@@ -83,6 +79,10 @@ std::filesystem::path runSimulation(const bool async_encoding)
 
     std::mt19937_64 rng(kSeed);
     std::uniform_int_distribution<int> roll(0, 99);
+
+    const auto tic = std::chrono::high_resolution_clock::now();
+    std::cout << "tic runSimulation (async_encoding=" << std::boolalpha << async_encoding << ", ticks=" << kRunTicks
+              << ")\n";
 
     while (++tick <= kRunTicks)
     {
