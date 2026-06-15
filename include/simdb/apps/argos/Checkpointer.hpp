@@ -278,13 +278,13 @@ public:
         if (anchor && anchor->getWindowID() == window_id)
         {
             work.path = EncodePath::ActiveAnchor;
-            auto slice_head = detail::getSharedCheckpoint(anchor, head_);
-            if (!slice_head)
+            auto stolen = detail::getSharedCheckpoint(anchor, head_);
+            if (!stolen)
             {
                 return std::nullopt;
             }
-            work.stolen_chain_tail = slice_head;
-            work.anchor = work.stolen_chain_tail.get();
+            work.stolen_chain_tail = stolen;
+            work.anchor = anchor;
             return work;
         }
 
@@ -459,13 +459,13 @@ public:
         if (anchor && anchor->getWindowID() == window_id)
         {
             work.path = EncodePath::ActiveAnchor;
-            auto slice_head = detail::getSharedCheckpoint(anchor, head_);
-            if (!slice_head)
+            auto stolen = detail::getSharedCheckpoint(anchor, head_);
+            if (!stolen)
             {
                 return std::nullopt;
             }
-            work.stolen_chain_tail = slice_head;
-            work.anchor = work.stolen_chain_tail.get();
+            work.stolen_chain_tail = stolen;
+            work.anchor = anchor;
             return work;
         }
 
@@ -666,13 +666,13 @@ public:
         if (anchor && anchor->getWindowID() == window_id)
         {
             work.path = EncodePath::ActiveAnchor;
-            auto slice_head = detail::getSharedCheckpoint(anchor, head_);
-            if (!slice_head)
+            auto stolen = detail::getSharedCheckpoint(anchor, head_);
+            if (!stolen)
             {
                 return std::nullopt;
             }
-            work.stolen_chain_tail = slice_head;
-            work.anchor = work.stolen_chain_tail.get();
+            work.stolen_chain_tail = stolen;
+            work.anchor = anchor;
             return work;
         }
 
