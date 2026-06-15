@@ -3,11 +3,9 @@
 #pragma once
 
 #include "simdb/apps/argos/Checkpoint.hpp"
-#include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/utils/ValidValue.hpp"
 
-#include <optional>
 #include <vector>
 
 namespace simdb::argos {
@@ -15,7 +13,7 @@ namespace simdb::argos {
 namespace detail {
 
 template <typename CheckpointT>
-inline CheckpointT* getAnchorForWindow(uint64_t window_id, const std::shared_ptr<CheckpointT>& tail)
+CheckpointT* getAnchorForWindow(uint64_t window_id, const std::shared_ptr<CheckpointT>& tail)
 {
     CheckpointT* anchor = tail.get();
     CheckpointT* best = nullptr;
@@ -43,7 +41,7 @@ inline bool participatedInWindow(uint64_t window_id, const std::shared_ptr<Check
 }
 
 template <typename CheckpointT>
-inline std::shared_ptr<CheckpointT> getSharedCheckpoint(CheckpointT* raw, const std::shared_ptr<CheckpointT>& head)
+std::shared_ptr<CheckpointT> getSharedCheckpoint(CheckpointT* raw, const std::shared_ptr<CheckpointT>& head)
 {
     std::shared_ptr<CheckpointT> sp = head;
     while (sp)
@@ -123,8 +121,6 @@ public:
                                                                           uint16_t cid) = 0;
 
     virtual bool participatedInWindow(uint64_t window_id) const = 0;
-
-    virtual std::optional<CidEncodeWork> buildEncodeWork(uint64_t window_id, uint16_t cid) = 0;
 
     virtual void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager*) { (void)cid; }
 
@@ -265,39 +261,6 @@ public:
         return {};
     }
 
-    std::optional<CidEncodeWork> buildEncodeWork(uint64_t window_id, uint16_t cid) override
-    {
-        CidEncodeWork work;
-        work.cid = cid;
-        work.kind = CheckpointerKind::Scalar;
-        work.heartbeat = heartbeat_;
-
-        auto* anchor = detail::getAnchorForWindow(window_id, tail_);
-        if (anchor && anchor->getWindowID() == window_id)
-        {
-            work.path = EncodePath::ActiveAnchor;
-            auto slice_head = detail::getSharedCheckpoint(anchor, head_);
-            if (!slice_head)
-            {
-                return std::nullopt;
-            }
-            tail_ = slice_head;
-            work.slice_head = slice_head;
-            work.anchor = work.slice_head.get();
-            return work;
-        }
-
-        if (!head_)
-        {
-            return std::nullopt;
-        }
-
-        work.path = EncodePath::AbsentRefresh;
-        work.slice_head = head_;
-        work.tip_disabled = head_->isDisabledEvent();
-        return work;
-    }
-
 private:
     ScalarCheckpoint* latestDataCheckpoint_() const
     {
@@ -436,39 +399,6 @@ public:
         }
 
         return {};
-    }
-
-    std::optional<CidEncodeWork> buildEncodeWork(uint64_t window_id, uint16_t cid) override
-    {
-        CidEncodeWork work;
-        work.cid = cid;
-        work.kind = CheckpointerKind::Contig;
-        work.heartbeat = heartbeat_;
-
-        auto* anchor = detail::getAnchorForWindow(window_id, tail_);
-        if (anchor && anchor->getWindowID() == window_id)
-        {
-            work.path = EncodePath::ActiveAnchor;
-            auto slice_head = detail::getSharedCheckpoint(anchor, head_);
-            if (!slice_head)
-            {
-                return std::nullopt;
-            }
-            tail_ = slice_head;
-            work.slice_head = slice_head;
-            work.anchor = work.slice_head.get();
-            return work;
-        }
-
-        if (!head_)
-        {
-            return std::nullopt;
-        }
-
-        work.path = EncodePath::AbsentRefresh;
-        work.slice_head = head_;
-        work.tip_disabled = head_->isDisabledEvent();
-        return work;
     }
 
     void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager* db_mgr) override
@@ -635,39 +565,6 @@ public:
         }
 
         return {};
-    }
-
-    std::optional<CidEncodeWork> buildEncodeWork(uint64_t window_id, uint16_t cid) override
-    {
-        CidEncodeWork work;
-        work.cid = cid;
-        work.kind = CheckpointerKind::Sparse;
-        work.heartbeat = heartbeat_;
-
-        auto* anchor = detail::getAnchorForWindow(window_id, tail_);
-        if (anchor && anchor->getWindowID() == window_id)
-        {
-            work.path = EncodePath::ActiveAnchor;
-            auto slice_head = detail::getSharedCheckpoint(anchor, head_);
-            if (!slice_head)
-            {
-                return std::nullopt;
-            }
-            tail_ = slice_head;
-            work.slice_head = slice_head;
-            work.anchor = work.slice_head.get();
-            return work;
-        }
-
-        if (!head_)
-        {
-            return std::nullopt;
-        }
-
-        work.path = EncodePath::AbsentRefresh;
-        work.slice_head = head_;
-        work.tip_disabled = head_->isDisabledEvent();
-        return work;
     }
 
     void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager* db_mgr) override

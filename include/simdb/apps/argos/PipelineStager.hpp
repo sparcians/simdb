@@ -24,34 +24,17 @@ namespace simdb::argos {
 class PipelineStager
 {
 public:
-    PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* sync_pipeline_head,
-                   ConcurrentQueue<Notification>* notif_head = nullptr,
-                   ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
-        PipelineStager(heartbeat, timestamp, sync_pipeline_head, nullptr, false, notif_head, dyn_field_head)
-    {
-    }
-
-    PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* sync_pipeline_head,
-                   ConcurrentQueue<DeltaEncodingBatch>* async_pipeline_head, bool async_encoding,
+    PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* pipeline_head,
                    ConcurrentQueue<Notification>* notif_head = nullptr,
                    ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
         heartbeat_(heartbeat),
         timestamp_(timestamp),
-        sync_pipeline_head_(sync_pipeline_head),
-        async_pipeline_head_(async_pipeline_head),
-        async_encoding_(async_encoding),
+        pipeline_head_(pipeline_head),
         notif_head_(notif_head),
         dyn_field_head_(dyn_field_head)
     {
         assert(heartbeat_ > 0);
         assert(timestamp_ != nullptr);
-        if (async_encoding_)
-        {
-            assert(async_pipeline_head_ != nullptr);
-        } else
-        {
-            assert(sync_pipeline_head_ != nullptr);
-        }
     }
 
     size_t getHeartbeat() const { return heartbeat_; }
@@ -148,11 +131,6 @@ public:
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
         writeMetaForSentCids(db_mgr, wire_sent_cids_);
-        writeCheckpointerMetaOnPostTeardown(db_mgr);
-    }
-
-    void writeCheckpointerMetaOnPostTeardown(DatabaseManager* db_mgr) const
-    {
         for (const auto& [cid, checkpointer] : checkpointers_)
         {
             checkpointer->writeMetaOnPostTeardown(cid, db_mgr);
@@ -282,17 +260,6 @@ private:
 
     void sendToPipeline_(uint64_t sim_time, uint64_t window_id)
     {
-        if (async_encoding_)
-        {
-            sendToPipelineAsync_(sim_time, window_id);
-        } else
-        {
-            sendToPipelineSync_(sim_time, window_id);
-        }
-    }
-
-    void sendToPipelineSync_(uint64_t sim_time, uint64_t window_id)
-    {
         QueueCollectionData to_send;
         to_send.sim_time = sim_time;
 
@@ -317,32 +284,7 @@ private:
             }
         }
 
-        sync_pipeline_head_->emplace(std::move(to_send));
-    }
-
-    void sendToPipelineAsync_(uint64_t sim_time, uint64_t window_id)
-    {
-        DeltaEncodingBatch batch;
-        batch.sim_time = sim_time;
-        batch.window_id = window_id;
-        batch.cid_to_clock = collectable_clock_ids_;
-
-        const bool multi_clock = hasMultipleCollectableClocks_();
-
-        for (auto& [cid, checkpointer] : checkpointers_)
-        {
-            if (multi_clock && !checkpointer->participatedInWindow(window_id))
-            {
-                continue;
-            }
-
-            if (auto work = checkpointer->buildEncodeWork(window_id, cid))
-            {
-                batch.work.emplace_back(std::move(*work));
-            }
-        }
-
-        async_pipeline_head_->emplace(std::move(batch));
+        pipeline_head_->emplace(std::move(to_send));
     }
 
     const size_t heartbeat_;
@@ -351,13 +293,11 @@ private:
     uint64_t current_window_id_ = 1;
     bool auto_send_ = true;
 
-    ConcurrentQueue<QueueCollectionData>* const sync_pipeline_head_;
-    ConcurrentQueue<DeltaEncodingBatch>* const async_pipeline_head_;
-    const bool async_encoding_;
+    ConcurrentQueue<QueueCollectionData>* const pipeline_head_;
     ConcurrentQueue<Notification>* const notif_head_;
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
 
-    std::map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
+    std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
     std::unordered_map<uint16_t, uint32_t> collectable_clock_ids_;
     std::unordered_set<uint16_t> wire_sent_cids_;
     std::unordered_set<uint32_t> clock_ids_;
