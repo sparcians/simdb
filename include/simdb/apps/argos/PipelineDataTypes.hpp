@@ -20,6 +20,34 @@
 
 namespace simdb::argos {
 
+class CollectableCheckpoint;
+
+enum class CheckpointerKind { Scalar, Contig, Sparse };
+
+enum class EncodePath { ActiveAnchor, AbsentRefresh };
+
+struct CidEncodeWork
+{
+    uint16_t cid = 0;
+    CheckpointerKind kind = CheckpointerKind::Scalar;
+    EncodePath path = EncodePath::ActiveAnchor;
+    size_t heartbeat = 0;
+
+    //! slice_head (shared_ptr to anchor or live head) owns the handed-off subchain via prev_ links.
+    std::shared_ptr<CollectableCheckpoint> slice_head;
+    CollectableCheckpoint* anchor = nullptr;
+
+    bool tip_disabled = false;
+};
+
+struct DeltaEncodingBatch
+{
+    uint64_t sim_time = 0;
+    uint64_t window_id = 0;
+    std::vector<CidEncodeWork> work;
+    std::unordered_map<uint16_t, uint32_t> cid_to_clock;
+};
+
 struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;

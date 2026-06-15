@@ -183,11 +183,28 @@ public:
 
     safe_weak_ptr<PipelineStager> get() const { return stager_; }
 
+    void enableAsyncEncoding(bool enable = true)
+    {
+        checkNotReady_();
+        async_encoding_ = enable;
+    }
+
+    bool asyncEncodingEnabled() const { return async_encoding_; }
+
+    void setAsyncWireSentCids(std::unordered_set<uint16_t>* wire_sent_cids) { async_wire_sent_cids_ = wire_sent_cids; }
+
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
         if (stager_)
         {
-            stager_->writeMetaOnPostTeardown(db_mgr);
+            if (async_wire_sent_cids_ != nullptr)
+            {
+                PipelineStager::writeMetaForSentCids(db_mgr, *async_wire_sent_cids_);
+                stager_->writeCheckpointerMetaOnPostTeardown(db_mgr);
+            } else
+            {
+                stager_->writeMetaOnPostTeardown(db_mgr);
+            }
         } else
         {
             PipelineStager::writeMetaForSentCids(db_mgr, {});
@@ -288,11 +305,22 @@ private:
     {
         if (!realized_ && heartbeat_.isValid() && pipeline_ && timestamp_)
         {
-            auto pipeline_head = pipeline_->getInPortQueue<QueueCollectionData>("compressor.input_queue");
+            ConcurrentQueue<QueueCollectionData>* sync_head = nullptr;
+            ConcurrentQueue<DeltaEncodingBatch>* async_head = nullptr;
+
             auto notif_head = pipeline_->getInPortQueue<Notification>("writer.notif_queue");
             auto dyn_field_head = pipeline_->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-            stager_ = std::make_shared<PipelineStager>(heartbeat_.getValue(), timestamp_, pipeline_head, notif_head,
-                                                       dyn_field_head);
+
+            if (async_encoding_)
+            {
+                async_head = pipeline_->getInPortQueue<DeltaEncodingBatch>("encoder.input_queue");
+            } else
+            {
+                sync_head = pipeline_->getInPortQueue<QueueCollectionData>("compressor.input_queue");
+            }
+
+            stager_ = std::make_shared<PipelineStager>(heartbeat_.getValue(), timestamp_, sync_head, async_head,
+                                                       async_encoding_, notif_head, dyn_field_head);
             applyPendingRegistrations_();
 
             Notification notif;
@@ -308,6 +336,8 @@ private:
     ValidValue<size_t> heartbeat_;
     pipeline::Pipeline* pipeline_ = nullptr;
     Timestamp* timestamp_ = nullptr;
+    bool async_encoding_ = false;
+    std::unordered_set<uint16_t>* async_wire_sent_cids_ = nullptr;
 
     ConcurrentQueue<Notification> dummy_notif_head_;
 
@@ -539,6 +569,8 @@ public:
     }
 
     PipelineStagerResource& getStagerResource() { return stager_resource_; }
+
+    const PipelineStagerResource& getStagerResource() const { return stager_resource_; }
 
     TinyStringsResource& getTinyStringsResource() { return tiny_strings_resource_; }
 

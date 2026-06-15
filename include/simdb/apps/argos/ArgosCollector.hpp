@@ -4,8 +4,10 @@
 
 #include "simdb/apps/App.hpp"
 #include "simdb/apps/argos/ArgosResources.hpp"
+#include "simdb/apps/argos/CheckpointerAsyncEncode.hpp"
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
+#include "simdb/pipeline/Flusher.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/sqlite/Dump.hpp"
 #include "simdb/utils/Compress.hpp"
@@ -241,18 +243,40 @@ public:
 
     ArgosResources* getResources() { return &resources_; }
 
+    void enableAsyncEncoding(bool enable = true) { resources_.getStagerResource().enableAsyncEncoding(enable); }
+
+    bool asyncEncodingEnabled() const { return resources_.getStagerResource().asyncEncodingEnabled(); }
+
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
         auto pipeline = pipeline_mgr->createPipeline(NAME, this);
+        const bool async_enc = asyncEncodingEnabled();
 
+        if (async_enc)
+        {
+            pipeline->addStage<EncoderStage>("encoder", async_wire_sent_cids_);
+        }
         pipeline->addStage<Compressor>("compressor");
         pipeline->addStage<Writer>("writer");
         pipeline->noMoreStages();
 
+        if (async_enc)
+        {
+            pipeline->bind("encoder.output_queue", "compressor.input_queue");
+        }
         pipeline->bind("compressor.output_queue", "writer.input_queue");
         pipeline->noMoreBindings();
 
         resources_.setPipeline(pipeline);
+
+        if (async_enc)
+        {
+            resources_.getStagerResource().setAsyncWireSentCids(&async_wire_sent_cids_);
+            pipeline_flusher_ = pipeline->createFlusher({"encoder", "compressor", "writer"});
+        } else
+        {
+            pipeline_flusher_ = pipeline->createFlusher({"compressor", "writer"});
+        }
     }
 
     void postInit(int, char**) override
@@ -280,7 +304,14 @@ public:
         }
     }
 
-    void preTeardown() override { pipeline_stager_->sendCollectedDataToPipeline(); }
+    void preTeardown() override
+    {
+        pipeline_stager_->sendCollectedDataToPipeline();
+        if (pipeline_flusher_)
+        {
+            pipeline_flusher_->flush();
+        }
+    }
 
     void postTeardown() override
     {
@@ -303,6 +334,53 @@ public:
     }
 
 private:
+    class EncoderStage : public pipeline::Stage
+    {
+    public:
+        explicit EncoderStage(std::unordered_set<uint16_t>& wire_sent_cids) :
+            wire_sent_cids_(wire_sent_cids)
+        {
+            addInPort_<DeltaEncodingBatch>("input_queue", input_queue_);
+            addOutPort_<QueueCollectionData>("output_queue", output_queue_);
+        }
+
+    private:
+        pipeline::PipelineAction run_(bool) override
+        {
+            DeltaEncodingBatch batch;
+            if (!input_queue_->try_pop(batch))
+            {
+                return pipeline::PipelineAction::SLEEP;
+            }
+
+            QueueCollectionData to_send;
+            to_send.sim_time = batch.sim_time;
+
+            for (const auto& work : batch.work)
+            {
+                auto& wire_state = wire_state_by_cid_[work.cid];
+                auto wires = encodeCidWork(work, batch.sim_time, wire_state);
+                for (auto& entry : wires)
+                {
+                    wire_sent_cids_.insert(work.cid);
+                    to_send.entries.emplace_back(std::move(entry));
+                    if (const auto clk_it = batch.cid_to_clock.find(work.cid); clk_it != batch.cid_to_clock.end())
+                    {
+                        to_send.clock_ids.insert(clk_it->second);
+                    }
+                }
+            }
+
+            output_queue_->emplace(std::move(to_send));
+            return pipeline::PipelineAction::PROCEED;
+        }
+
+        ConcurrentQueue<DeltaEncodingBatch>* input_queue_ = nullptr;
+        ConcurrentQueue<QueueCollectionData>* output_queue_ = nullptr;
+        std::unordered_map<uint16_t, WireAccountingState> wire_state_by_cid_;
+        std::unordered_set<uint16_t>& wire_sent_cids_;
+    };
+
     class Compressor : public pipeline::Stage
     {
     public:
@@ -489,6 +567,8 @@ private:
     std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;
     ArgosResources resources_;
     PipelineStagerResource& pipeline_stager_{resources_.getStagerResource()};
+    std::unordered_set<uint16_t> async_wire_sent_cids_;
+    std::unique_ptr<pipeline::Flusher> pipeline_flusher_;
 };
 
 } // namespace simdb::argos
