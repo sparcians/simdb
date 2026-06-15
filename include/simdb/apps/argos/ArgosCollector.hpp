@@ -345,7 +345,6 @@ private:
     public:
         EncoderStage(std::unordered_set<uint16_t>& wire_sent_cids,
                      ConcurrentQueue<AsyncEncodeCompletion>* completion_queue) :
-            Stage(1),
             wire_sent_cids_(wire_sent_cids),
             completion_queue_(completion_queue)
         {
