@@ -33,9 +33,8 @@ struct CidEncodeWork
     EncodePath path = EncodePath::ActiveAnchor;
     size_t heartbeat = 0;
 
-    //! ActiveAnchor: shared alias to [anchor .. head] via stolen_chain_tail until encoder posts completion.
-    //! AbsentRefresh: read-only alias to live head_ (encoder must not mutate the chain).
-    std::shared_ptr<CollectableCheckpoint> stolen_chain_tail;
+    //! slice_head (shared_ptr to anchor or live head) owns the handed-off subchain via prev_ links.
+    std::shared_ptr<CollectableCheckpoint> slice_head;
     CollectableCheckpoint* anchor = nullptr;
 
     bool tip_disabled = false;
@@ -47,14 +46,6 @@ struct DeltaEncodingBatch
     uint64_t window_id = 0;
     std::vector<CidEncodeWork> work;
     std::unordered_map<uint16_t, uint32_t> cid_to_clock;
-};
-
-//! Posted by the async encoder after active-anchor encode; drained on the main thread.
-struct AsyncEncodeCompletion
-{
-    uint16_t cid = 0;
-    std::shared_ptr<CollectableCheckpoint> tail;
-    bool release_through_full_anchor = false;
 };
 
 struct QueueCollectionData

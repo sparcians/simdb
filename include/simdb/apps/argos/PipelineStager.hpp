@@ -25,17 +25,14 @@ class PipelineStager
 {
 public:
     PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* sync_pipeline_head,
-                   ConcurrentQueue<DeltaEncodingBatch>* async_pipeline_head, bool async_encoding,
                    ConcurrentQueue<Notification>* notif_head = nullptr,
                    ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
-        PipelineStager(heartbeat, timestamp, sync_pipeline_head, async_pipeline_head, async_encoding, nullptr,
-                       notif_head, dyn_field_head)
+        PipelineStager(heartbeat, timestamp, sync_pipeline_head, nullptr, false, notif_head, dyn_field_head)
     {
     }
 
     PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* sync_pipeline_head,
                    ConcurrentQueue<DeltaEncodingBatch>* async_pipeline_head, bool async_encoding,
-                   ConcurrentQueue<AsyncEncodeCompletion>* async_encode_completion_queue,
                    ConcurrentQueue<Notification>* notif_head = nullptr,
                    ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
         heartbeat_(heartbeat),
@@ -43,7 +40,6 @@ public:
         sync_pipeline_head_(sync_pipeline_head),
         async_pipeline_head_(async_pipeline_head),
         async_encoding_(async_encoding),
-        async_encode_completion_queue_(async_encode_completion_queue),
         notif_head_(notif_head),
         dyn_field_head_(dyn_field_head)
     {
@@ -111,28 +107,11 @@ public:
 
     void sendCollectedDataToPipeline()
     {
-        drainAsyncEncodeCompletions();
         while (!ready_queue_.empty())
         {
             const auto& ready = ready_queue_.front();
             sendToPipeline_(ready.sim_time, ready.window_id);
             ready_queue_.pop();
-        }
-        drainAsyncEncodeCompletions();
-    }
-
-    void drainAsyncEncodeCompletions()
-    {
-        if (async_encode_completion_queue_ == nullptr)
-        {
-            return;
-        }
-
-        AsyncEncodeCompletion completion;
-        while (async_encode_completion_queue_->try_pop(completion))
-        {
-            checkpointers_.at(completion.cid)
-                ->commitAsyncEncode(completion.tail, completion.release_through_full_anchor);
         }
     }
 
@@ -343,8 +322,6 @@ private:
 
     void sendToPipelineAsync_(uint64_t sim_time, uint64_t window_id)
     {
-        drainAsyncEncodeCompletions();
-
         DeltaEncodingBatch batch;
         batch.sim_time = sim_time;
         batch.window_id = window_id;
@@ -377,7 +354,6 @@ private:
     ConcurrentQueue<QueueCollectionData>* const sync_pipeline_head_;
     ConcurrentQueue<DeltaEncodingBatch>* const async_pipeline_head_;
     const bool async_encoding_;
-    ConcurrentQueue<AsyncEncodeCompletion>* const async_encode_completion_queue_;
     ConcurrentQueue<Notification>* const notif_head_;
     ConcurrentQueue<DynamicFieldChanges>* const dyn_field_head_;
 

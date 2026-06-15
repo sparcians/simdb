@@ -126,8 +126,6 @@ public:
 
     virtual std::optional<CidEncodeWork> buildEncodeWork(uint64_t window_id, uint16_t cid) = 0;
 
-    virtual void commitAsyncEncode(const std::shared_ptr<CollectableCheckpoint>& tail, bool full_release) = 0;
-
     virtual void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager*) { (void)cid; }
 
 protected:
@@ -283,8 +281,9 @@ public:
             {
                 return std::nullopt;
             }
-            work.stolen_chain_tail = slice_head;
-            work.anchor = work.stolen_chain_tail.get();
+            tail_ = slice_head;
+            work.slice_head = slice_head;
+            work.anchor = work.slice_head.get();
             return work;
         }
 
@@ -294,18 +293,9 @@ public:
         }
 
         work.path = EncodePath::AbsentRefresh;
-        work.stolen_chain_tail = head_;
+        work.slice_head = head_;
         work.tip_disabled = head_->isDisabledEvent();
         return work;
-    }
-
-    void commitAsyncEncode(const std::shared_ptr<CollectableCheckpoint>& tail, bool full_release) override
-    {
-        tail_ = std::static_pointer_cast<ScalarCheckpoint>(tail);
-        if (full_release)
-        {
-            tail_->detachPrev();
-        }
     }
 
 private:
@@ -464,8 +454,9 @@ public:
             {
                 return std::nullopt;
             }
-            work.stolen_chain_tail = slice_head;
-            work.anchor = work.stolen_chain_tail.get();
+            tail_ = slice_head;
+            work.slice_head = slice_head;
+            work.anchor = work.slice_head.get();
             return work;
         }
 
@@ -475,18 +466,9 @@ public:
         }
 
         work.path = EncodePath::AbsentRefresh;
-        work.stolen_chain_tail = head_;
+        work.slice_head = head_;
         work.tip_disabled = head_->isDisabledEvent();
         return work;
-    }
-
-    void commitAsyncEncode(const std::shared_ptr<CollectableCheckpoint>& tail, bool full_release) override
-    {
-        tail_ = std::static_pointer_cast<ContigContainerCheckpoint>(tail);
-        if (full_release)
-        {
-            tail_->detachPrev();
-        }
     }
 
     void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager* db_mgr) override
@@ -671,8 +653,9 @@ public:
             {
                 return std::nullopt;
             }
-            work.stolen_chain_tail = slice_head;
-            work.anchor = work.stolen_chain_tail.get();
+            tail_ = slice_head;
+            work.slice_head = slice_head;
+            work.anchor = work.slice_head.get();
             return work;
         }
 
@@ -682,18 +665,9 @@ public:
         }
 
         work.path = EncodePath::AbsentRefresh;
-        work.stolen_chain_tail = head_;
+        work.slice_head = head_;
         work.tip_disabled = head_->isDisabledEvent();
         return work;
-    }
-
-    void commitAsyncEncode(const std::shared_ptr<CollectableCheckpoint>& tail, bool full_release) override
-    {
-        tail_ = std::static_pointer_cast<SparseContainerCheckpoint>(tail);
-        if (full_release)
-        {
-            tail_->detachPrev();
-        }
     }
 
     void writeMetaOnPostTeardown(uint16_t cid, DatabaseManager* db_mgr) override
