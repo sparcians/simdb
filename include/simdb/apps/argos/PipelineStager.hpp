@@ -25,13 +25,6 @@ class PipelineStager
 {
 public:
     PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* sync_pipeline_head,
-                   ConcurrentQueue<Notification>* notif_head = nullptr,
-                   ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
-        PipelineStager(heartbeat, timestamp, sync_pipeline_head, nullptr, false, nullptr, notif_head, dyn_field_head)
-    {
-    }
-
-    PipelineStager(size_t heartbeat, Timestamp* timestamp, ConcurrentQueue<QueueCollectionData>* sync_pipeline_head,
                    ConcurrentQueue<DeltaEncodingBatch>* async_pipeline_head, bool async_encoding,
                    ConcurrentQueue<Notification>* notif_head = nullptr,
                    ConcurrentQueue<DynamicFieldChanges>* dyn_field_head = nullptr) :
