@@ -211,6 +211,8 @@ public:
         }
     }
 
+    using CollectableCheckpointer::createCheckpoint;  // un-hide the other two
+
     void onEnabledChanged(uint64_t window_id, bool enabled) override
     {
         head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, enabled);
@@ -348,6 +350,8 @@ public:
             tail_ = head_;
         }
     }
+
+    using CollectableCheckpointer::createCheckpoint;  // un-hide the other two
 
     void onEnabledChanged(uint64_t window_id, bool enabled) override
     {
@@ -512,6 +516,8 @@ public:
             tail_ = head_;
         }
     }
+
+    using CollectableCheckpointer::createCheckpoint;  // un-hide the other two
 
     void onEnabledChanged(uint64_t window_id, bool enabled) override
     {
