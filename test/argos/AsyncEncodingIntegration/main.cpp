@@ -3,7 +3,10 @@
 #include "simdb/apps/argos/ArgosCollector.hpp"
 #include "simdb/utils/Compress.hpp"
 
+#include <chrono>
 #include <filesystem>
+#include <iomanip>
+#include <iostream>
 #include <map>
 #include <random>
 #include <string>
@@ -43,6 +46,10 @@ std::map<uint16_t, std::vector<char>> sparseBytes(uint16_t idx, uint8_t val)
 
 std::filesystem::path runSimulation(const bool async_encoding)
 {
+    const auto tic = std::chrono::high_resolution_clock::now();
+    std::cout << "tic runSimulation (async_encoding=" << std::boolalpha << async_encoding << ", ticks=" << kRunTicks
+              << ")\n";
+
     simdb::argos::CollectionEntryPoint::resetCIDs();
 
     const auto db_name = async_encoding ? "async_encoding.db" : "sync_encoding.db";
@@ -57,10 +64,7 @@ std::filesystem::path runSimulation(const bool async_encoding)
     app_mgrs.createEnabledApps();
     auto argos_collector = app_mgr.getApp<simdb::argos::ArgosCollector>();
     argos_collector->setHeartbeat(kHeartbeat);
-    if (async_encoding)
-    {
-        argos_collector->enableAsyncEncoding(true);
-    }
+    argos_collector->enableAsyncEncoding(async_encoding);
 
     auto fast_scalar = argos_collector->createScalarCollector("top.fast_scalar", "fast", "unsigned char");
     auto slow_scalar = argos_collector->createScalarCollector("top.slow_scalar", "slow", "unsigned char");
@@ -109,6 +113,12 @@ std::filesystem::path runSimulation(const bool async_encoding)
     }
 
     app_mgrs.postSimLoopTeardown();
+
+    const auto toc = std::chrono::high_resolution_clock::now();
+    const auto elapsed_s = std::chrono::duration<double>(toc - tic).count();
+    std::cout << "toc runSimulation (async_encoding=" << std::boolalpha << async_encoding << ") elapsed "
+              << std::fixed << std::setprecision(2) << elapsed_s << "s\n";
+
     return db_path;
 }
 

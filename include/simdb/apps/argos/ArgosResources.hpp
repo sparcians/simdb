@@ -336,7 +336,7 @@ private:
     ValidValue<size_t> heartbeat_;
     pipeline::Pipeline* pipeline_ = nullptr;
     Timestamp* timestamp_ = nullptr;
-    bool async_encoding_ = true;
+    bool async_encoding_ = false;
     std::unordered_set<uint16_t>* async_wire_sent_cids_ = nullptr;
 
     ConcurrentQueue<Notification> dummy_notif_head_;
