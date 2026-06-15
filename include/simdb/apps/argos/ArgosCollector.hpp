@@ -254,7 +254,7 @@ public:
 
         if (async_enc)
         {
-            pipeline->addStage<EncoderStage>("encoder", async_wire_sent_cids_);
+            pipeline->addStage<EncoderStage>("encoder", async_wire_sent_cids_, &async_encode_completion_queue_);
         }
         pipeline->addStage<Compressor>("compressor");
         pipeline->addStage<Writer>("writer");
@@ -267,11 +267,16 @@ public:
         pipeline->bind("compressor.output_queue", "writer.input_queue");
         pipeline->noMoreBindings();
 
+        if (async_enc)
+        {
+            resources_.getStagerResource().setAsyncWireSentCids(&async_wire_sent_cids_);
+            resources_.getStagerResource().setAsyncEncodeCompletionQueue(&async_encode_completion_queue_);
+        }
+
         resources_.setPipeline(pipeline);
 
         if (async_enc)
         {
-            resources_.getStagerResource().setAsyncWireSentCids(&async_wire_sent_cids_);
             pipeline_flusher_ = pipeline->createFlusher({"encoder", "compressor", "writer"});
         } else
         {
@@ -311,6 +316,7 @@ public:
         {
             pipeline_flusher_->flush();
         }
+        pipeline_stager_->drainAsyncEncodeCompletions();
     }
 
     void postTeardown() override
@@ -337,8 +343,10 @@ private:
     class EncoderStage : public pipeline::Stage
     {
     public:
-        explicit EncoderStage(std::unordered_set<uint16_t>& wire_sent_cids) :
-            wire_sent_cids_(wire_sent_cids)
+        EncoderStage(std::unordered_set<uint16_t>& wire_sent_cids,
+                     ConcurrentQueue<AsyncEncodeCompletion>* completion_queue) :
+            wire_sent_cids_(wire_sent_cids),
+            completion_queue_(completion_queue)
         {
             addInPort_<DeltaEncodingBatch>("input_queue", input_queue_);
             addOutPort_<QueueCollectionData>("output_queue", output_queue_);
@@ -359,8 +367,16 @@ private:
             for (const auto& work : batch.work)
             {
                 auto& wire_state = wire_state_by_cid_[work.cid];
-                auto wires = encodeCidWork(work, batch.sim_time, wire_state);
-                for (auto& entry : wires)
+                auto result = encodeCidWork(work, batch.sim_time, wire_state);
+                if (result.committed_active_anchor && work.stolen_chain_tail && completion_queue_ != nullptr)
+                {
+                    AsyncEncodeCompletion completion;
+                    completion.cid = work.cid;
+                    completion.tail = work.stolen_chain_tail;
+                    completion.release_through_full_anchor = result.release_through_full_anchor;
+                    completion_queue_->emplace(std::move(completion));
+                }
+                for (auto& entry : result.wires)
                 {
                     wire_sent_cids_.insert(work.cid);
                     to_send.entries.emplace_back(std::move(entry));
@@ -379,6 +395,7 @@ private:
         ConcurrentQueue<QueueCollectionData>* output_queue_ = nullptr;
         std::unordered_map<uint16_t, WireAccountingState> wire_state_by_cid_;
         std::unordered_set<uint16_t>& wire_sent_cids_;
+        ConcurrentQueue<AsyncEncodeCompletion>* completion_queue_ = nullptr;
     };
 
     class Compressor : public pipeline::Stage
@@ -568,6 +585,7 @@ private:
     ArgosResources resources_;
     PipelineStagerResource& pipeline_stager_{resources_.getStagerResource()};
     std::unordered_set<uint16_t> async_wire_sent_cids_;
+    ConcurrentQueue<AsyncEncodeCompletion> async_encode_completion_queue_;
     std::unique_ptr<pipeline::Flusher> pipeline_flusher_;
 };
 

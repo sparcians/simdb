@@ -145,6 +145,14 @@ public:
             }
         }
 
+        void drainAsyncEncodeCompletions()
+        {
+            if (resource_->stager_)
+            {
+                resource_->stager_->drainAsyncEncodeCompletions();
+            }
+        }
+
     private:
         PipelineStagerResource* resource_;
     };
@@ -192,6 +200,11 @@ public:
     bool asyncEncodingEnabled() const { return async_encoding_; }
 
     void setAsyncWireSentCids(std::unordered_set<uint16_t>* wire_sent_cids) { async_wire_sent_cids_ = wire_sent_cids; }
+
+    void setAsyncEncodeCompletionQueue(ConcurrentQueue<AsyncEncodeCompletion>* completion_queue)
+    {
+        async_encode_completion_queue_ = completion_queue;
+    }
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
@@ -320,7 +333,8 @@ private:
             }
 
             stager_ = std::make_shared<PipelineStager>(heartbeat_.getValue(), timestamp_, sync_head, async_head,
-                                                       async_encoding_, notif_head, dyn_field_head);
+                                                       async_encoding_, async_encode_completion_queue_, notif_head,
+                                                       dyn_field_head);
             applyPendingRegistrations_();
 
             Notification notif;
@@ -338,6 +352,7 @@ private:
     Timestamp* timestamp_ = nullptr;
     bool async_encoding_ = false;
     std::unordered_set<uint16_t>* async_wire_sent_cids_ = nullptr;
+    ConcurrentQueue<AsyncEncodeCompletion>* async_encode_completion_queue_ = nullptr;
 
     ConcurrentQueue<Notification> dummy_notif_head_;
 

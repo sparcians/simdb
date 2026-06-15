@@ -3,10 +3,8 @@
 #include "simdb/apps/argos/ArgosCollector.hpp"
 #include "simdb/utils/Compress.hpp"
 
-#include <chrono>
+#include <cstdlib>
 #include <filesystem>
-#include <iomanip>
-#include <iostream>
 #include <map>
 #include <random>
 #include <string>
@@ -18,8 +16,7 @@ namespace {
 
 constexpr size_t kHeartbeat = 3;
 constexpr size_t kContainerCapacity = 8;
-// Large run to exercise async encoding backlog (~11s total on typical dev hardware).
-constexpr uint64_t kRunTicks = 100'000;
+uint64_t kRunTicks = 100'000;
 constexpr uint64_t kSeed = 0xA5A5A5A5ULL;
 
 std::filesystem::path workDir()
@@ -80,10 +77,6 @@ std::filesystem::path runSimulation(const bool async_encoding)
     std::mt19937_64 rng(kSeed);
     std::uniform_int_distribution<int> roll(0, 99);
 
-    const auto tic = std::chrono::high_resolution_clock::now();
-    std::cout << "tic runSimulation (async_encoding=" << std::boolalpha << async_encoding << ", ticks=" << kRunTicks
-              << ")\n";
-
     while (++tick <= kRunTicks)
     {
         const int r = roll(rng);
@@ -113,11 +106,6 @@ std::filesystem::path runSimulation(const bool async_encoding)
     }
 
     app_mgrs.postSimLoopTeardown();
-
-    const auto toc = std::chrono::high_resolution_clock::now();
-    const auto elapsed_s = std::chrono::duration<double>(toc - tic).count();
-    std::cout << "toc runSimulation (async_encoding=" << std::boolalpha << async_encoding << ") elapsed "
-              << std::fixed << std::setprecision(2) << elapsed_s << "s\n";
 
     return db_path;
 }
@@ -198,8 +186,12 @@ void testSyncAndAsyncProduceIdenticalCollectionRecords()
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc > 1)
+    {
+        kRunTicks = std::strtoull(argv[1], nullptr, 10);
+    }
     testSyncAndAsyncProduceIdenticalCollectionRecords();
 
     REPORT_ERROR;

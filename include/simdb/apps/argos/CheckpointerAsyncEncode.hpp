@@ -86,6 +86,13 @@ private:
     ValidValue<uint64_t> last_disabled_wired_sim_time_;
 };
 
+struct EncodeCidResult
+{
+    std::vector<std::unique_ptr<CollectedData>> wires;
+    bool release_through_full_anchor = false;
+    bool committed_active_anchor = false;
+};
+
 namespace detail {
 
 template <typename CheckpointT>
@@ -100,29 +107,15 @@ inline CheckpointT* latestDataCheckpoint(CheckpointT* head)
 }
 
 template <typename CheckpointT>
-inline void cleanupSliceThrough(CheckpointT* anchor, Action action)
+inline EncodeCidResult emitDisabledWires(CheckpointT* head, uint16_t cid, uint64_t sim_time,
+                                         WireAccountingState& wire_state)
 {
-    if (!anchor)
-    {
-        return;
-    }
-    if (action == Action::FULL)
-    {
-        anchor->detachPrev();
-    }
-}
-
-template <typename CheckpointT>
-inline std::vector<std::unique_ptr<CollectedData>> emitDisabledWires(CheckpointT* head, uint16_t cid,
-                                                                      uint64_t sim_time,
-                                                                      WireAccountingState& wire_state)
-{
-    std::vector<std::unique_ptr<CollectedData>> out;
+    EncodeCidResult result;
     if (wire_state.needsDisabledPriming(sim_time))
     {
         if (auto* latest = latestDataCheckpoint(head))
         {
-            out.push_back(latest->encodeSnapshotForPipeline(cid));
+            result.wires.push_back(latest->encodeSnapshotForPipeline(cid));
             wire_state.recordWireSent(Action::FULL, sim_time);
         }
     }
@@ -130,13 +123,13 @@ inline std::vector<std::unique_ptr<CollectedData>> emitDisabledWires(CheckpointT
     auto encoded = std::make_unique<CollectedData>(cid);
     encoded->getBuffer().append(Action::DISABLED);
     wire_state.recordWireSent(Action::DISABLED, sim_time);
-    out.push_back(std::move(encoded));
-    return out;
+    result.wires.push_back(std::move(encoded));
+    return result;
 }
 
 template <typename CheckpointT>
-inline std::vector<std::unique_ptr<CollectedData>> encodeActive(CheckpointT* anchor, uint16_t cid, bool force_snapshot,
-                                                                 uint64_t sim_time, WireAccountingState& wire_state)
+inline EncodeCidResult encodeActive(CheckpointT* anchor, uint16_t cid, bool force_snapshot, uint64_t sim_time,
+                                    WireAccountingState& wire_state)
 {
     auto encoded = anchor->encodeForPipeline(cid, force_snapshot);
     if (!encoded)
@@ -147,22 +140,24 @@ inline std::vector<std::unique_ptr<CollectedData>> encodeActive(CheckpointT* anc
     const auto action = readEncodedAction(*encoded);
     if (action == Action::DISABLED)
     {
-        cleanupSliceThrough(anchor, action);
-        return emitDisabledWires(anchor, cid, sim_time, wire_state);
+        EncodeCidResult disabled = emitDisabledWires(anchor, cid, sim_time, wire_state);
+        disabled.committed_active_anchor = true;
+        return disabled;
     }
 
     wire_state.recordWireSent(action, sim_time);
-    cleanupSliceThrough(anchor, action);
-    std::vector<std::unique_ptr<CollectedData>> out;
-    out.push_back(std::move(encoded));
-    return out;
+    EncodeCidResult result;
+    result.committed_active_anchor = true;
+    result.release_through_full_anchor = (action == Action::FULL);
+    result.wires.push_back(std::move(encoded));
+    return result;
 }
 
 template <typename CheckpointT>
-inline std::vector<std::unique_ptr<CollectedData>> encodeContainerWork(const CidEncodeWork& work, uint64_t sim_time,
-                                                                       WireAccountingState& wire_state)
+inline EncodeCidResult encodeContainerWork(const CidEncodeWork& work, uint64_t sim_time,
+                                           WireAccountingState& wire_state)
 {
-    auto* head = static_cast<CheckpointT*>(work.slice_head.get());
+    auto* head = static_cast<CheckpointT*>(work.stolen_chain_tail.get());
     if (work.path == EncodePath::ActiveAnchor)
     {
         auto* anchor = static_cast<CheckpointT*>(work.anchor);
@@ -187,15 +182,14 @@ inline std::vector<std::unique_ptr<CollectedData>> encodeContainerWork(const Cid
 
     auto encoded = latest->encodeSnapshotForPipeline(work.cid);
     wire_state.recordWireSent(Action::FULL, sim_time);
-    std::vector<std::unique_ptr<CollectedData>> out;
-    out.push_back(std::move(encoded));
-    return out;
+    EncodeCidResult result;
+    result.wires.push_back(std::move(encoded));
+    return result;
 }
 
-inline std::vector<std::unique_ptr<CollectedData>> encodeScalarWork(const CidEncodeWork& work, uint64_t sim_time,
-                                                                    WireAccountingState& wire_state)
+inline EncodeCidResult encodeScalarWork(const CidEncodeWork& work, uint64_t sim_time, WireAccountingState& wire_state)
 {
-    auto* head = static_cast<ScalarCheckpoint*>(work.slice_head.get());
+    auto* head = static_cast<ScalarCheckpoint*>(work.stolen_chain_tail.get());
     if (work.path == EncodePath::ActiveAnchor)
     {
         auto* anchor = static_cast<ScalarCheckpoint*>(work.anchor);
@@ -220,15 +214,14 @@ inline std::vector<std::unique_ptr<CollectedData>> encodeScalarWork(const CidEnc
 
     auto encoded = latest->encodeSnapshotForPipeline(work.cid);
     wire_state.recordWireSent(Action::FULL, sim_time);
-    std::vector<std::unique_ptr<CollectedData>> out;
-    out.push_back(std::move(encoded));
-    return out;
+    EncodeCidResult result;
+    result.wires.push_back(std::move(encoded));
+    return result;
 }
 
 } // namespace detail
 
-inline std::vector<std::unique_ptr<CollectedData>> encodeCidWork(const CidEncodeWork& work, uint64_t sim_time,
-                                                                 WireAccountingState& wire_state)
+inline EncodeCidResult encodeCidWork(const CidEncodeWork& work, uint64_t sim_time, WireAccountingState& wire_state)
 {
     wire_state.ensureHeartbeat(work.heartbeat);
     switch (work.kind)
