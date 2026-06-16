@@ -4,8 +4,11 @@
 
 #include "simdb/apps/App.hpp"
 #include "simdb/apps/argos/ArgosResources.hpp"
+#include "simdb/apps/argos/Checkpointer.hpp"
 #include "simdb/apps/argos/Collectables.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
+#include "simdb/apps/argos/PipelineStagerInterface.hpp"
+#include "simdb/apps/argos/Timestamps.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/sqlite/Dump.hpp"
 #include "simdb/utils/Compress.hpp"
@@ -18,7 +21,7 @@ inline constexpr size_t DEFAULT_HEARTBEAT = 10;
 
 //! \class ArgosCollector
 //! \brief Main entry point into the Argos collection system.
-class ArgosCollector : public App
+class ArgosCollector : public App, public PipelineStagerInterface
 {
 public:
     //! Required by all SimDB apps
@@ -28,7 +31,6 @@ public:
         db_mgr_(db_mgr)
     {
         resources_.setDatabase(db_mgr);
-        resources_.setHeartbeat(DEFAULT_HEARTBEAT);
     }
 
     static void defineSchema(Schema& schema)
@@ -101,7 +103,6 @@ public:
         queue_max_sizes_tbl.unsetPrimaryKey();
 
         auto& notif_tbl = schema.addTable("Notifications");
-        notif_tbl.addColumn("SerializationCID", dt::int32_t);
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
         notif_tbl.addColumn("NotifType", dt::int32_t);
         notif_tbl.addColumn("NotifStr", dt::string_t);
@@ -125,7 +126,6 @@ public:
             throw DBException("Cannot use 0 for Argos collector heartbeat");
         }
         heartbeat_ = heartbeat;
-        resources_.setHeartbeat(heartbeat);
     }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
@@ -154,7 +154,6 @@ public:
             throw DBException("Cannot change timestamp object once created!");
         }
         timestamp_ = std::make_unique<Timestamp>(backpointer);
-        resources_.setTimestamp(timestamp_.get());
     }
 
     void timestampWith(uint64_t (*fn)())
@@ -164,7 +163,6 @@ public:
             throw DBException("Cannot change timestamp object once created!");
         }
         timestamp_ = std::make_unique<Timestamp>(fn);
-        resources_.setTimestamp(timestamp_.get());
     }
 
     void timestampWith(std::function<uint64_t()> fn)
@@ -174,7 +172,6 @@ public:
             throw DBException("Cannot change timestamp object once created!");
         }
         timestamp_ = std::make_unique<Timestamp>(fn);
-        resources_.setTimestamp(timestamp_.get());
     }
 
     //! TODO cnyce: Once the collection code from Sparta is moved to SimDB, change this
@@ -210,11 +207,11 @@ public:
     CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
                                                 const std::string& encoded_scalar_type)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setScalarDataType(encoded_scalar_type);
+        auto entry_point = std::make_unique<CollectionEntryPoint>(this);
+        encoded_dtypes_[entry_point->getID()] = encoded_scalar_type;
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
-        collectors_.emplace_back(std::move(entry_point));
-        return collectors_.back().get();
+        entry_points_.emplace_back(std::move(entry_point));
+        return entry_points_.back().get();
     }
 
     //! TODO cnyce: Once the collection code from Sparta is moved to SimDB, change this
@@ -228,31 +225,59 @@ public:
     CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
                                                    const std::string& encoded_container_type)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(&resources_);
-        entry_point->setContainerDataType(encoded_container_type);
+        auto entry_point = std::make_unique<CollectionEntryPoint>(this);
+        encoded_dtypes_[entry_point->getID()] = encoded_container_type;
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
-        collectors_.emplace_back(std::move(entry_point));
-        return collectors_.back().get();
+        entry_points_.emplace_back(std::move(entry_point));
+        return entry_points_.back().get();
     }
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() { return resources_.getTinyStringsResource().get(); }
 
-    safe_weak_ptr<PipelineStager> getStager() { return resources_.getStagerResource().get(); }
-
-    ArgosResources* getResources() { return &resources_; }
+    ArgosResources* getResources() override { return &resources_; }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
         auto pipeline = pipeline_mgr->createPipeline(NAME, this);
 
+        pipeline_stager_ = pipeline->addStage<PipelineStager>("stager", heartbeat_);
         pipeline->addStage<Compressor>("compressor");
         pipeline->addStage<Writer>("writer");
         pipeline->noMoreStages();
 
-        pipeline->bind("compressor.output_queue", "writer.input_queue");
+        pipeline->bind("stager.data_output_queue", "compressor.data_input_queue");
+        pipeline->bind("compressor.data_output_queue", "writer.data_input_queue");
         pipeline->noMoreBindings();
 
-        resources_.setPipeline(pipeline);
+        pipeline_head_ = pipeline->getInPortQueue<LedgerPtr>("stager.main_input_queue");
+        notif_head_ = pipeline->getInPortQueue<NotifEntry>("writer.notif_input_queue");
+
+        for (const auto& [cid, encoded_dtype] : encoded_dtypes_)
+        {
+            ContainerMeta meta;
+            if (extractContainerMeta_(encoded_dtype, meta))
+            {
+                pipeline_stager_->setContainerDataType(cid, meta.sparse, meta.capacity);
+            } else
+            {
+                pipeline_stager_->setScalarDataType(cid);
+            }
+        }
+
+        NotifEntry notif_entry;
+        while (pending_notif_entries_.try_pop(notif_entry))
+        {
+            notif_head_->emplace(std::move(notif_entry));
+        }
+
+        for (const auto& collector : entry_points_)
+        {
+            auto cid = collector->getID();
+            const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
+            pipeline_stager_->setCollectableClock(cid, getClockId_(clk_name));
+        }
+
+        is_live_ = true;
     }
 
     void postInit(int, char**) override
@@ -268,23 +293,66 @@ public:
         }
 
         auto ctn_inserter = db_mgr_->prepareINSERT(SQL_TABLE("CollectableTreeNodes"));
-        for (const auto& collector : collectors_)
+        for (const auto& collector : entry_points_)
         {
             auto cid = (int)collector->getID();
             const auto& full_path = std::get<0>(meta_by_cid_.at(cid));
             const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
             const auto clk_id = clk_ids.at(clk_name);
-            const auto dtype_name = collector->getEncodedCollectedType();
+            const auto dtype_name = encoded_dtypes_.at(cid);
             ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
-            pipeline_stager_->setCollectableClock(collector->getID(), getClockId_(clk_name));
         }
     }
 
-    void preTeardown() override { pipeline_stager_->sendCollectedDataToPipeline(); }
+    void stage(uint16_t cid, std::vector<char>&& scalar_bytes) override
+    {
+        assertLive_();
+        checkTimeAdvanced_();
+        ledger_->recordScalar(cid, std::move(scalar_bytes));
+    }
+
+    void stage(uint16_t cid, std::vector<std::vector<char>>&& contig_bin_bytes) override
+    {
+        assertLive_();
+        checkTimeAdvanced_();
+        ledger_->recordContig(cid, std::move(contig_bin_bytes));
+    }
+
+    void stage(uint16_t cid, std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes) override
+    {
+        assertLive_();
+        checkTimeAdvanced_();
+        ledger_->recordSparse(cid, std::move(sparse_bin_bytes));
+    }
+
+    void recordOpenChange(uint16_t cid, bool open) override
+    {
+        assertLive_();
+        checkTimeAdvanced_();
+        ledger_->recordOpenChange(cid, open);
+    }
+
+    void postNotif(const std::string& notif, NotifType type) override
+    {
+        NotifEntry entry(timestamp_.get(), notif, type);
+        auto notif_entries = is_live_ ? notif_head_ : &pending_notif_entries_;
+        notif_entries->emplace(std::move(entry));
+    }
+
+    void preTeardown() override
+    {
+        if (ledger_ && ledger_->hasEntries())
+        {
+            pipeline_head_->emplace(std::move(ledger_));
+        }
+    }
 
     void postTeardown() override
     {
-        resources_.writeMetaOnPostTeardown(db_mgr_);
+        if (pipeline_stager_)
+        {
+            pipeline_stager_->writeMetaOnPostTeardown(db_mgr_);
+        }
 
         if (verbose())
         {
@@ -303,13 +371,433 @@ public:
     }
 
 private:
+    struct ScalarEntry
+    {
+        uint16_t cid = 0;
+        std::vector<char> scalar_bytes;
+
+        ScalarEntry(uint16_t cid, std::vector<char>&& scalar_bytes) :
+            cid(cid),
+            scalar_bytes(std::move(scalar_bytes))
+        {
+        }
+
+        ScalarEntry() = default;
+        ScalarEntry(ScalarEntry&&) = default;
+        ScalarEntry& operator=(ScalarEntry&&) = default;
+    };
+
+    struct ContigEntry
+    {
+        uint16_t cid = 0;
+        std::vector<std::vector<char>> contig_bin_bytes;
+
+        ContigEntry(uint16_t cid, std::vector<std::vector<char>>&& contig_bin_bytes) :
+            cid(cid),
+            contig_bin_bytes(std::move(contig_bin_bytes))
+        {
+        }
+
+        ContigEntry() = default;
+        ContigEntry(ContigEntry&&) = default;
+        ContigEntry& operator=(ContigEntry&&) = default;
+    };
+
+    struct SparseEntry
+    {
+        uint16_t cid = 0;
+        std::map<uint16_t, std::vector<char>> sparse_bin_bytes;
+
+        SparseEntry(uint16_t cid, std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes) :
+            cid(cid),
+            sparse_bin_bytes(std::move(sparse_bin_bytes))
+        {
+        }
+
+        SparseEntry() = default;
+        SparseEntry(SparseEntry&&) = default;
+        SparseEntry& operator=(SparseEntry&&) = default;
+    };
+
+    struct NotifEntry
+    {
+        ValidValue<uint64_t> sim_time;
+        std::string notif;
+        NotifType type = NotifType::__INVALID__;
+
+        NotifEntry(const Timestamp* timestamp, const std::string& notif, NotifType type) :
+            notif(notif),
+            type(type)
+        {
+            if (timestamp)
+            {
+                sim_time = timestamp->getTime();
+            }
+        }
+
+        NotifEntry() = default;
+        NotifEntry(NotifEntry&&) = default;
+        NotifEntry& operator=(NotifEntry&&) = default;
+    };
+
+    ConcurrentQueue<NotifEntry>* notif_head_ = nullptr;
+    ConcurrentQueue<NotifEntry> pending_notif_entries_;
+
+    class Ledger
+    {
+    public:
+        Ledger(uint64_t sim_time, uint64_t window_id, uint64_t reserve_num_scalars = 0,
+               uint64_t reserve_num_contigs = 0, uint64_t reserve_num_sparses = 0) :
+            sim_time_(sim_time),
+            window_id_(window_id)
+        {
+            scalar_records_.reserve(reserve_num_scalars);
+            contig_records_.reserve(reserve_num_contigs);
+            sparse_records_.reserve(reserve_num_sparses);
+        }
+
+        Ledger(Ledger&&) = default;
+        Ledger(const Ledger&) = delete;
+
+        void recordScalar(uint16_t cid, std::vector<char>&& scalar_bytes)
+        {
+            scalar_records_.emplace_back(cid, std::move(scalar_bytes));
+        }
+
+        void recordContig(uint16_t cid, std::vector<std::vector<char>>&& contig_bytes)
+        {
+            contig_records_.emplace_back(cid, std::move(contig_bytes));
+        }
+
+        void recordSparse(uint16_t cid, std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes)
+        {
+            sparse_records_.emplace_back(cid, std::move(sparse_bin_bytes));
+        }
+
+        void recordOpenChange(uint16_t cid, bool open) { open_states_[cid] = open; }
+
+        uint64_t getSimTime() const { return sim_time_; }
+
+        uint64_t getWindowId() const { return window_id_; }
+
+        bool hasEntries() const
+        {
+            return !scalar_records_.empty() || !contig_records_.empty() || !sparse_records_.empty();
+        }
+
+        std::vector<ScalarEntry> releaseScalarEntries() { return std::move(scalar_records_); }
+
+        std::vector<ContigEntry> releaseContigEntries() { return std::move(contig_records_); }
+
+        std::vector<SparseEntry> releaseSparseEntries() { return std::move(sparse_records_); }
+
+        const std::unordered_map<uint16_t, bool>& getOpenStates() const { return open_states_; }
+
+    private:
+        uint64_t sim_time_ = 0;
+        uint64_t window_id_ = 0;
+        std::vector<ScalarEntry> scalar_records_;
+        std::vector<ContigEntry> contig_records_;
+        std::vector<SparseEntry> sparse_records_;
+        std::unordered_map<uint16_t, bool> open_states_;
+    };
+
+    using LedgerPtr = std::unique_ptr<Ledger>;
+    LedgerPtr ledger_;
+    ConcurrentQueue<LedgerPtr>* pipeline_head_ = nullptr;
+
+    class PipelineStager : public pipeline::Stage
+    {
+    public:
+        PipelineStager(size_t heartbeat) :
+            heartbeat_(heartbeat)
+        {
+            addInPort_<LedgerPtr>("main_input_queue", main_input_queue_);
+            addOutPort_<QueueCollectionData>("data_output_queue", data_output_queue_);
+        }
+
+        void setCollectableClock(uint16_t cid, uint32_t clock_id)
+        {
+            collectable_clock_ids_[cid] = clock_id;
+            clock_ids_.insert(clock_id);
+        }
+
+        void setScalarDataType(uint16_t cid)
+        {
+            checkpointers_[cid] = std::make_unique<ScalarCheckpointer>(heartbeat_);
+            ++num_scalars_;
+        }
+
+        void setContainerDataType(uint16_t cid, bool sparse, size_t capacity)
+        {
+            if (sparse)
+            {
+                checkpointers_[cid] = std::make_unique<SparseContainerCheckpointer>(heartbeat_, capacity);
+                ++num_sparses_;
+            } else
+            {
+                checkpointers_[cid] = std::make_unique<ContigContainerCheckpointer>(heartbeat_, capacity);
+                ++num_contigs_;
+            }
+        }
+
+        size_t getNumScalars() const { return num_scalars_; }
+
+        size_t getNumContigs() const { return num_contigs_; }
+
+        size_t getNumSparses() const { return num_sparses_; }
+
+        void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
+        {
+            writeShowInUI_(db_mgr);
+            writeQueueMaxSizes_(db_mgr);
+        }
+
+    private:
+        pipeline::PipelineAction run_(bool) override
+        {
+            auto action = pipeline::PipelineAction::SLEEP;
+
+            LedgerPtr ledger;
+            while (main_input_queue_->try_pop(ledger))
+            {
+                auto window_id = ledger->getWindowId();
+
+                auto scalars = ledger->releaseScalarEntries();
+                for (auto& scalar : scalars)
+                {
+                    auto cid = scalar.cid;
+                    auto data = std::move(scalar.scalar_bytes);
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
+                }
+
+                auto contigs = ledger->releaseContigEntries();
+                for (auto& contig : contigs)
+                {
+                    auto cid = contig.cid;
+                    auto data = std::move(contig.contig_bin_bytes);
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
+                    updateContainerMaxSize_(cid, getSize_(data));
+                }
+
+                auto sparses = ledger->releaseSparseEntries();
+                for (auto& sparse : sparses)
+                {
+                    auto cid = sparse.cid;
+                    auto data = std::move(sparse.sparse_bin_bytes);
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
+                    updateContainerMaxSize_(cid, getSize_(data));
+                }
+
+                for (const auto& [cid, open] : ledger->getOpenStates())
+                {
+                    checkpointers_.at(cid)->recordOpenChange(window_id, open);
+                }
+
+                QueueCollectionData to_send;
+                auto sim_time = ledger->getSimTime();
+                to_send.sim_time = sim_time;
+
+                const auto multi_clock = clock_ids_.size() > 1;
+                for (auto& [cid, checkpointer] : checkpointers_)
+                {
+                    if (multi_clock && !checkpointer->participatedInWindow(window_id))
+                    {
+                        continue;
+                    }
+
+                    auto wires = checkpointer->encodeForPipeline(window_id, sim_time, cid);
+                    for (auto& entry : wires)
+                    {
+                        wire_sent_cids_.insert(cid);
+                        to_send.entries.emplace_back(std::move(entry));
+                        if (const auto clk_it = collectable_clock_ids_.find(cid);
+                            clk_it != collectable_clock_ids_.end())
+                        {
+                            to_send.clock_ids.insert(clk_it->second);
+                        }
+                    }
+                }
+
+                if (!to_send.entries.empty())
+                {
+                    data_output_queue_->emplace(std::move(to_send));
+                }
+
+                action = pipeline::PipelineAction::PROCEED;
+            }
+
+            return action;
+        }
+
+        void updateContainerMaxSize_(uint16_t cid, size_t size)
+        {
+            auto it = container_max_sizes_.find(cid);
+            if (it == container_max_sizes_.end())
+            {
+                it = container_max_sizes_.emplace(cid, size).first;
+            } else
+            {
+                it->second = std::max(it->second, size);
+            }
+        }
+
+        static size_t getSize_(const std::vector<std::vector<char>>& contig_bin_bytes)
+        {
+            size_t size = 0;
+            for (const auto& bin_bytes : contig_bin_bytes)
+            {
+                if (!bin_bytes.empty())
+                {
+                    ++size;
+                } else
+                {
+                    break;
+                }
+            }
+            return size;
+        }
+
+        static size_t getSize_(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+        {
+            size_t size = 0;
+            for (const auto& [_, bin_bytes] : sparse_bin_bytes)
+            {
+                if (!bin_bytes.empty())
+                {
+                    ++size;
+                }
+            }
+            return size;
+        }
+
+        void writeShowInUI_(DatabaseManager* db_mgr) const
+        {
+            std::vector<int> valid_cids;
+            valid_cids.reserve(wire_sent_cids_.size());
+            for (const auto cid : wire_sent_cids_)
+            {
+                valid_cids.push_back(cid);
+            }
+
+            if (!valid_cids.empty())
+            {
+                std::ostringstream oss;
+                oss << "UPDATE CollectableTreeNodes SET ShowInUI=1 WHERE SerializationCID IN (";
+
+                bool comma = false;
+                for (const auto cid : valid_cids)
+                {
+                    if (comma)
+                    {
+                        oss << ",";
+                    }
+                    oss << cid;
+                    comma = true;
+                }
+                oss << ")";
+                db_mgr->EXECUTE(oss.str());
+            }
+
+            auto query = db_mgr->createQuery("CollectableTreeNodes");
+            query->addConstraintForInt("SerializationCID", SetConstraints::NOT_IN_SET, valid_cids);
+
+            struct CID_Info
+            {
+                std::string path;
+                std::string type;
+
+                CID_Info(const std::string& path, const std::string& type) :
+                    path(path),
+                    type(type)
+                {
+                }
+            };
+
+            std::string path;
+            query->select("FullPath", path);
+
+            std::string type;
+            query->select("TypeName", type);
+
+            std::vector<CID_Info> cid_infos;
+            auto results = query->getResultSet();
+            while (results.getNextRecord())
+            {
+                cid_infos.emplace_back(path, type);
+            }
+
+            if (!cid_infos.empty())
+            {
+                std::ostringstream oss;
+                oss << "No data was ever collected for the following collectables, and will not be shown in Argos:\n";
+                size_t leftcol_w = 0;
+                for (const auto& info : cid_infos)
+                {
+                    leftcol_w = std::max(leftcol_w, info.path.size());
+                }
+
+                leftcol_w += 12;
+                for (const auto& info : cid_infos)
+                {
+                    oss << std::left << std::setw(leftcol_w) << info.path;
+                    if (auto idx = info.type.find("_sparse"); idx != std::string::npos)
+                    {
+                        auto base_type = info.type.substr(0, idx);
+                        oss << "(Sparse container of '" << base_type << "')";
+                    } else if (auto idx = info.type.find("_contig"); idx != std::string::npos)
+                    {
+                        auto base_type = info.type.substr(0, idx);
+                        oss << "(Contig container of '" << base_type << "')";
+                    } else
+                    {
+                        oss << "(" << info.type << ")";
+                    }
+                    oss << "\n";
+                }
+
+                auto warning = oss.str();
+                warning.pop_back();
+
+                constexpr auto no_cid = 0;
+                db_mgr->INSERT(SQL_TABLE("Notifications"), SQL_COLUMNS("NotifStr", "NotifType"),
+                               SQL_VALUES(no_cid, warning, (int)NotifType::WARNING));
+            }
+        }
+
+        void writeQueueMaxSizes_(DatabaseManager* db_mgr) const
+        {
+            auto inserter = db_mgr->prepareINSERT(SQL_TABLE("QueueMaxSizes"));
+            for (const auto& [cid, max_size] : container_max_sizes_)
+            {
+                inserter->createRecordWithColValues((int)cid, (int)max_size);
+            }
+        }
+
+        const size_t heartbeat_;
+
+        ConcurrentQueue<LedgerPtr>* main_input_queue_ = nullptr;
+        ConcurrentQueue<QueueCollectionData>* data_output_queue_ = nullptr;
+
+        std::unordered_map<uint16_t, uint32_t> collectable_clock_ids_;
+        std::unordered_set<uint32_t> clock_ids_;
+        std::unordered_set<uint16_t> wire_sent_cids_;
+
+        std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
+        std::unordered_map<uint16_t, size_t> container_max_sizes_;
+
+        size_t num_scalars_ = 0;
+        size_t num_contigs_ = 0;
+        size_t num_sparses_ = 0;
+    };
+
     class Compressor : public pipeline::Stage
     {
     public:
         Compressor()
         {
-            addInPort_<QueueCollectionData>("input_queue", input_queue_);
-            addOutPort_<CompressedQueueCollectionData>("output_queue", output_queue_);
+            addInPort_<QueueCollectionData>("data_input_queue", input_queue_);
+            addOutPort_<CompressedQueueCollectionData>("data_output_queue", output_queue_);
         }
 
     private:
@@ -345,9 +833,8 @@ private:
     public:
         Writer()
         {
-            addInPort_<CompressedQueueCollectionData>("input_queue", input_queue_);
-            addInPort_<Notification>("notif_queue", notif_queue_);
-            addInPort_<DynamicFieldChanges>("dyn_field_queue", dyn_field_queue_);
+            addInPort_<CompressedQueueCollectionData>("data_input_queue", data_input_queue_);
+            addInPort_<NotifEntry>("notif_input_queue", notif_input_queue_);
         }
 
     private:
@@ -357,7 +844,7 @@ private:
             auto action = pipeline::PipelineAction::SLEEP;
 
             CompressedQueueCollectionData collection_at_time;
-            if (input_queue_->try_pop(collection_at_time))
+            if (data_input_queue_->try_pop(collection_at_time))
             {
                 auto db_mgr = getDatabaseManager_();
                 auto id = Timestamp::createTimestampInDatabase(db_mgr, collection_at_time.sim_time);
@@ -384,79 +871,89 @@ private:
             // reason why we use WHILE here instead of IF like above, and the
             // returned action is not set to PROCEED based on the availability
             // of new notifications.
-            Notification notification;
-            while (notif_queue_->try_pop(notification))
+            NotifEntry notif;
+            while (notif_input_queue_->try_pop(notif))
             {
                 auto inserter = getTableInserter_("Notifications");
 
-                const auto cid = notification.cid;
-                const auto& notif_str = notification.notif;
-                const auto notif_type = notification.type;
+                const auto& notif_str = notif.notif;
+                const auto notif_type = notif.type;
 
-                inserter->setColumnValue(0, (int)cid);
-                if (notification.sim_time.isValid())
+                if (notif.sim_time.isValid())
                 {
-                    inserter->setColumnValue(1, notification.sim_time.getValue());
+                    inserter->setColumnValue(0, notif.sim_time.getValue());
                 }
-                inserter->setColumnValue(2, (int)notif_type);
-                inserter->setColumnValue(3, notif_str);
+                inserter->setColumnValue(1, (int)notif_type);
+                inserter->setColumnValue(2, notif_str);
                 inserter->createRecord();
-            }
-
-            DynamicFieldChanges dyn_field_changes;
-            while (dyn_field_queue_->try_pop(dyn_field_changes))
-            {
-                const auto cid = dyn_field_changes.cid;
-                const auto& field_names = dyn_field_changes.field_names;
-                const auto& field_types = dyn_field_changes.field_types;
-                assert(field_names.size() == field_types.size());
-                assert(!field_names.empty());
-                assert(cid != 0);
-
-                if (serialized_dyn_field_cids_.insert(cid).second)
-                {
-                    bool comma = false;
-                    std::ostringstream concat_field_names;
-                    for (const auto& field_name : field_names)
-                    {
-                        if (comma)
-                        {
-                            concat_field_names << ",";
-                        }
-                        comma = true;
-                        concat_field_names << field_name;
-                    }
-
-                    auto inserter = getTableInserter_("DynamicFieldNames");
-                    inserter->createRecordWithColValues((int)cid, concat_field_names.str());
-                }
-
-                bool comma = false;
-                std::ostringstream concat_field_types;
-                for (const auto field_type : field_types)
-                {
-                    if (comma)
-                    {
-                        concat_field_types << ",";
-                    }
-                    comma = true;
-                    concat_field_types << field_type;
-                }
-
-                auto inserter = getTableInserter_("DynamicFieldTypeChanges");
-                inserter->createRecordWithColValues((int)cid, concat_field_types.str(), dyn_field_changes.sim_time);
-
-                action = pipeline::PipelineAction::PROCEED;
             }
 
             return action;
         }
 
-        ConcurrentQueue<CompressedQueueCollectionData>* input_queue_ = nullptr;
-        ConcurrentQueue<Notification>* notif_queue_ = nullptr;
-        ConcurrentQueue<DynamicFieldChanges>* dyn_field_queue_ = nullptr;
-        std::unordered_set<uint16_t> serialized_dyn_field_cids_;
+        ConcurrentQueue<CompressedQueueCollectionData>* data_input_queue_ = nullptr;
+        ConcurrentQueue<NotifEntry>* notif_input_queue_ = nullptr;
     };
+
+    void assertLive_() const
+    {
+        if (!is_live_ || !timestamp_)
+        {
+            throw DBException("API call cannot be made until pipeline is open and "
+                              "timestampWith() was called");
+        }
+    }
+
+    void checkTimeAdvanced_()
+    {
+        assertLive_();
+
+        auto current_time = timestamp_->getTime();
+        if (!current_stage_time_.isValid())
+        {
+            current_stage_time_ = current_time;
+            ledger_ = std::make_unique<Ledger>(current_time, current_window_id_++, pipeline_stager_->getNumScalars(),
+                                               pipeline_stager_->getNumContigs(), pipeline_stager_->getNumSparses());
+        } else if (current_time < current_stage_time_.getValue())
+        {
+            throw DBException("Time must be monotonically increasing");
+        } else if (current_time > current_stage_time_.getValue())
+        {
+            if (ledger_)
+            {
+                pipeline_head_->emplace(std::move(ledger_));
+
+                ledger_ =
+                    std::make_unique<Ledger>(current_time, current_window_id_++, pipeline_stager_->getNumScalars(),
+                                             pipeline_stager_->getNumContigs(), pipeline_stager_->getNumSparses());
+            }
+
+            current_stage_time_ = current_time;
+        }
+    }
+
+    struct ContainerMeta
+    {
+        ValidValue<bool> sparse;
+        ValidValue<size_t> capacity;
+    };
+
+    bool extractContainerMeta_(const std::string& encoded_dtype, ContainerMeta& meta)
+    {
+        auto extract_capacity = [&](const bool contig) {
+            std::string lookfor = contig ? "_contig_capacity" : "_sparse_capacity";
+            if (auto idx = encoded_dtype.find(lookfor); idx != std::string::npos)
+            {
+                auto capacity = std::stoi(encoded_dtype.substr(idx + lookfor.size()));
+                meta.sparse = !contig;
+                meta.capacity = capacity;
+                return true;
+            }
+            return false;
+        };
+
+        return extract_capacity(true) || extract_capacity(false);
+    }
 
     DatabaseManager* const db_mgr_;
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
@@ -486,9 +983,13 @@ private:
     }
 
     std::unique_ptr<Timestamp> timestamp_;
-    std::vector<std::unique_ptr<CollectionEntryPoint>> collectors_;
+    std::vector<std::unique_ptr<CollectionEntryPoint>> entry_points_;
+    std::unordered_map<uint16_t, std::string> encoded_dtypes_;
+    PipelineStager* pipeline_stager_ = nullptr;
+    ValidValue<uint64_t> current_stage_time_;
+    uint64_t current_window_id_ = 1;
     ArgosResources resources_;
-    PipelineStagerResource& pipeline_stager_{resources_.getStagerResource()};
+    bool is_live_ = false;
 };
 
 } // namespace simdb::argos

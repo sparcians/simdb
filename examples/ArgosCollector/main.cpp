@@ -244,25 +244,25 @@ void TestScalarCollection()
     {
         auto ival = randomInt<int32_t>();
         auto bytes = getScalarBytes(ival, tiny_strings.get());
-        int_collector->setScalarValueBytes(bytes);
+        int_collector->setScalarValueBytes(std::move(bytes));
 
         auto sval = randomString();
         bytes = getScalarBytes(sval, tiny_strings.get());
-        string_collector->setScalarValueBytes(bytes);
+        string_collector->setScalarValueBytes(std::move(bytes));
 
         auto eval = randomEnum();
         bytes = getScalarBytes(eval, tiny_strings.get());
-        enum_collector->setScalarValueBytes(bytes);
+        enum_collector->setScalarValueBytes(std::move(bytes));
 
         auto bval = randomBool();
         bytes = getScalarBytes(bval, tiny_strings.get());
-        bool_collector->setScalarValueBytes(bytes);
+        bool_collector->setScalarValueBytes(std::move(bytes));
 
         auto inst = Instruction::genRandom();
         std::vector<char> inst_bytes;
         simdb::argos::StreamBuffer buf(inst_bytes, tiny_strings);
         inst->writeToBuffer(buf);
-        struct_collector->setScalarValueBytes(inst_bytes);
+        struct_collector->setScalarValueBytes(std::move(inst_bytes));
     }
 
     // Finalize...
@@ -326,7 +326,7 @@ template <bool Sparse> void TestInstQueueContainerCollection()
                 queue[i]->writeToBuffer(buf);
                 sparse_bin_bytes.emplace(static_cast<uint16_t>(i), std::move(bytes));
             }
-            queue_collector->setSparseContainerBinBytes(sparse_bin_bytes);
+            queue_collector->setSparseContainerBinBytes(std::move(sparse_bin_bytes));
         } else
         {
             std::vector<std::vector<char>> contig_bin_bytes;
@@ -337,7 +337,7 @@ template <bool Sparse> void TestInstQueueContainerCollection()
                 simdb::argos::StreamBuffer buf(bytes, tiny_strings);
                 queue[i]->writeToBuffer(buf);
             }
-            queue_collector->setContigContainerBinBytes(contig_bin_bytes);
+            queue_collector->setContigContainerBinBytes(std::move(contig_bin_bytes));
         }
     }
 

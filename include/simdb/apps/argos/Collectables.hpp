@@ -4,6 +4,7 @@
 
 #include "simdb/apps/argos/ArgosResources.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
+#include "simdb/apps/argos/PipelineStagerInterface.hpp"
 #include "simdb/utils/Demangle.hpp"
 #include "simdb/utils/TinyStrings.hpp"
 #include "simdb/utils/TypeTraits.hpp"
@@ -18,35 +19,14 @@ namespace simdb::argos {
 class CollectionEntryPoint
 {
 public:
-    CollectionEntryPoint(ArgosResources* resource_container) :
-        stager_(resource_container->getStagerResource()),
-        tiny_strings_(resource_container->getTinyStringsResource())
+    CollectionEntryPoint(PipelineStagerInterface* stager_interface) :
+        tiny_strings_(stager_interface->getResources()->getTinyStringsResource()),
+        stager_interface_(stager_interface)
     {
     }
 
     /// Get the unique ID for this collection point.
     uint16_t getID() const { return cid_; }
-
-    /// Enable collection
-    void enable()
-    {
-        if (!enabled_)
-        {
-            // TODO cnyce: handle initial value on first enable()
-            enabled_ = true;
-            stager_->onEnabledChanged(getID(), enabled_);
-        }
-    }
-
-    /// Disable collection
-    void disable()
-    {
-        if (enabled_)
-        {
-            enabled_ = false;
-            stager_->onEnabledChanged(getID(), enabled_);
-        }
-    }
 
     /// Suppress heartbeat re-emission of previously seen bytes.
     void quiet()
@@ -54,7 +34,7 @@ public:
         if (!quiet_)
         {
             quiet_ = true;
-            stager_->onQuietChanged(getID(), quiet_);
+            stager_interface_->recordOpenChange(getID(), quiet_);
         }
     }
 
@@ -64,7 +44,7 @@ public:
         if (quiet_)
         {
             quiet_ = false;
-            stager_->onQuietChanged(getID(), quiet_);
+            stager_interface_->recordOpenChange(getID(), quiet_);
         }
     }
 
@@ -74,85 +54,39 @@ public:
     /// Check whether heartbeat re-emission is suppressed.
     bool quieted() const { return quiet_; }
 
-    /// Add a timestamped warning/error/msg which applies to this collectable.
-    /// All of these will be visible in the Argos UI. These are purely for
-    /// the user's benefit; Argos doesn't do anything with them but give
-    /// a modal dialog of these notifications. These are never printed to
-    /// stdout/stderr.
-    void postNotif(const std::string& notif, NotifType type) { stager_->postNotif(getID(), notif, type); }
-
-    void postWarning(const std::string& warning) { postNotif(warning, NotifType::WARNING); }
-
-    void postError(const std::string& error) { postNotif(error, NotifType::ERROR); }
-
-    void postMessage(const std::string& msg) { postNotif(msg, NotifType::MESSAGE); }
-
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs() { nextCID_() = 0; }
 
     safe_weak_ptr<TinyStrings<>> getTinyStrings() const { return tiny_strings_.get(); }
-
-    /// TODO cnyce: Remove this method when Sparta collection code is moved to SimDB.
-    /// We can figure this out using <T> only.
-    void setScalarDataType(const std::string& dtype)
-    {
-        assert(collectable_type_name_.empty());
-        collectable_type_name_ = dtype;
-        stager_->setScalarType(getID());
-    }
-
-    /// TODO cnyce: Remove this method when Sparta collection code is moved to SimDB.
-    /// We can figure this out using <T> only.
-    void setContainerDataType(const std::string& encoded_container_type)
-    {
-        assert(collectable_type_name_.empty());
-        collectable_type_name_ = encoded_container_type;
-
-        size_t pos = encoded_container_type.find_last_not_of("0123456789");
-        auto capacity = std::stoi(encoded_container_type.substr(pos + 1));
-        assert(capacity <= UINT16_MAX);
-
-        auto sparse = encoded_container_type.find("_sparse") != std::string::npos;
-        stager_->setContainerType(getID(), sparse, capacity);
-    }
-
-    std::string getEncodedCollectedType() const
-    {
-        if (collectable_type_name_.empty())
-        {
-            throw DBException("Collectable data type name never set!");
-        }
-        return collectable_type_name_;
-    }
 
     //! NOTE: We only have setScalarValueBytes(), setContigContainerBinBytes()
     //! and setSparseContainerBinBytes() all together in one class temporarily
     //! until Sparta/SimDB collection is merged. When the entry point class
     //! becomes a template, these will collapse to one method (<T> decides
     //! the input data structure).
-    void setScalarValueBytes(const std::vector<char>& bytes)
+    void setScalarValueBytes(std::vector<char>&& scalar_bytes)
     {
         if (enabled())
         {
-            stager_->stage(getID(), bytes);
+            stager_interface_->stage(getID(), std::move(scalar_bytes));
         }
     }
 
     //! \see setScalarValueBytes
-    void setContigContainerBinBytes(const std::vector<std::vector<char>>& contig_bin_bytes)
+    void setContigContainerBinBytes(std::vector<std::vector<char>>&& contig_bin_bytes)
     {
         if (enabled())
         {
-            stager_->stage(getID(), contig_bin_bytes);
+            stager_interface_->stage(getID(), std::move(contig_bin_bytes));
         }
     }
 
     //! \see setScalarValueBytes
-    void setSparseContainerBinBytes(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+    void setSparseContainerBinBytes(std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes)
     {
         if (enabled())
         {
-            stager_->stage(getID(), sparse_bin_bytes);
+            stager_interface_->stage(getID(), std::move(sparse_bin_bytes));
         }
     }
 
@@ -179,8 +113,8 @@ private:
     bool quiet_ = false;
 
     std::string collectable_type_name_;
-    PipelineStagerResource& stager_;
     TinyStringsResource& tiny_strings_;
+    PipelineStagerInterface* const stager_interface_;
 };
 
 } // namespace simdb::argos

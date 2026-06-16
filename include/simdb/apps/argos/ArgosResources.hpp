@@ -3,8 +3,6 @@
 #pragma once
 
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
-#include "simdb/apps/argos/PipelineStager.hpp"
-#include "simdb/pipeline/Pipeline.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TinyStrings.hpp"
@@ -13,59 +11,9 @@
 #include <random>
 #include <unordered_set>
 
-//! There are collection classes that require things like DatabaseManager,
-//! collection heartbeat, etc. in order to be instantiated. We cannot know
-//! ahead of time all the ways in which these ctor args will become available
-//! for all simulations / unit tests. One simulation could do this:
-//!
-//!   - set the heartbeat value
-//!   - set the timestamp backpointer
-//!   - create the DatabaseManager         (now TinyStrings can be created)
-//!   - open pipelines                     (now PipelineStager can be created)
-//!
-//! But a unit test might do this:
-//!
-//!   - set the timestamp backpointer
-//!   - set the heartbeat value
-//!   - never create the DatabaseManager
-//!   - never open pipelines
-//!
-//! In the unit test, we would never have a DatabaseManager, so we would
-//! never have a TinyStrings (whose ctor takes a DatabaseManager).
-//!
-//! The classes below provide a way for Argos collection to freely use temporary
-//! resources like TinyStrings and PipelineStager until all required ctor args
-//! have been set, then the "live" resources like TinyStrings are created and
-//! pre-populated with any information gathered while the temporary objects
-//! were being used.
-
 namespace simdb::argos {
 
 class ArgosResources;
-
-//! For lazy creation of resources that require the pipeline heartbeat
-class HeartbeatResource
-{
-public:
-    explicit HeartbeatResource(ArgosResources* resource_container);
-    virtual void setHeartbeat(size_t heartbeat) = 0;
-};
-
-//! For lazy creation of resources that require the Pipeline
-class PipelineResource
-{
-public:
-    explicit PipelineResource(ArgosResources* resource_container);
-    virtual void setPipeline(pipeline::Pipeline* pipeline) = 0;
-};
-
-//! For lazy creation of resources that require the Timestamp
-class TimestampResource
-{
-public:
-    explicit TimestampResource(ArgosResources* resource_container);
-    virtual void setTimestamp(Timestamp* timestamp) = 0;
-};
 
 //! For lazy creation of resources that require the DatabaseManager
 class DatabaseResource
@@ -73,253 +21,6 @@ class DatabaseResource
 public:
     explicit DatabaseResource(ArgosResources* resource_container);
     virtual void setDatabase(DatabaseManager* db_mgr) = 0;
-};
-
-//! \class PipelineStagerResource
-//! \brief Used to lazily create a live PipelineStager only when the
-//! heartbeat is known, the pipeline has been created, and the timestamp
-//! has been created. Those three bits of information can be set in any
-//! order. If one or more is never set, as in the case of some unit tests,
-//! then type registrations and notifications are buffered until realization.
-class PipelineStagerResource : public HeartbeatResource, public PipelineResource, public TimestampResource
-{
-public:
-    class StagerProxy
-    {
-    public:
-        explicit StagerProxy(PipelineStagerResource* resource) :
-            resource_(resource)
-        {
-        }
-
-        void setScalarType(uint16_t cid) { resource_->setScalarType_(cid); }
-
-        void setContainerType(uint16_t cid, bool sparse, size_t capacity)
-        {
-            resource_->setContainerType_(cid, sparse, capacity);
-        }
-
-        void setCollectableClock(uint16_t cid, uint32_t clock_id) { resource_->setCollectableClock_(cid, clock_id); }
-
-        void stage(uint16_t cid, const std::vector<char>& scalar_bytes)
-        {
-            resource_->liveStager_().stage(cid, scalar_bytes);
-        }
-
-        void stage(uint16_t cid, const std::vector<std::vector<char>>& contig_bin_bytes)
-        {
-            resource_->liveStager_().stage(cid, contig_bin_bytes);
-        }
-
-        void stage(uint16_t cid, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
-        {
-            resource_->liveStager_().stage(cid, sparse_bin_bytes);
-        }
-
-        void onEnabledChanged(uint16_t cid, bool enabled)
-        {
-            if (resource_->stager_)
-            {
-                resource_->stager_->onEnabledChanged(cid, enabled);
-            }
-        }
-
-        void onQuietChanged(uint16_t cid, bool quiet)
-        {
-            if (resource_->stager_)
-            {
-                resource_->stager_->onQuietChanged(cid, quiet);
-            }
-        }
-
-        void postNotif(uint16_t cid, const std::string& notif, NotifType type)
-        {
-            resource_->postNotif_(cid, notif, type);
-        }
-
-        void sendCollectedDataToPipeline()
-        {
-            if (resource_->stager_)
-            {
-                resource_->stager_->sendCollectedDataToPipeline();
-            }
-        }
-
-    private:
-        PipelineStagerResource* resource_;
-    };
-
-    explicit PipelineStagerResource(ArgosResources* resource_container) :
-        HeartbeatResource(resource_container),
-        PipelineResource(resource_container),
-        TimestampResource(resource_container),
-        proxy_(this)
-    {
-    }
-
-    void setHeartbeat(size_t heartbeat) override final
-    {
-        checkNotReady_();
-        heartbeat_ = heartbeat;
-        checkReady_();
-    }
-
-    void setPipeline(pipeline::Pipeline* pipeline) override final
-    {
-        checkNotReady_();
-        pipeline_ = pipeline;
-        checkReady_();
-    }
-
-    void setTimestamp(Timestamp* timestamp) override final
-    {
-        checkNotReady_();
-        timestamp_ = timestamp;
-        checkReady_();
-    }
-
-    //! Access the temporary/live stager proxy. DO NOT cache this raw pointer.
-    StagerProxy* operator->() const { return &proxy_; }
-
-    safe_weak_ptr<PipelineStager> get() const { return stager_; }
-
-    void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
-    {
-        if (stager_)
-        {
-            stager_->writeMetaOnPostTeardown(db_mgr);
-        } else
-        {
-            PipelineStager::writeMetaForSentCids(db_mgr, {});
-        }
-    }
-
-private:
-    void setScalarType_(uint16_t cid)
-    {
-        pending_scalar_cids_.insert(cid);
-        if (stager_)
-        {
-            stager_->setScalarType(cid);
-        }
-    }
-
-    void setContainerType_(uint16_t cid, bool sparse, size_t capacity)
-    {
-        if (sparse)
-        {
-            pending_sparse_capacities_[cid] = capacity;
-        } else
-        {
-            pending_contig_capacities_[cid] = capacity;
-        }
-        if (stager_)
-        {
-            stager_->setContainerType(cid, sparse, capacity);
-        }
-    }
-
-    void setCollectableClock_(uint16_t cid, uint32_t clock_id)
-    {
-        pending_clock_ids_[cid] = clock_id;
-        if (stager_)
-        {
-            stager_->setCollectableClock(cid, clock_id);
-        }
-    }
-
-    void postNotif_(uint16_t cid, const std::string& notif, NotifType type)
-    {
-        if (stager_)
-        {
-            stager_->postNotif(cid, notif, type);
-            return;
-        }
-
-        if (timestamp_)
-        {
-            Notification notification(cid, notif, type, timestamp_->getTime());
-            dummy_notif_head_.emplace(std::move(notification));
-        } else
-        {
-            Notification notification(cid, notif, type);
-            dummy_notif_head_.emplace(std::move(notification));
-        }
-    }
-
-    PipelineStager& liveStager_()
-    {
-        if (!stager_)
-        {
-            throw DBException("Pipeline stager not ready - heartbeat, timestamp, and pipeline must be set first");
-        }
-        return *stager_;
-    }
-
-    void applyPendingRegistrations_()
-    {
-        for (const auto cid : pending_scalar_cids_)
-        {
-            stager_->setScalarType(cid);
-        }
-        for (const auto& [cid, capacity] : pending_contig_capacities_)
-        {
-            stager_->setContainerType(cid, false, capacity);
-        }
-        for (const auto& [cid, capacity] : pending_sparse_capacities_)
-        {
-            stager_->setContainerType(cid, true, capacity);
-        }
-        for (const auto& [cid, clock_id] : pending_clock_ids_)
-        {
-            stager_->setCollectableClock(cid, clock_id);
-        }
-    }
-
-    void checkNotReady_()
-    {
-        if (realized_)
-        {
-            throw DBException("PipelineStager resource already created!");
-        }
-    }
-
-    void checkReady_()
-    {
-        if (!realized_ && heartbeat_.isValid() && pipeline_ && timestamp_)
-        {
-            auto pipeline_head = pipeline_->getInPortQueue<QueueCollectionData>("compressor.input_queue");
-            auto notif_head = pipeline_->getInPortQueue<Notification>("writer.notif_queue");
-            auto dyn_field_head = pipeline_->getInPortQueue<DynamicFieldChanges>("writer.dyn_field_queue");
-            stager_ = std::make_shared<PipelineStager>(heartbeat_.getValue(), timestamp_, pipeline_head, notif_head,
-                                                       dyn_field_head);
-            applyPendingRegistrations_();
-
-            Notification notif;
-            while (dummy_notif_head_.try_pop(notif))
-            {
-                stager_->postNotif(notif.cid, notif.notif, notif.type);
-            }
-
-            realized_ = true;
-        }
-    }
-
-    ValidValue<size_t> heartbeat_;
-    pipeline::Pipeline* pipeline_ = nullptr;
-    Timestamp* timestamp_ = nullptr;
-
-    ConcurrentQueue<Notification> dummy_notif_head_;
-
-    std::shared_ptr<PipelineStager> stager_;
-    bool realized_ = false;
-
-    std::unordered_set<uint16_t> pending_scalar_cids_;
-    std::unordered_map<uint16_t, size_t> pending_contig_capacities_;
-    std::unordered_map<uint16_t, size_t> pending_sparse_capacities_;
-    std::unordered_map<uint16_t, uint32_t> pending_clock_ids_;
-
-    mutable StagerProxy proxy_;
 };
 
 //! This class is used to manage the TinyStrings resource before/after the
@@ -370,31 +71,6 @@ private:
     DatabaseManager tmp_db_{makeTempFile_(), true};
     std::shared_ptr<TinyStrings<>> tiny_strings_{std::make_shared<TinyStrings<>>(&tmp_db_)};
     bool realized_ = false;
-};
-
-//! This class manages CollectedData resources before/after the live TinyStrings is created.
-class CollectedDataResource
-{
-public:
-    explicit CollectedDataResource(TinyStringsResource& tiny_strings) :
-        tiny_strings_(tiny_strings)
-    {
-    }
-
-    CollectedData& getFor(uint16_t cid)
-    {
-        auto& data = collected_data_map_[cid];
-        const auto live = tiny_strings_.get();
-        if (!data || data->usesExpiredTinyStrings(live))
-        {
-            data = std::make_unique<CollectedData>(cid, live);
-        }
-        return *data;
-    }
-
-private:
-    TinyStringsResource& tiny_strings_;
-    std::unordered_map<uint16_t, std::unique_ptr<CollectedData>> collected_data_map_;
 };
 
 //! This class allows us to track collected enum values (int) and their corresponding
@@ -488,45 +164,9 @@ class ArgosResources
 public:
     template <typename Resource> void addResource(Resource* resource)
     {
-        if constexpr (std::is_base_of<HeartbeatResource, Resource>::value)
-        {
-            heartbeat_resources_.push_back(resource);
-        }
-        if constexpr (std::is_base_of<PipelineResource, Resource>::value)
-        {
-            pipeline_resources_.push_back(resource);
-        }
-        if constexpr (std::is_base_of<TimestampResource, Resource>::value)
-        {
-            timestamp_resources_.push_back(resource);
-        }
         if constexpr (std::is_base_of<DatabaseResource, Resource>::value)
         {
             database_resources_.push_back(resource);
-        }
-    }
-
-    void setHeartbeat(size_t heartbeat)
-    {
-        for (auto r : heartbeat_resources_)
-        {
-            r->setHeartbeat(heartbeat);
-        }
-    }
-
-    void setPipeline(pipeline::Pipeline* pipeline)
-    {
-        for (auto r : pipeline_resources_)
-        {
-            r->setPipeline(pipeline);
-        }
-    }
-
-    void setTimestamp(Timestamp* timestamp)
-    {
-        for (auto r : timestamp_resources_)
-        {
-            r->setTimestamp(timestamp);
         }
     }
 
@@ -538,11 +178,7 @@ public:
         }
     }
 
-    PipelineStagerResource& getStagerResource() { return stager_resource_; }
-
     TinyStringsResource& getTinyStringsResource() { return tiny_strings_resource_; }
-
-    CollectedDataResource& getCollectedDataBuffersResource() { return collected_data_bufs_resource_; }
 
     EnumMapResource* getEnumMapResource() { return &enum_map_resource_; }
 
@@ -550,35 +186,13 @@ public:
     {
         tiny_strings_resource_->serialize();
         enum_map_resource_.serializeEnumMaps(db_mgr);
-        stager_resource_.writeMetaOnPostTeardown(db_mgr);
     }
 
 private:
-    std::vector<HeartbeatResource*> heartbeat_resources_;
-    std::vector<PipelineResource*> pipeline_resources_;
-    std::vector<TimestampResource*> timestamp_resources_;
     std::vector<DatabaseResource*> database_resources_;
-
-    PipelineStagerResource stager_resource_{this};
     TinyStringsResource tiny_strings_resource_{this};
-    CollectedDataResource collected_data_bufs_resource_{tiny_strings_resource_};
     EnumMapResource enum_map_resource_;
 };
-
-inline HeartbeatResource::HeartbeatResource(ArgosResources* resource_container)
-{
-    resource_container->addResource(this);
-}
-
-inline PipelineResource::PipelineResource(ArgosResources* resource_container)
-{
-    resource_container->addResource(this);
-}
-
-inline TimestampResource::TimestampResource(ArgosResources* resource_container)
-{
-    resource_container->addResource(this);
-}
 
 inline DatabaseResource::DatabaseResource(ArgosResources* resource_container)
 {

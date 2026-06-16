@@ -113,9 +113,7 @@ public:
         throw DBException("Not implemented");
     }
 
-    virtual void onEnabledChanged(uint64_t window_id, bool enabled) = 0;
-
-    virtual void onQuietChanged(uint64_t window_id, bool quiet) = 0;
+    virtual void recordOpenChange(uint64_t window_id, bool open) = 0;
 
     virtual std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                           uint16_t cid) = 0;
@@ -213,16 +211,14 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void onEnabledChanged(uint64_t window_id, bool enabled) override
+    void recordOpenChange(uint64_t window_id, bool open) override
     {
-        head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, enabled);
+        head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, open);
         if (!tail_)
         {
             tail_ = head_;
         }
     }
-
-    void onQuietChanged(uint64_t window_id, bool quiet) override { onEnabledChanged(window_id, quiet); }
 
     bool participatedInWindow(uint64_t window_id) const override
     {
@@ -353,16 +349,14 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void onEnabledChanged(uint64_t window_id, bool enabled) override
+    void recordOpenChange(uint64_t window_id, bool open) override
     {
-        head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, enabled);
+        head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, open);
         if (!tail_)
         {
             tail_ = head_;
         }
     }
-
-    void onQuietChanged(uint64_t window_id, bool quiet) override { onEnabledChanged(window_id, quiet); }
 
     bool participatedInWindow(uint64_t window_id) const override
     {
@@ -519,16 +513,14 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void onEnabledChanged(uint64_t window_id, bool enabled) override
+    void recordOpenChange(uint64_t window_id, bool open) override
     {
-        head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, enabled);
+        head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, open);
         if (!tail_)
         {
             tail_ = head_;
         }
     }
-
-    void onQuietChanged(uint64_t window_id, bool quiet) override { onEnabledChanged(window_id, quiet); }
 
     bool participatedInWindow(uint64_t window_id) const override
     {
