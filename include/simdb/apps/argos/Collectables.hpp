@@ -20,7 +20,7 @@ class CollectionEntryPoint
 {
 public:
     CollectionEntryPoint(PipelineStagerInterface* stager_interface) :
-        tiny_strings_(stager_interface->getResources()->getTinyStringsResource()),
+        tiny_strings_(stager_interface->getResources()->getTinyStrings()),
         stager_interface_(stager_interface)
     {
     }
@@ -57,7 +57,7 @@ public:
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs() { nextCID_() = 0; }
 
-    safe_weak_ptr<TinyStrings<>> getTinyStrings() const { return tiny_strings_.get(); }
+    TinyStrings<>* getTinyStrings() const { return tiny_strings_; }
 
     //! NOTE: We only have setScalarValueBytes(), setContigContainerBinBytes()
     //! and setSparseContainerBinBytes() all together in one class temporarily
@@ -113,7 +113,7 @@ private:
     bool quiet_ = false;
 
     std::string collectable_type_name_;
-    TinyStringsResource& tiny_strings_;
+    TinyStrings<>* tiny_strings_;
     PipelineStagerInterface* const stager_interface_;
 };
 

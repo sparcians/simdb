@@ -2,7 +2,11 @@
 
 #pragma once
 
+#include "simdb/apps/argos/PipelineDataTypes.hpp"
+
+#include <cstdint>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace simdb::argos {

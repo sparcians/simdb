@@ -7,15 +7,15 @@ class DirtyReasons(enum.Enum):
     TabAdded = 4
     TabRenamed = 5
     TabDeleted = 6
-    QueueUtilizDispQueueChanged = 10
-    TimeseriesPlotSettingsChanged = 11
-    QueueTableDispColsChanged = 12
-    QueueTableAutoColorizeChanged = 13
-    SchedulingLinesWidgetChanged = 14
-    SashPositionChanged = 15
-    WidgetRemoved = 16,
-    TrackedPacketChanged = 17
-    SummaryViewsWidgetChanged = 18
+    QueueUtilizDispQueueChanged = 7
+    TimeseriesPlotSettingsChanged = 8
+    QueueTableDispColsChanged = 9
+    QueueTableAutoColorizeChanged = 10
+    SchedulingLinesWidgetChanged = 11
+    SashPositionChanged = 12
+    WidgetRemoved = 13
+    TrackedPacketChanged = 14
+    SummaryViewsWidgetChanged = 15
 
 DIRTY_REASONS = {
     DirtyReasons.WidgetDropped: 'A widget was dropped onto the widget canvas',

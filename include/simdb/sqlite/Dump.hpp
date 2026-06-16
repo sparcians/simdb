@@ -4,6 +4,16 @@
 
 #include "simdb/sqlite/DatabaseManager.hpp"
 
+#include <algorithm>
+#include <deque>
+#include <iomanip>
+#include <iostream>
+#include <numeric>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <vector>
+
 namespace simdb {
 
 namespace detail {

@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 #include <string.h>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace simdb {

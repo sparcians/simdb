@@ -4,80 +4,20 @@
 
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
-#include "simdb/utils/SafeWeakPtr.hpp"
 #include "simdb/utils/TinyStrings.hpp"
-#include <filesystem>
+
+#include <map>
 #include <memory>
-#include <random>
-#include <unordered_set>
+#include <optional>
+#include <vector>
 
 namespace simdb::argos {
-
-class ArgosResources;
-
-//! For lazy creation of resources that require the DatabaseManager
-class DatabaseResource
-{
-public:
-    explicit DatabaseResource(ArgosResources* resource_container);
-    virtual void setDatabase(DatabaseManager* db_mgr) = 0;
-};
-
-//! This class is used to manage the TinyStrings resource before/after the
-//! DatabaseManager is first seen.
-class TinyStringsResource : public DatabaseResource
-{
-public:
-    explicit TinyStringsResource(ArgosResources* resource_container) :
-        DatabaseResource(resource_container)
-    {
-    }
-
-    void setDatabase(DatabaseManager* db_mgr) override final
-    {
-        if (realized_ && tiny_strings_->getDatabaseManager() != db_mgr)
-        {
-            throw DBException("TinyStrings resource already created!");
-        } else if (realized_)
-        {
-            return;
-        }
-
-        auto copy_from = tiny_strings_.get();
-        auto new_tiny_strings = std::make_shared<TinyStrings<>>(db_mgr, copy_from);
-        tiny_strings_ = std::move(new_tiny_strings);
-        realized_ = true;
-    }
-
-    //! Access the temporary/live TinyStrings. DO NOT cache this raw
-    //! pointer. If you accidentally cache the temporary TinyStrings,
-    //! you will see a crash if it gets reallocated to the live one.
-    TinyStrings<>* operator->() const { return get().operator->(); }
-
-    safe_weak_ptr<TinyStrings<>> get() const { return tiny_strings_; }
-
-    void serialize() { tiny_strings_->serialize(); }
-
-private:
-    static std::filesystem::path makeTempFile_()
-    {
-        const auto temp_dir = std::filesystem::temp_directory_path();
-        std::random_device rd;
-        std::mt19937_64 gen(rd());
-        std::uniform_int_distribution<uint64_t> dist;
-        return temp_dir / (std::to_string(dist(gen)) + ".db");
-    }
-
-    DatabaseManager tmp_db_{makeTempFile_(), true};
-    std::shared_ptr<TinyStrings<>> tiny_strings_{std::make_shared<TinyStrings<>>(&tmp_db_)};
-    bool realized_ = false;
-};
 
 //! This class allows us to track collected enum values (int) and their corresponding
 //! stringified values (operator<<) and store them in the database for the Argos UI
 //! to use. Note that enums without operator<< are just shown in Argos as their int
 //! values.
-class EnumMapResource
+class EnumInspector
 {
     class EnumMapBase
     {
@@ -181,41 +121,24 @@ private:
 class ArgosResources
 {
 public:
-    template <typename Resource> void addResource(Resource* resource)
+    explicit ArgosResources(TinyStrings<>* tiny_strings) :
+        tiny_strings_(tiny_strings)
     {
-        if constexpr (std::is_base_of<DatabaseResource, Resource>::value)
-        {
-            database_resources_.push_back(resource);
-        }
     }
 
-    void setDatabase(DatabaseManager* db_mgr)
-    {
-        for (auto r : database_resources_)
-        {
-            r->setDatabase(db_mgr);
-        }
-    }
+    TinyStrings<>* getTinyStrings() const { return tiny_strings_; }
 
-    TinyStringsResource& getTinyStringsResource() { return tiny_strings_resource_; }
-
-    EnumMapResource* getEnumMapResource() { return &enum_map_resource_; }
+    EnumInspector* getEnumInspector() { return &enum_map_resource_; }
 
     void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
     {
-        tiny_strings_resource_->serialize();
+        tiny_strings_->serialize(db_mgr);
         enum_map_resource_.serializeEnumMaps(db_mgr);
     }
 
 private:
-    std::vector<DatabaseResource*> database_resources_;
-    TinyStringsResource tiny_strings_resource_{this};
-    EnumMapResource enum_map_resource_;
+    TinyStrings<>* tiny_strings_;
+    EnumInspector enum_map_resource_;
 };
-
-inline DatabaseResource::DatabaseResource(ArgosResources* resource_container)
-{
-    resource_container->addResource(this);
-}
 
 } // namespace simdb::argos

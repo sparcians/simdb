@@ -12,7 +12,7 @@
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/sqlite/Dump.hpp"
 #include "simdb/utils/Compress.hpp"
-#include "simdb/utils/SafeWeakPtr.hpp"
+#include "simdb/utils/TinyStrings.hpp"
 #include "simdb/utils/TypeTraits.hpp"
 
 namespace simdb::argos {
@@ -30,7 +30,6 @@ public:
     ArgosCollector(DatabaseManager* db_mgr) :
         db_mgr_(db_mgr)
     {
-        resources_.setDatabase(db_mgr);
     }
 
     static void defineSchema(Schema& schema)
@@ -117,6 +116,10 @@ public:
         dyn_field_names_tbl.addColumn("SerializationCID", dt::int32_t);
         dyn_field_names_tbl.addColumn("FieldNames", dt::string_t);
         dyn_field_names_tbl.createIndexOn("SerializationCID");
+
+        auto& tiny_string_ids_tbl = schema.addTable("TinyStringIDs");
+        tiny_string_ids_tbl.addColumn("StringValue", dt::string_t);
+        tiny_string_ids_tbl.addColumn("StringID", dt::uint32_t);
     }
 
     void setHeartbeat(size_t heartbeat)
@@ -232,7 +235,7 @@ public:
         return entry_points_.back().get();
     }
 
-    safe_weak_ptr<TinyStrings<>> getTinyStrings() { return resources_.getTinyStringsResource().get(); }
+    TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
 
     ArgosResources* getResources() override { return &resources_; }
 
@@ -988,7 +991,8 @@ private:
     PipelineStager* pipeline_stager_ = nullptr;
     ValidValue<uint64_t> current_stage_time_;
     uint64_t current_window_id_ = 1;
-    ArgosResources resources_;
+    TinyStrings<> tiny_strings_;
+    ArgosResources resources_{&tiny_strings_};
     bool is_live_ = false;
 };
 

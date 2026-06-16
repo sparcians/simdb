@@ -243,19 +243,19 @@ void TestScalarCollection()
     while (++tick <= RUN_TICKS)
     {
         auto ival = randomInt<int32_t>();
-        auto bytes = getScalarBytes(ival, tiny_strings.get());
+        auto bytes = getScalarBytes(ival, tiny_strings);
         int_collector->setScalarValueBytes(std::move(bytes));
 
         auto sval = randomString();
-        bytes = getScalarBytes(sval, tiny_strings.get());
+        bytes = getScalarBytes(sval, tiny_strings);
         string_collector->setScalarValueBytes(std::move(bytes));
 
         auto eval = randomEnum();
-        bytes = getScalarBytes(eval, tiny_strings.get());
+        bytes = getScalarBytes(eval, tiny_strings);
         enum_collector->setScalarValueBytes(std::move(bytes));
 
         auto bval = randomBool();
-        bytes = getScalarBytes(bval, tiny_strings.get());
+        bytes = getScalarBytes(bval, tiny_strings);
         bool_collector->setScalarValueBytes(std::move(bytes));
 
         auto inst = Instruction::genRandom();

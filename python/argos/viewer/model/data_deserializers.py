@@ -231,6 +231,13 @@ class StringDeserializer:
 class EnumDeserializer:
     def __init__(self, val_deserializer, enum_map):
         self._val_deserializer = val_deserializer
+
+        self._enum_map = {}
+        for e_name, e_int in enum_map.items():
+            assert isinstance(e_name, str)
+            assert isinstance(e_int, int)
+            self._enum_map[e_int] = e_name
+
         self._enum_map = {k:v for v,k in enum_map.items()}
 
     def GetNumBytes(self):
