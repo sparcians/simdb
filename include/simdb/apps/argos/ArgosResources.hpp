@@ -99,50 +99,69 @@ class EnumMapResource
     public:
         void inspect(E val)
         {
-            auto& s = enum_map_[val];
-            if (s.empty())
+            if (last_seen_ && *last_seen_ == val)
             {
-                std::ostringstream oss;
-                oss << val;
-                s = oss.str();
-                sparta_assert(!s.empty());
+                return;
             }
+
+            for (E seen : all_seen_)
+            {
+                if (seen == val)
+                {
+                    last_seen_ = val;
+                    return;
+                }
+            }
+
+            all_seen_.push_back(val);
+            last_seen_ = val;
         }
 
         void dumpEnumMap(DatabaseManager* db_mgr) const override final
         {
             using underlying_t = std::underlying_type_t<E>;
-            using DumpInt = std::conditional_t<std::is_signed_v<underlying_t>, int64_t, uint64_t>;
-            dumpEnumMap_<DumpInt>(db_mgr);
+            using dump_int_t = std::conditional_t<std::is_signed_v<underlying_t>, int64_t, uint64_t>;
+            using enum_map_t = std::map<dump_int_t, std::string>;
+
+            enum_map_t enum_map;
+            for (auto e : all_seen_)
+            {
+                std::ostringstream oss;
+                oss << e;
+                enum_map[static_cast<dump_int_t>(e)] = oss.str();
+            }
+
+            dumpEnumMap_(db_mgr, enum_map);
         }
 
     private:
-        template <typename IntType> void dumpEnumMap_(DatabaseManager* db_mgr) const
+        template <typename IntType>
+        void dumpEnumMap_(DatabaseManager* db_mgr, const std::map<IntType, std::string>& enum_map) const
         {
             constexpr auto table_name = std::is_signed_v<IntType> ? "SignedEnumMappings" : "UnsignedEnumMappings";
             auto inserter = db_mgr->prepareINSERT(SQL_TABLE(table_name));
 
             const auto enum_name = demangle_type<E>();
-            for (const auto& [enum_val, enum_str] : enum_map_)
+            for (const auto& [enum_val, enum_str] : enum_map)
             {
-                inserter->createRecordWithColValues(enum_name, enum_str, static_cast<IntType>(enum_val));
+                inserter->createRecordWithColValues(enum_name, enum_str, enum_val);
             }
         }
 
-        std::map<E, std::string> enum_map_;
+        std::vector<E> all_seen_;
+        std::optional<E> last_seen_;
     };
 
 public:
     template <typename E> std::enable_if_t<type_traits::has_ostream_operator_v<E>, void> inspect(E val)
     {
-        auto& enum_map = enum_maps_[simdb::demangle_type<E>()];
-        if (!enum_map)
-        {
-            enum_map = std::make_unique<EnumMap<E>>();
-        }
-        EnumMapBase* abstract_map = enum_map.get();
-        auto concrete_map = static_cast<EnumMap<E>*>(abstract_map);
-        concrete_map->inspect(val);
+        static EnumMap<E>* map = [this] {
+            auto& slot = enum_maps_[simdb::demangle_type<E>()];
+            if (!slot)
+                slot = std::make_unique<EnumMap<E>>();
+            return static_cast<EnumMap<E>*>(slot.get());
+        }();
+        map->inspect(val);
     }
 
     template <typename E> std::enable_if_t<!type_traits::has_ostream_operator_v<E>, void> inspect(E) {}

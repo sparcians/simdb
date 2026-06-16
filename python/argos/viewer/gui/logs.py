@@ -10,7 +10,7 @@ class CollectionLogs(scrolled.ScrolledPanel):
         self.simhier = frame.simhier
 
         cursor = frame.db.cursor()
-        cursor.execute("SELECT SerializationCID, NotifStr, NotifType, Timestamp "
+        cursor.execute("SELECT Timestamp, NotifStr, NotifType "
                        "FROM Notifications ORDER BY Timestamp ASC")
         rows = cursor.fetchall()
 
@@ -24,10 +24,9 @@ class CollectionLogs(scrolled.ScrolledPanel):
         grid = wx.GridBagSizer(vgap=2, hgap=10)
 
         row = 0
-        for cid, notif_str, notif_type, timestamp in rows:
+        for timestamp, notif_str, notif_type in rows:
             tick = str(timestamp) if timestamp is not None else '0'
             type_label = self.NOTIF_TYPE_LABELS.get(notif_type, str(notif_type))
-            path = paths_by_cid.get(cid)
 
             tick_text = wx.StaticText(self, label='Tick:{}'.format(int(tick)))
             tick_text.SetFont(mono10)
@@ -36,11 +35,6 @@ class CollectionLogs(scrolled.ScrolledPanel):
             type_text = wx.StaticText(self, label='Type:{}'.format(type_label))
             type_text.SetFont(mono10)
             grid.Add(type_text, pos=(row, 1))
-
-            if path is not None:
-                path_text = wx.StaticText(self, label='Path:{}'.format(path))
-                path_text.SetFont(mono10)
-                grid.Add(path_text, pos=(row, 2), flag=wx.EXPAND)
 
             body = wx.StaticText(self, label=notif_str)
             body.SetFont(mono10)

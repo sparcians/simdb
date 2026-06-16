@@ -353,6 +353,7 @@ public:
         {
             pipeline_stager_->writeMetaOnPostTeardown(db_mgr_);
         }
+        resources_.writeMetaOnPostTeardown(db_mgr_);
 
         if (verbose())
         {
@@ -759,9 +760,8 @@ private:
                 auto warning = oss.str();
                 warning.pop_back();
 
-                constexpr auto no_cid = 0;
                 db_mgr->INSERT(SQL_TABLE("Notifications"), SQL_COLUMNS("NotifStr", "NotifType"),
-                               SQL_VALUES(no_cid, warning, (int)NotifType::WARNING));
+                               SQL_VALUES(warning, (int)NotifType::WARNING));
             }
         }
 
