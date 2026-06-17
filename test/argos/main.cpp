@@ -819,6 +819,16 @@ public:
         contig[bin_idx] = deserializeBinValue(payload, strings_);
     }
 
+    void handleContigContainerMultiSwap(argos_test::BlobContext& context, const std::vector<uint16_t>& indices,
+                                        const std::vector<std::vector<char>>& payloads) override
+    {
+        assert(indices.size() == payloads.size());
+        for (size_t i = 0; i < indices.size(); ++i)
+        {
+            handleContigContainerSwap(context, indices[i], payloads[i]);
+        }
+    }
+
     void handleContigContainerArrival(argos_test::BlobContext& context, const std::vector<char>& payload) override
     {
         contigAt_(context.current_cid).push_back(deserializeBinValue(payload, strings_));
@@ -840,6 +850,21 @@ public:
         handleContigContainerArrival(context, payload);
     }
 
+    void handleContigContainerMimo(argos_test::BlobContext& context, uint8_t depart_count, uint8_t arrive_count,
+                                   const std::vector<std::vector<char>>& arrive_payloads) override
+    {
+        (void)arrive_count;
+        for (uint8_t i = 0; i < depart_count; ++i)
+        {
+            (void)i;
+            handleContigContainerDeparture(context);
+        }
+        for (const auto& payload : arrive_payloads)
+        {
+            handleContigContainerArrival(context, payload);
+        }
+    }
+
     void handleSparseContainerClosed(argos_test::BlobContext& context) override
     {
         values_by_cid_.erase(context.current_cid);
@@ -859,9 +884,34 @@ public:
         sparseAt_(context.current_cid)[bin_idx] = deserializeBinValue(payload, strings_);
     }
 
+    void handleSparseContainerMultiSwap(argos_test::BlobContext& context, const std::vector<uint16_t>& indices,
+                                        const std::vector<std::vector<char>>& payloads) override
+    {
+        assert(indices.size() == payloads.size());
+        for (size_t i = 0; i < indices.size(); ++i)
+        {
+            handleSparseContainerExchangedBin(context, indices[i], payloads[i]);
+        }
+    }
+
     void handleSparseContainerRemovedBin(argos_test::BlobContext& context, uint16_t bin_idx) override
     {
         sparseAt_(context.current_cid).erase(bin_idx);
+    }
+
+    void handleSparseContainerAddedBin(argos_test::BlobContext& context, uint16_t bin_idx,
+                                       const std::vector<char>& payload) override
+    {
+        sparseAt_(context.current_cid)[bin_idx] = deserializeBinValue(payload, strings_);
+    }
+
+    void handleSparseContainerMultiRemovedBins(argos_test::BlobContext& context,
+                                               const std::vector<uint16_t>& indices) override
+    {
+        for (const auto bin_idx : indices)
+        {
+            handleSparseContainerRemovedBin(context, bin_idx);
+        }
     }
 
     const std::unordered_map<uint16_t, CollectableValue>& getValuesByCid() const { return values_by_cid_; }

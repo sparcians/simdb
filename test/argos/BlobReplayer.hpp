@@ -87,15 +87,23 @@ public:
     virtual void handleContigContainerCarried(BlobContext&) {}
     virtual void handleContigContainerFullDump(BlobContext&, const std::vector<std::vector<char>>&) {}
     virtual void handleContigContainerSwap(BlobContext&, uint16_t, const std::vector<char>&) {}
+    virtual void handleContigContainerMultiSwap(BlobContext&, const std::vector<uint16_t>&,
+                                                const std::vector<std::vector<char>>&) {}
     virtual void handleContigContainerArrival(BlobContext&, const std::vector<char>&) {}
     virtual void handleContigContainerDeparture(BlobContext&) {}
     virtual void handleContigContainerBookends(BlobContext&, const std::vector<char>&) {}
+    virtual void handleContigContainerMimo(BlobContext&, uint8_t /*depart_count*/, uint8_t /*arrive_count*/,
+                                           const std::vector<std::vector<char>>&) {}
 
     virtual void handleSparseContainerClosed(BlobContext&) {}
     virtual void handleSparseContainerCarried(BlobContext&) {}
     virtual void handleSparseContainerFullDump(BlobContext&, const std::map<uint16_t, std::vector<char>>&) {}
     virtual void handleSparseContainerExchangedBin(BlobContext&, uint16_t, const std::vector<char>&) {}
+    virtual void handleSparseContainerMultiSwap(BlobContext&, const std::vector<uint16_t>&,
+                                                const std::vector<std::vector<char>>&) {}
     virtual void handleSparseContainerRemovedBin(BlobContext&, uint16_t) {}
+    virtual void handleSparseContainerAddedBin(BlobContext&, uint16_t, const std::vector<char>&) {}
+    virtual void handleSparseContainerMultiRemovedBins(BlobContext&, const std::vector<uint16_t>&) {}
 
     virtual void snapshotTick(BlobContext&) {}
 };
@@ -266,26 +274,56 @@ inline HandlerStep handleContigContainerAction(BlobResources& resources, BlobCon
         resources.handler.handleContigContainerFullDump(context, bins);
         break;
     }
-    case Action::CONTIG_CONTAINER_SWAP:
+    case Action::CONTAINER_SWAP:
     {
         const auto bin_idx = resources.buf->read<uint16_t>();
         auto payload = resources.deserialize_bin(context.current_cid, *resources.buf);
         resources.handler.handleContigContainerSwap(context, bin_idx, payload);
         break;
     }
-    case Action::CONTIG_CONTAINER_ARRIVE:
+    case Action::CONTAINER_MULTI_SWAP:
+    {
+        const auto count = resources.buf->read<uint8_t>();
+        std::vector<uint16_t> indices;
+        std::vector<std::vector<char>> payloads;
+        indices.reserve(count);
+        payloads.reserve(count);
+        for (uint8_t i = 0; i < count; ++i)
+        {
+            (void)i;
+            indices.push_back(resources.buf->read<uint16_t>());
+            payloads.push_back(resources.deserialize_bin(context.current_cid, *resources.buf));
+        }
+        resources.handler.handleContigContainerMultiSwap(context, indices, payloads);
+        break;
+    }
+    case Action::CONTIG_ARRIVE:
     {
         auto payload = resources.deserialize_bin(context.current_cid, *resources.buf);
         resources.handler.handleContigContainerArrival(context, payload);
         break;
     }
-    case Action::CONTIG_CONTAINER_DEPART:
+    case Action::CONTIG_DEPART:
         resources.handler.handleContigContainerDeparture(context);
         break;
-    case Action::CONTIG_CONTAINER_BOOKENDS:
+    case Action::CONTIG_BOOKENDS:
     {
         auto payload = resources.deserialize_bin(context.current_cid, *resources.buf);
         resources.handler.handleContigContainerBookends(context, payload);
+        break;
+    }
+    case Action::CONTIG_MIMO:
+    {
+        const auto depart_count = resources.buf->read<uint8_t>();
+        const auto arrive_count = resources.buf->read<uint8_t>();
+        std::vector<std::vector<char>> arrive_payloads;
+        arrive_payloads.reserve(arrive_count);
+        for (uint8_t i = 0; i < arrive_count; ++i)
+        {
+            (void)i;
+            arrive_payloads.push_back(resources.deserialize_bin(context.current_cid, *resources.buf));
+        }
+        resources.handler.handleContigContainerMimo(context, depart_count, arrive_count, arrive_payloads);
         break;
     }
     default:
@@ -319,17 +357,53 @@ inline HandlerStep handleSparseContainerAction(BlobResources& resources, BlobCon
         resources.handler.handleSparseContainerFullDump(context, bins);
         break;
     }
-    case Action::SPARSE_CONTAINER_SWAP:
+    case Action::CONTAINER_SWAP:
     {
         const auto bin_idx = resources.buf->read<uint16_t>();
         auto payload = resources.deserialize_bin(context.current_cid, *resources.buf);
         resources.handler.handleSparseContainerExchangedBin(context, bin_idx, payload);
         break;
     }
-    case Action::SPARSE_CONTAINER_REMOVE:
+    case Action::CONTAINER_MULTI_SWAP:
+    {
+        const auto count = resources.buf->read<uint8_t>();
+        std::vector<uint16_t> indices;
+        std::vector<std::vector<char>> payloads;
+        indices.reserve(count);
+        payloads.reserve(count);
+        for (uint8_t i = 0; i < count; ++i)
+        {
+            (void)i;
+            indices.push_back(resources.buf->read<uint16_t>());
+            payloads.push_back(resources.deserialize_bin(context.current_cid, *resources.buf));
+        }
+        resources.handler.handleSparseContainerMultiSwap(context, indices, payloads);
+        break;
+    }
+    case Action::SPARSE_REMOVE:
     {
         const auto bin_idx = resources.buf->read<uint16_t>();
         resources.handler.handleSparseContainerRemovedBin(context, bin_idx);
+        break;
+    }
+    case Action::SPARSE_ADD:
+    {
+        const auto bin_idx = resources.buf->read<uint16_t>();
+        auto payload = resources.deserialize_bin(context.current_cid, *resources.buf);
+        resources.handler.handleSparseContainerAddedBin(context, bin_idx, payload);
+        break;
+    }
+    case Action::SPARSE_MULTI_REMOVE:
+    {
+        const auto count = resources.buf->read<uint8_t>();
+        std::vector<uint16_t> indices;
+        indices.reserve(count);
+        for (uint8_t i = 0; i < count; ++i)
+        {
+            (void)i;
+            indices.push_back(resources.buf->read<uint16_t>());
+        }
+        resources.handler.handleSparseContainerMultiRemovedBins(context, indices);
         break;
     }
     default:

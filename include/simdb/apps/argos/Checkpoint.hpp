@@ -15,20 +15,29 @@ namespace simdb::argos {
 //!   [uint16_t cid]     // collectable ID
 //!   [uint8_t action]   // encoding
 enum class Action : uint8_t {
-    // Common to all collected types
-    CLOSED = 0,
-    FULL,
-    CARRY,
+    // Tier 1: 0x00–0x0F — lifecycle / common (scalars + all collectables)
+    CLOSED = 0x00,
+    FULL = 0x01,
+    CARRY = 0x02,
+    // 0x03–0x0F reserved
 
-    // Specific to contiguous containers
-    CONTIG_CONTAINER_SWAP,
-    CONTIG_CONTAINER_ARRIVE,
-    CONTIG_CONTAINER_DEPART,
-    CONTIG_CONTAINER_BOOKENDS,
+    // Tier 2: 0x10–0x1F — any-container (identical wire for contig & sparse)
+    CONTAINER_SWAP = 0x10,
+    CONTAINER_MULTI_SWAP = 0x11,
+    // 0x12–0x1F reserved
 
-    // Specific to sparse containers
-    SPARSE_CONTAINER_SWAP,
-    SPARSE_CONTAINER_REMOVE
+    // Tier 3: 0x20–0x2F — contig-specific (FIFO queue semantics)
+    CONTIG_ARRIVE = 0x20,
+    CONTIG_DEPART = 0x21,
+    CONTIG_BOOKENDS = 0x22,
+    CONTIG_MIMO = 0x23,
+    // 0x24–0x2F reserved
+
+    // Tier 4: 0x30–0x3F — sparse-specific (explicit bin indices)
+    SPARSE_REMOVE = 0x30,
+    SPARSE_ADD = 0x31,
+    SPARSE_MULTI_REMOVE = 0x32,
+    // 0x33–0x3F reserved (SPARSE_BATCH future)
 };
 
 //! \class CollectableCheckpoint
@@ -294,13 +303,17 @@ private:
         case ContigDeltaKind::CARRY:
             return Action::CARRY;
         case ContigDeltaKind::SWAP:
-            return Action::CONTIG_CONTAINER_SWAP;
+            return Action::CONTAINER_SWAP;
+        case ContigDeltaKind::MULTI_SWAP:
+            return Action::CONTAINER_MULTI_SWAP;
         case ContigDeltaKind::ARRIVE:
-            return Action::CONTIG_CONTAINER_ARRIVE;
+            return Action::CONTIG_ARRIVE;
         case ContigDeltaKind::DEPART:
-            return Action::CONTIG_CONTAINER_DEPART;
+            return Action::CONTIG_DEPART;
         case ContigDeltaKind::BOOKENDS:
-            return Action::CONTIG_CONTAINER_BOOKENDS;
+            return Action::CONTIG_BOOKENDS;
+        case ContigDeltaKind::MIMO:
+            return Action::CONTIG_MIMO;
         case ContigDeltaKind::FULL:
             break;
         }
@@ -344,16 +357,42 @@ private:
         const auto action = contigActionFromKind_(classification.kind);
         buf.append(action);
 
-        if (action == Action::CONTIG_CONTAINER_SWAP)
+        switch (action)
         {
+        case Action::CONTAINER_SWAP:
             assert(classification.swap_index.isValid());
             assert(!classification.payload.empty());
             buf.append(classification.swap_index.getValue());
             buf.append(classification.payload);
-        } else if (action == Action::CONTIG_CONTAINER_ARRIVE || action == Action::CONTIG_CONTAINER_BOOKENDS)
-        {
+            break;
+        case Action::CONTAINER_MULTI_SWAP:
+            assert(classification.swap_indices.size() >= 2);
+            assert(classification.swap_indices.size() == classification.swap_payloads.size());
+            buf.append(static_cast<uint8_t>(classification.swap_indices.size()));
+            for (size_t i = 0; i < classification.swap_indices.size(); ++i)
+            {
+                buf.append(classification.swap_indices[i]);
+                buf.append(classification.swap_payloads[i]);
+            }
+            break;
+        case Action::CONTIG_ARRIVE:
+        case Action::CONTIG_BOOKENDS:
             assert(!classification.payload.empty());
             buf.append(classification.payload);
+            break;
+        case Action::CONTIG_MIMO:
+            buf.append(classification.depart_count);
+            buf.append(classification.arrive_count);
+            for (const auto& arrive_payload : classification.arrive_payloads)
+            {
+                buf.append(arrive_payload);
+            }
+            break;
+        case Action::CONTIG_DEPART:
+        case Action::CARRY:
+            break;
+        default:
+            throw DBException("Unexpected contig delta action");
         }
 
         return encoded;
@@ -454,9 +493,15 @@ private:
         case SparseDeltaKind::CARRY:
             return Action::CARRY;
         case SparseDeltaKind::SWAP:
-            return Action::SPARSE_CONTAINER_SWAP;
+            return Action::CONTAINER_SWAP;
+        case SparseDeltaKind::MULTI_SWAP:
+            return Action::CONTAINER_MULTI_SWAP;
         case SparseDeltaKind::REMOVE:
-            return Action::SPARSE_CONTAINER_REMOVE;
+            return Action::SPARSE_REMOVE;
+        case SparseDeltaKind::ADD:
+            return Action::SPARSE_ADD;
+        case SparseDeltaKind::MULTI_REMOVE:
+            return Action::SPARSE_MULTI_REMOVE;
         case SparseDeltaKind::FULL:
             break;
         }
@@ -467,7 +512,7 @@ private:
 
     static void appendSparseBins_(StreamBuffer& buf, const std::map<uint16_t, std::vector<char>>& bins)
     {
-        const auto size = countSparseElements_(bins);
+        const auto size = countSparseElements(bins);
         buf.append(size);
         for (const auto& [bin_idx, bin_bytes] : bins)
         {
@@ -504,16 +549,46 @@ private:
         const auto action = sparseActionFromKind_(classification.kind);
         buf.append(action);
 
-        if (action == Action::SPARSE_CONTAINER_SWAP)
+        switch (action)
         {
+        case Action::CONTAINER_SWAP:
             assert(classification.bin_index.isValid());
             assert(!classification.payload.empty());
             buf.append(classification.bin_index.getValue());
             buf.append(classification.payload);
-        } else if (action == Action::SPARSE_CONTAINER_REMOVE)
-        {
+            break;
+        case Action::CONTAINER_MULTI_SWAP:
+            assert(classification.bin_indices.size() >= 2);
+            assert(classification.bin_indices.size() == classification.payloads.size());
+            buf.append(static_cast<uint8_t>(classification.bin_indices.size()));
+            for (size_t i = 0; i < classification.bin_indices.size(); ++i)
+            {
+                buf.append(classification.bin_indices[i]);
+                buf.append(classification.payloads[i]);
+            }
+            break;
+        case Action::SPARSE_REMOVE:
             assert(classification.bin_index.isValid());
             buf.append(classification.bin_index.getValue());
+            break;
+        case Action::SPARSE_ADD:
+            assert(classification.bin_index.isValid());
+            assert(!classification.payload.empty());
+            buf.append(classification.bin_index.getValue());
+            buf.append(classification.payload);
+            break;
+        case Action::SPARSE_MULTI_REMOVE:
+            assert(classification.bin_indices.size() >= 2);
+            buf.append(static_cast<uint8_t>(classification.bin_indices.size()));
+            for (const auto idx : classification.bin_indices)
+            {
+                buf.append(idx);
+            }
+            break;
+        case Action::CARRY:
+            break;
+        default:
+            throw DBException("Unexpected sparse delta action");
         }
 
         return encoded;

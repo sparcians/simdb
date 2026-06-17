@@ -49,6 +49,9 @@ class BlobHandler:
     @abstractmethod
     def HandleSparseContainerRemovedBin(self, context, bin_idx): pass
 
+    @abstractmethod
+    def HandleSparseContainerAddedBin(self, context, bin_idx, bin_deserialized): pass
+
     # Called by the blob iterator after each blob (tick) has been fully
     # processed. Handlers that track per-tick state can override this.
     def SnapshotTick(self, context): pass
@@ -99,6 +102,9 @@ class SmokeTestHandler(BlobHandler):
 
     def HandleSparseContainerRemovedBin(self, context, bin_idx):
         print(f'At tick {context.current_tick}, sparse container cid {context.current_cid} removed bin {bin_idx}')
+
+    def HandleSparseContainerAddedBin(self, context, bin_idx, bin_deserialized):
+        print(f'At tick {context.current_tick}, sparse container cid {context.current_cid} added bin {bin_idx}')
 
 # Blob handler for extracting collected values/structs/containers
 class DataExtractionHandler(BlobHandler):
@@ -174,6 +180,11 @@ class DataExtractionHandler(BlobHandler):
 
     def HandleSparseContainerRemovedBin(self, context, bin_idx):
         self.HandleSparseContainerExchangedBin(context, bin_idx, None)
+
+    def HandleSparseContainerAddedBin(self, context, bin_idx, bin_deserialized):
+        if context.current_cid in self._values_by_cid:
+            assert bin_idx < len(self._values_by_cid[context.current_cid])
+            self._values_by_cid[context.current_cid][bin_idx] = bin_deserialized
 
     def SnapshotTick(self, context):
         if self._snapshot_cids is None:

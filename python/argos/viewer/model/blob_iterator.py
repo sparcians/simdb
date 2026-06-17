@@ -9,29 +9,29 @@ if _PACKAGE_ROOT not in sys.path:
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.blob_handlers import *
 
-class ActionInt:
-    NEXT: int = 0
+# Tier 1: 0x00–0x0F — lifecycle / common (scalars + all collectables)
+_CLOSED = 0x00
+_FULL = 0x01
+_CARRY = 0x02
+# 0x03–0x0F reserved
 
-    @classmethod
-    def Next(cls):
-        next = cls.NEXT
-        cls.NEXT += 1
-        return next
+# Tier 2: 0x10–0x1F — any-container (identical wire for contig & sparse)
+_CONTAINER_SWAP = 0x10
+_CONTAINER_MULTI_SWAP = 0x11
+# 0x12–0x1F reserved
 
-# Common actions applicable to all
-_CLOSED = ActionInt.Next()
-_FULL = ActionInt.Next()
-_CARRY = ActionInt.Next()
+# Tier 3: 0x20–0x2F — contig-specific (FIFO queue semantics)
+_CONTIG_ARRIVE = 0x20
+_CONTIG_DEPART = 0x21
+_CONTIG_BOOKENDS = 0x22
+_CONTIG_MIMO = 0x23
+# 0x24–0x2F reserved
 
-# Contig container-specific actions
-_CONTIG_CONTAINER_SWAP = ActionInt.Next()
-_CONTIG_CONTAINER_ARRIVE = ActionInt.Next()
-_CONTIG_CONTAINER_DEPART = ActionInt.Next()
-_CONTIG_CONTAINER_BOOKENDS = ActionInt.Next()
-
-# Sparse container-specific actions
-_SPARSE_CONTAINER_SWAP = ActionInt.Next()
-_SPARSE_CONTAINER_REMOVE = ActionInt.Next()
+# Tier 4: 0x30–0x3F — sparse-specific (explicit bin indices)
+_SPARSE_REMOVE = 0x30
+_SPARSE_ADD = 0x31
+_SPARSE_MULTI_REMOVE = 0x32
+# 0x33–0x3F reserved
 
 _VALID_COMMON_ACTIONS = {
     _CLOSED,
@@ -41,18 +41,24 @@ _VALID_COMMON_ACTIONS = {
 
 _VALID_SCALAR_ACTIONS = _VALID_COMMON_ACTIONS
 
-_VALID_CONTIG_CONTAINER_ACTIONS = _VALID_COMMON_ACTIONS | \
+_VALID_ANY_CONTAINER_ACTIONS = {
+    _CONTAINER_SWAP,
+    _CONTAINER_MULTI_SWAP,
+}
+
+_VALID_CONTIG_CONTAINER_ACTIONS = _VALID_COMMON_ACTIONS | _VALID_ANY_CONTAINER_ACTIONS | \
     {
-        _CONTIG_CONTAINER_SWAP,
-        _CONTIG_CONTAINER_ARRIVE,
-        _CONTIG_CONTAINER_DEPART,
-        _CONTIG_CONTAINER_BOOKENDS
+        _CONTIG_ARRIVE,
+        _CONTIG_DEPART,
+        _CONTIG_BOOKENDS,
+        _CONTIG_MIMO,
     }
 
-_VALID_SPARSE_CONTAINER_ACTIONS = _VALID_COMMON_ACTIONS | \
+_VALID_SPARSE_CONTAINER_ACTIONS = _VALID_COMMON_ACTIONS | _VALID_ANY_CONTAINER_ACTIONS | \
     {
-        _SPARSE_CONTAINER_SWAP,
-        _SPARSE_CONTAINER_REMOVE
+        _SPARSE_REMOVE,
+        _SPARSE_ADD,
+        _SPARSE_MULTI_REMOVE,
     }
 
 class Resources:
@@ -128,21 +134,37 @@ def HandleContigContainerAction(resources, context, action):
 
             resources.handler.HandleContigContainerFullDump(context, deserialized)
 
-        elif action == _CONTIG_CONTAINER_SWAP:
+        elif action == _CONTAINER_SWAP:
             bin_idx = resources.buf.Read('H')
             deserialized = type_deserializer.Deserialize(resources.buf)
             resources.handler.HandleContigContainerSwap(context, bin_idx, deserialized)
 
-        elif action == _CONTIG_CONTAINER_ARRIVE:
+        elif action == _CONTAINER_MULTI_SWAP:
+            count = resources.buf.Read('B')
+            for _ in range(count):
+                bin_idx = resources.buf.Read('H')
+                deserialized = type_deserializer.Deserialize(resources.buf)
+                resources.handler.HandleContigContainerSwap(context, bin_idx, deserialized)
+
+        elif action == _CONTIG_ARRIVE:
             deserialized = type_deserializer.Deserialize(resources.buf)
             resources.handler.HandleContigContainerArrival(context, deserialized)
 
-        elif action == _CONTIG_CONTAINER_DEPART:
+        elif action == _CONTIG_DEPART:
             resources.handler.HandleContigContainerDeparture(context)
 
-        elif action == _CONTIG_CONTAINER_BOOKENDS:
+        elif action == _CONTIG_BOOKENDS:
             deserialized = type_deserializer.Deserialize(resources.buf)
             resources.handler.HandleContigContainerBookends(context, deserialized)
+
+        elif action == _CONTIG_MIMO:
+            depart_count = resources.buf.Read('B')
+            arrive_count = resources.buf.Read('B')
+            for _ in range(depart_count):
+                resources.handler.HandleContigContainerDeparture(context)
+            for _ in range(arrive_count):
+                deserialized = type_deserializer.Deserialize(resources.buf)
+                resources.handler.HandleContigContainerArrival(context, deserialized)
 
     return HandleCID
 
@@ -166,14 +188,32 @@ def HandleSparseContainerAction(resources, context, action):
 
             resources.handler.HandleSparseContainerFullDump(context, deserialized)
 
-        elif action == _SPARSE_CONTAINER_SWAP:
+        elif action == _CONTAINER_SWAP:
             bin_idx = resources.buf.Read('H')
             bin_deserialized = type_deserializer.Deserialize(resources.buf)
             resources.handler.HandleSparseContainerExchangedBin(context, bin_idx, bin_deserialized)
 
-        elif action == _SPARSE_CONTAINER_REMOVE:
+        elif action == _CONTAINER_MULTI_SWAP:
+            count = resources.buf.Read('B')
+            for _ in range(count):
+                bin_idx = resources.buf.Read('H')
+                bin_deserialized = type_deserializer.Deserialize(resources.buf)
+                resources.handler.HandleSparseContainerExchangedBin(context, bin_idx, bin_deserialized)
+
+        elif action == _SPARSE_REMOVE:
             bin_idx = resources.buf.Read('H')
             resources.handler.HandleSparseContainerRemovedBin(context, bin_idx)
+
+        elif action == _SPARSE_ADD:
+            bin_idx = resources.buf.Read('H')
+            bin_deserialized = type_deserializer.Deserialize(resources.buf)
+            resources.handler.HandleSparseContainerAddedBin(context, bin_idx, bin_deserialized)
+
+        elif action == _SPARSE_MULTI_REMOVE:
+            count = resources.buf.Read('B')
+            for _ in range(count):
+                bin_idx = resources.buf.Read('H')
+                resources.handler.HandleSparseContainerRemovedBin(context, bin_idx)
 
     return HandleCID
 
