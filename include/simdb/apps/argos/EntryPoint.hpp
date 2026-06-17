@@ -29,12 +29,12 @@ public:
     uint16_t getID() const { return cid_; }
 
     /// Suppress heartbeat re-emission of previously seen bytes.
-    void close()
+    void closeRecord()
     {
         if (!closed_)
         {
             closed_ = true;
-            stager_interface_->recordLifecycleChange(getID(), closed_);
+            stager_interface_->closeRecord(getID(), closed_);
         }
     }
 

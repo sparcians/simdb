@@ -328,11 +328,11 @@ public:
         ledger_->recordSparse(cid, std::move(sparse_bin_bytes));
     }
 
-    void recordLifecycleChange(uint16_t cid, bool closed) override
+    void closeRecord(uint16_t cid, bool closed) override
     {
         assertLive_();
         checkTimeAdvanced_();
-        ledger_->recordLifecycleChange(cid, closed);
+        ledger_->closeRecord(cid, closed);
     }
 
     void postNotif(const std::string& notif, NotifType type) override
@@ -466,7 +466,7 @@ private:
 
                 for (const auto& [cid, closed] : ledger->getClosedStates())
                 {
-                    checkpointers_.at(cid)->recordLifecycleChange(window_id, closed);
+                    checkpointers_.at(cid)->closeRecord(window_id, closed);
                 }
 
                 QueueCollectionData to_send;

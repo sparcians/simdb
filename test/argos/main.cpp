@@ -544,7 +544,7 @@ bool maybeClose(LiveState& state, simdb::argos::EntryPoint* ep)
         state.logical.reset();
         state.closed = true;
         state.has_data = false;
-        ep->close();
+        ep->closeRecord();
         return true;
     }
     return false;
@@ -1339,11 +1339,11 @@ void testCloseCollectLifecycle()
     advance_to(150);
     stageCollectable(active, CollectableValue{int32_t{150}}, tiny_strings);
     advance_to(200);
-    ep->close();
+    ep->closeRecord();
     advance_to(250);
     stageCollectable(active, CollectableValue{int32_t{250}}, tiny_strings);
     advance_to(300);
-    ep->close();
+    ep->closeRecord();
     advance_to(350);
 
     app_mgrs.postSimLoopTeardown();

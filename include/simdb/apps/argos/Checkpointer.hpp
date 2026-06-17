@@ -113,7 +113,7 @@ public:
         throw DBException("Not implemented");
     }
 
-    virtual void recordLifecycleChange(uint64_t window_id, bool closed) = 0;
+    virtual void closeRecord(uint64_t window_id, bool closed) = 0;
 
     virtual std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                           uint16_t cid) = 0;
@@ -210,7 +210,7 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void recordLifecycleChange(uint64_t window_id, bool closed) override
+    void closeRecord(uint64_t window_id, bool closed) override
     {
         head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, closed);
         if (!tail_)
@@ -348,7 +348,7 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void recordLifecycleChange(uint64_t window_id, bool closed) override
+    void closeRecord(uint64_t window_id, bool closed) override
     {
         head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, closed);
         if (!tail_)
@@ -512,7 +512,7 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void recordLifecycleChange(uint64_t window_id, bool closed) override
+    void closeRecord(uint64_t window_id, bool closed) override
     {
         head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, closed);
         if (!tail_)

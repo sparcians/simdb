@@ -163,7 +163,7 @@ public:
         sparse_records_.emplace_back(cid, std::move(sparse_bin_bytes));
     }
 
-    void recordLifecycleChange(uint16_t cid, bool closed) { closed_states_[cid] = closed; }
+    void closeRecord(uint16_t cid, bool closed) { closed_states_[cid] = closed; }
 
     uint64_t getSimTime() const { return sim_time_; }
 
