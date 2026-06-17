@@ -777,10 +777,8 @@ class DataExtractionHandler : public argos_test::BlobHandler
 {
 public:
     explicit DataExtractionHandler(const std::unordered_map<uint16_t, std::string>& encoded_type_by_cid,
-                                   const std::unordered_map<uint16_t, std::string>& bin_element_type_by_cid,
                                    const std::unordered_map<uint32_t, std::string>& strings) :
         encoded_type_by_cid_(encoded_type_by_cid),
-        bin_element_type_by_cid_(bin_element_type_by_cid),
         strings_(strings)
     {
     }
@@ -912,7 +910,6 @@ private:
     }
 
     const std::unordered_map<uint16_t, std::string>& encoded_type_by_cid_;
-    const std::unordered_map<uint16_t, std::string>& bin_element_type_by_cid_;
     const std::unordered_map<uint32_t, std::string>& strings_;
     std::unordered_map<uint16_t, CollectableValue> values_by_cid_;
 };
@@ -922,11 +919,10 @@ class TruthValidationHandler final : public DataExtractionHandler
 {
 public:
     TruthValidationHandler(const std::unordered_map<uint16_t, std::string>& encoded_type_by_cid,
-                           const std::unordered_map<uint16_t, std::string>& bin_element_type_by_cid,
                            const std::unordered_map<uint32_t, std::string>& strings,
                            const std::map<uint64_t, std::map<uint16_t, CollectableValue>>& truth_by_tick,
                            const std::vector<uint16_t>& tracked_cids) :
-        DataExtractionHandler(encoded_type_by_cid, bin_element_type_by_cid, strings),
+        DataExtractionHandler(encoded_type_by_cid, strings),
         truth_by_tick_(truth_by_tick),
         tracked_cids_(tracked_cids)
     {
@@ -1189,8 +1185,7 @@ private:
             return buf.slice(start, buf.tell());
         };
 
-        TruthValidationHandler handler(encoded_type_by_cid_, bin_element_type_by_cid_, strings, truth_by_tick_,
-                                       tracked_cids_);
+        TruthValidationHandler handler(encoded_type_by_cid_, strings, truth_by_tick_, tracked_cids_);
         argos_test::BlobIterator iterator(db_mgr_, registry);
         iterator.iterate(handler, deserialize_bin);
     }
