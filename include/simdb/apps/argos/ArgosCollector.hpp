@@ -484,7 +484,7 @@ private:
                     auto wires = checkpointer->encodeForPipeline(window_id, sim_time, cid);
                     for (auto& entry : wires)
                     {
-                        wire_sent_cids_.insert(cid);
+                        cids_with_data_.insert(cid);
                         to_send.entries.emplace_back(std::move(entry));
                         if (const auto clk_it = collectable_clock_ids_.find(cid);
                             clk_it != collectable_clock_ids_.end())
@@ -510,7 +510,7 @@ private:
             auto it = container_max_sizes_.find(cid);
             if (it == container_max_sizes_.end())
             {
-                it = container_max_sizes_.emplace(cid, size).first;
+                container_max_sizes_.emplace(cid, size).first;
             } else
             {
                 it->second = std::max(it->second, size);
@@ -549,8 +549,8 @@ private:
         void writeShowInUI_(DatabaseManager* db_mgr) const
         {
             std::vector<int> valid_cids;
-            valid_cids.reserve(wire_sent_cids_.size());
-            for (const auto cid : wire_sent_cids_)
+            valid_cids.reserve(cids_with_data_.size());
+            for (const auto cid : cids_with_data_)
             {
                 valid_cids.push_back(cid);
             }
@@ -655,7 +655,7 @@ private:
 
         std::unordered_map<uint16_t, uint32_t> collectable_clock_ids_;
         std::unordered_set<uint32_t> clock_ids_;
-        std::unordered_set<uint16_t> wire_sent_cids_;
+        std::unordered_set<uint16_t> cids_with_data_;
 
         std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
         std::unordered_map<uint16_t, size_t> container_max_sizes_;
@@ -812,7 +812,7 @@ private:
         ValidValue<size_t> capacity;
     };
 
-    bool extractContainerMeta_(const std::string& encoded_dtype, ContainerMeta& meta)
+    static bool extractContainerMeta_(const std::string& encoded_dtype, ContainerMeta& meta)
     {
         auto extract_capacity = [&](const bool contig) {
             std::string lookfor = contig ? "_contig_capacity" : "_sparse_capacity";
@@ -829,6 +829,18 @@ private:
         return extract_capacity(true) || extract_capacity(false);
     }
 
+    uint32_t getClockId_(const std::string& clk_name) const
+    {
+        for (size_t i = 0; i < clocks_.size(); ++i)
+        {
+            if (std::get<0>(clocks_[i]) == clk_name)
+            {
+                return static_cast<uint32_t>(i + 1);
+            }
+        }
+        throw DBException("Unknown clock: ") << clk_name;
+    }
+
     DatabaseManager* const db_mgr_;
     size_t heartbeat_ = DEFAULT_HEARTBEAT;
 
@@ -843,18 +855,6 @@ private:
                                        std::string  // clk name
                                        >;
     std::map<uint16_t, CollectableMeta> meta_by_cid_;
-
-    uint32_t getClockId_(const std::string& clk_name) const
-    {
-        for (size_t i = 0; i < clocks_.size(); ++i)
-        {
-            if (std::get<0>(clocks_[i]) == clk_name)
-            {
-                return static_cast<uint32_t>(i + 1);
-            }
-        }
-        throw DBException("Unknown clock: ") << clk_name;
-    }
 
     std::unique_ptr<Timestamp> timestamp_;
     std::vector<std::unique_ptr<EntryPoint>> entry_points_;

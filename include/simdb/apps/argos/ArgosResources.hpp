@@ -19,6 +19,31 @@ namespace simdb::argos {
 //! values.
 class EnumInspector
 {
+public:
+    template <typename E> std::enable_if_t<type_traits::has_ostream_operator_v<E>, void> inspect(E val)
+    {
+        static EnumMap<E>* map = [this] {
+            auto& slot = enum_maps_[simdb::demangle_type<E>()];
+            if (!slot)
+            {
+                slot = std::make_unique<EnumMap<E>>();
+            }
+            return static_cast<EnumMap<E>*>(slot.get());
+        }();
+        map->inspect(val);
+    }
+
+    template <typename E> std::enable_if_t<!type_traits::has_ostream_operator_v<E>, void> inspect(E) {}
+
+    void serializeEnumMaps(DatabaseManager* db_mgr)
+    {
+        for (auto& [_, map] : enum_maps_)
+        {
+            map->dumpEnumMap(db_mgr);
+        }
+    }
+
+private:
     class EnumMapBase
     {
     public:
@@ -92,29 +117,6 @@ class EnumInspector
         std::optional<E> last_seen_;
     };
 
-public:
-    template <typename E> std::enable_if_t<type_traits::has_ostream_operator_v<E>, void> inspect(E val)
-    {
-        static EnumMap<E>* map = [this] {
-            auto& slot = enum_maps_[simdb::demangle_type<E>()];
-            if (!slot)
-                slot = std::make_unique<EnumMap<E>>();
-            return static_cast<EnumMap<E>*>(slot.get());
-        }();
-        map->inspect(val);
-    }
-
-    template <typename E> std::enable_if_t<!type_traits::has_ostream_operator_v<E>, void> inspect(E) {}
-
-    void serializeEnumMaps(DatabaseManager* db_mgr)
-    {
-        for (auto& [_, map] : enum_maps_)
-        {
-            map->dumpEnumMap(db_mgr);
-        }
-    }
-
-private:
     std::unordered_map<std::string, std::unique_ptr<EnumMapBase>> enum_maps_;
 };
 

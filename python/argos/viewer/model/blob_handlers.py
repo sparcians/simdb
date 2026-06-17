@@ -206,16 +206,6 @@ class DataExtractionHandler(BlobHandler):
         cid = self._ResolveCID(ident)
         return cid in self._values_by_cid
 
-    def _ResolveCID(self, ident):
-        if isinstance(ident, str):
-            try:
-                ident = int(ident)
-            except:
-                ident = self._simhier.GetCollectionID(ident)
-
-        assert isinstance(ident, int)
-        return ident
-
     def GetValuesByTick(self, ident):
         cid = self._ResolveCID(ident)
         return self._values_by_cid_by_tick.get(cid, OrderedDict())
@@ -237,6 +227,16 @@ class DataExtractionHandler(BlobHandler):
         }
 
         return final_values
+
+    def _ResolveCID(self, ident):
+        if isinstance(ident, str):
+            try:
+                ident = int(ident)
+            except:
+                ident = self._simhier.GetCollectionID(ident)
+
+        assert isinstance(ident, int)
+        return ident
 
     def _ResetSparseContainer(self, context, deserialized):
         capacity = self._simhier.GetCapacityByCollectionID(context.current_cid)

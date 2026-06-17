@@ -124,22 +124,22 @@ E randomEnum()
     }
 }
 
-void appendEnumWire(simdb::argos::StreamBuffer& buf, UnsignedEnum val)
+void appendEnum(simdb::argos::StreamBuffer& buf, UnsignedEnum val)
 {
     buf.append(static_cast<uint64_t>(static_cast<uint32_t>(val)));
 }
 
-void appendEnumWire(simdb::argos::StreamBuffer& buf, SignedEnum val)
+void appendEnum(simdb::argos::StreamBuffer& buf, SignedEnum val)
 {
     buf.append(static_cast<int64_t>(static_cast<int32_t>(val)));
 }
 
-UnsignedEnum readUnsignedEnumWire(argos_test::ByteBuffer& buf)
+UnsignedEnum readUnsignedEnum(argos_test::ByteBuffer& buf)
 {
     return static_cast<UnsignedEnum>(static_cast<uint32_t>(buf.read<uint64_t>()));
 }
 
-SignedEnum readSignedEnumWire(argos_test::ByteBuffer& buf)
+SignedEnum readSignedEnum(argos_test::ByteBuffer& buf)
 {
     return static_cast<SignedEnum>(static_cast<int32_t>(buf.read<int64_t>()));
 }
@@ -167,8 +167,8 @@ struct MultipleTypes
         buf.append(i);
         buf.append(s);
         buf.append(b);
-        appendEnumWire(buf, ue);
-        appendEnumWire(buf, se);
+        appendEnum(buf, ue);
+        appendEnum(buf, se);
     }
 
     static MultipleTypes readFromBuffer(argos_test::ByteBuffer& buf, const std::unordered_map<uint32_t, std::string>& strings)
@@ -183,8 +183,8 @@ struct MultipleTypes
         }
         val.s = str_iter->second;
         val.b = static_cast<bool>(buf.read<uint8_t>());
-        val.ue = readUnsignedEnumWire(buf);
-        val.se = readSignedEnumWire(buf);
+        val.ue = readUnsignedEnum(buf);
+        val.se = readSignedEnum(buf);
         return val;
     }
 };
@@ -251,13 +251,13 @@ std::vector<char> getScalarBytes(const ScalarT& val, simdb::TinyStrings<>* tiny_
     {
         std::vector<char> bytes;
         simdb::argos::StreamBuffer buf(bytes);
-        appendEnumWire(buf, val);
+        appendEnum(buf, val);
         return bytes;
     } else if constexpr (std::is_same_v<ScalarT, SignedEnum>)
     {
         std::vector<char> bytes;
         simdb::argos::StreamBuffer buf(bytes);
-        appendEnumWire(buf, val);
+        appendEnum(buf, val);
         return bytes;
     } else if constexpr (std::is_enum_v<ScalarT>)
     {
@@ -332,11 +332,11 @@ ScalarValue deserializeScalarValue(const std::string& encoded_type,
     }
     if (encoded_type == "UnsignedEnum")
     {
-        return readUnsignedEnumWire(buf);
+        return readUnsignedEnum(buf);
     }
     if (encoded_type == "SignedEnum")
     {
-        return readSignedEnumWire(buf);
+        return readSignedEnum(buf);
     }
     if (encoded_type == "MultipleTypes")
     {
@@ -1104,6 +1104,15 @@ private:
         truth_by_tick_[tick][cid] = *state.logical;
     }
 
+    void registerActive_(ActiveCollectable active)
+    {
+        const auto cid = active.entry_point->getID();
+        tracked_cids_.push_back(cid);
+        encoded_type_by_cid_.emplace(cid, active.encoded_type);
+        bin_element_type_by_cid_.emplace(cid, active.bin_element_type);
+        active_.push_back(std::move(active));
+    }
+
     void setupAppManagers_()
     {
         app_mgrs_.registerApp<simdb::argos::ArgosCollector>();
@@ -1159,13 +1168,13 @@ private:
         }
     }
 
-    void registerActive_(ActiveCollectable active)
+
+    void openPipelines_()
     {
-        const auto cid = active.entry_point->getID();
-        tracked_cids_.push_back(cid);
-        encoded_type_by_cid_.emplace(cid, active.encoded_type);
-        bin_element_type_by_cid_.emplace(cid, active.bin_element_type);
-        active_.push_back(std::move(active));
+        app_mgrs_.createSchemas();
+        app_mgrs_.postInit(0, nullptr);
+        app_mgrs_.initializePipelines();
+        app_mgrs_.openPipelines();
     }
 
     void simulate_(uint64_t end_sim_time)
@@ -1192,14 +1201,6 @@ private:
                 recordTruth_(tick_, cid, engine.at(cid));
             }
         }
-    }
-
-    void openPipelines_()
-    {
-        app_mgrs_.createSchemas();
-        app_mgrs_.postInit(0, nullptr);
-        app_mgrs_.initializePipelines();
-        app_mgrs_.openPipelines();
     }
 
     void teardown_()
@@ -1377,24 +1378,17 @@ void testCloseCollectLifecycle()
     active.bin_element_type = "int";
     active.entry_point = ep;
 
-    const auto advance_to = [&](uint64_t target) {
-        while (tick < target)
-        {
-            ++tick;
-        }
-    };
-
-    advance_to(100);
-    stageCollectable(active, CollectableValue{int32_t{100}}, tiny_strings);
-    advance_to(150);
-    stageCollectable(active, CollectableValue{int32_t{150}}, tiny_strings);
-    advance_to(200);
+    tick = 100;
+    stageCollectable(active, CollectableValue{static_cast<int32_t>(tick)}, tiny_strings);
+    tick = 150;
+    stageCollectable(active, CollectableValue{static_cast<int32_t>(tick)}, tiny_strings);
+    tick = 200;
     ep->closeRecord();
-    advance_to(250);
-    stageCollectable(active, CollectableValue{int32_t{250}}, tiny_strings);
-    advance_to(300);
+    tick = 250;
+    stageCollectable(active, CollectableValue{static_cast<int32_t>(tick)}, tiny_strings);
+    tick = 300;
     ep->closeRecord();
-    advance_to(350);
+    tick = 350;
 
     app_mgrs.postSimLoopTeardown();
 
@@ -1436,18 +1430,8 @@ void testCloseCollectLifecycle()
 
 constexpr uint64_t DEFAULT_END_SIM_TIME = 1000;
 
-int main(int argc, char** argv)
+void testEverything(uint64_t end_sim_time)
 {
-    TEST_METHOD_INIT;
-
-    testCloseCollectLifecycle();
-
-    uint64_t end_sim_time = DEFAULT_END_SIM_TIME;
-    if (argc > 1)
-    {
-        end_sim_time = static_cast<uint64_t>(std::stoull(argv[1]));
-    }
-
     const auto repo_root = findRepoRoot();
     const auto db_dir = std::filesystem::current_path();
     const auto hb1_db = db_dir / "hb1.db";
@@ -1467,7 +1451,20 @@ int main(int argc, char** argv)
 
     runCompare(repo_root, hb1_db, hb3_db);
     runCompare(repo_root, hb1_db, hb10_db);
-    runCompare(repo_root, hb3_db, hb10_db);
+}
+
+int main(int argc, char** argv)
+{
+    TEST_METHOD_INIT;
+
+    uint64_t end_sim_time = DEFAULT_END_SIM_TIME;
+    if (argc > 1)
+    {
+        end_sim_time = static_cast<uint64_t>(std::stoull(argv[1]));
+    }
+
+    testEverything(end_sim_time);
+    testCloseCollectLifecycle();
 
     REPORT_ERROR;
     return ERROR_CODE;

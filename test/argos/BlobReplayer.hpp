@@ -41,7 +41,7 @@ public:
             throw simdb::DBException("ByteBuffer slice out of range");
         }
         return std::vector<char>(data_.begin() + static_cast<std::ptrdiff_t>(start),
-                               data_.begin() + static_cast<std::ptrdiff_t>(end));
+                                 data_.begin() + static_cast<std::ptrdiff_t>(end));
     }
 
     template <typename T>

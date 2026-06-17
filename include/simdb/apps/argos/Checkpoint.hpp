@@ -41,23 +41,29 @@ enum class Action : uint8_t {
 };
 
 //! \class CollectableCheckpoint
-//! \brief Base class for all collectable checkpoints.
 class CollectableCheckpoint
 {
 public:
+    /// Destroys this checkpoint node.
     virtual ~CollectableCheckpoint() = default;
 
+    /// Returns the previous checkpoint in the chain, or nullptr.
     CollectableCheckpoint* getPrev() const { return prev_.get(); }
 
+    /// Returns the next checkpoint in the chain, or nullptr.
     CollectableCheckpoint* getNext() const { return next_; }
 
+    /// Returns the collection window that created this checkpoint.
     uint64_t getWindowID() const { return window_id_; }
 
+    /// Drops the link to the previous checkpoint without deleting it.
     void detachPrev() { prev_.reset(); }
 
+    /// Returns the shared_ptr to the previous checkpoint, if any.
     const std::shared_ptr<CollectableCheckpoint>& getPrevShared() const { return prev_; }
 
 protected:
+    /// Links \p prev to this node and stores \p window_id.
     CollectableCheckpoint(std::shared_ptr<CollectableCheckpoint> prev, uint64_t window_id) :
         prev_(prev),
         window_id_(window_id)
@@ -68,6 +74,7 @@ protected:
         }
     }
 
+    /// Returns true if a CLOSED event occurred between \p data_prev and \p self.
     template <typename CheckpointT>
     static bool closedSincePrevDataCheckpoint_(const CheckpointT* self, const CheckpointT* data_prev)
     {
@@ -95,32 +102,39 @@ protected:
 class ScalarCheckpoint final : public CollectableCheckpoint
 {
 public:
-    // Use this ctor for data collection events
+    /// Creates a data checkpoint holding a full scalar snapshot.
     ScalarCheckpoint(std::shared_ptr<ScalarCheckpoint> prev, uint64_t window_id, const std::vector<char>& full_bytes) :
         CollectableCheckpoint(prev, window_id),
         full_bytes_(full_bytes)
     {
     }
 
-    // Use this ctor for close lifecycle events
+    /// Creates a lifecycle checkpoint recording a close transition.
     ScalarCheckpoint(std::shared_ptr<ScalarCheckpoint> prev, uint64_t window_id, bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
         lifecycle_change_(switched_to_closed)
     {
     }
 
+    /// Returns the previous scalar checkpoint in the chain.
     ScalarCheckpoint* prev() { return static_cast<ScalarCheckpoint*>(getPrev()); }
 
+    /// Returns the previous scalar checkpoint in the chain.
     const ScalarCheckpoint* prev() const { return static_cast<const ScalarCheckpoint*>(getPrev()); }
 
+    /// Returns the next scalar checkpoint in the chain.
     ScalarCheckpoint* next() { return static_cast<ScalarCheckpoint*>(getNext()); }
 
+    /// Returns true when this node holds collected bytes rather than a lifecycle flag.
     bool isDataCheckpoint() const { return !lifecycle_change_.isValid(); }
 
+    /// Returns true when this node records a transition to closed.
     bool isClosedEvent() const { return lifecycle_change_.isValid() && lifecycle_change_.getValue(); }
 
+    /// Returns true for any lifecycle (close) checkpoint.
     bool isLifecycleEvent() const { return lifecycle_change_.isValid(); }
 
+    /// Encodes an unconditional FULL snapshot for heartbeat or absent-CID refresh.
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
         auto encoded = std::make_unique<CollectedData>(cid);
@@ -130,14 +144,9 @@ public:
         return encoded;
     }
 
+    /// Encodes CLOSED, FULL, or CARRY by diffing against the prior data checkpoint.
     std::unique_ptr<CollectedData> encodeForPipeline(uint16_t cid, bool force_snapshot)
     {
-        // ScalarCheckpoints only return:
-        //   CLOSED
-        //   FULL
-        //   CARRY
-        //
-        // The incoming force_snapshot flag is true when we require a heartbeat refresh.
         if (lifecycle_change_.isValid())
         {
             return encodeLifecycleEvt_(cid);
@@ -168,6 +177,7 @@ public:
     }
 
 private:
+    /// Walks backward to the nearest prior data checkpoint.
     const ScalarCheckpoint* prevDataCheckpoint_() const
     {
         const auto* checkpoint = prev();
@@ -178,6 +188,7 @@ private:
         return checkpoint;
     }
 
+    /// Encodes a CLOSED lifecycle wire record.
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
         assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
@@ -187,6 +198,7 @@ private:
         return encoded;
     }
 
+    /// Encodes a FULL snapshot of the current scalar bytes.
     std::unique_ptr<CollectedData> encodeFull_(uint16_t cid)
     {
         assert(!full_bytes_.empty());
@@ -197,6 +209,7 @@ private:
         return encoded;
     }
 
+    /// Encodes CARRY when bytes are unchanged since the prior data checkpoint.
     std::unique_ptr<CollectedData> encodeDelta_(uint16_t cid)
     {
         const auto* data_prev = prevDataCheckpoint_();
@@ -215,7 +228,7 @@ private:
 class ContigContainerCheckpoint : public CollectableCheckpoint
 {
 public:
-    // Use this ctor for data collection events
+    /// Creates a data checkpoint holding a full contig container snapshot.
     ContigContainerCheckpoint(std::shared_ptr<ContigContainerCheckpoint> prev, uint64_t window_id,
                               const std::vector<std::vector<char>>& full_bytes) :
         CollectableCheckpoint(prev, window_id),
@@ -223,7 +236,7 @@ public:
     {
     }
 
-    // Use this ctor for close lifecycle events
+    /// Creates a lifecycle checkpoint recording a close transition.
     ContigContainerCheckpoint(std::shared_ptr<ContigContainerCheckpoint> prev, uint64_t window_id,
                               bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
@@ -231,18 +244,25 @@ public:
     {
     }
 
+    /// Returns the previous contig checkpoint in the chain.
     ContigContainerCheckpoint* prev() { return static_cast<ContigContainerCheckpoint*>(getPrev()); }
 
+    /// Returns the previous contig checkpoint in the chain.
     const ContigContainerCheckpoint* prev() const { return static_cast<const ContigContainerCheckpoint*>(getPrev()); }
 
+    /// Returns the next contig checkpoint in the chain.
     ContigContainerCheckpoint* next() { return static_cast<ContigContainerCheckpoint*>(getNext()); }
 
+    /// Returns true when this node holds collected bytes rather than a lifecycle flag.
     bool isDataCheckpoint() const { return !lifecycle_change_.isValid(); }
 
+    /// Returns true when this node records a transition to closed.
     bool isClosedEvent() const { return lifecycle_change_.isValid() && lifecycle_change_.getValue(); }
 
+    /// Returns true for any lifecycle (close) checkpoint.
     bool isLifecycleEvent() const { return lifecycle_change_.isValid(); }
 
+    /// Encodes an unconditional FULL snapshot for heartbeat or absent-CID refresh.
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
         assert(isDataCheckpoint());
@@ -253,6 +273,7 @@ public:
         return encoded;
     }
 
+    /// Encodes CLOSED, FULL, or a contig delta by diffing against the prior data checkpoint.
     std::unique_ptr<CollectedData> encodeForPipeline(uint16_t cid, bool force_snapshot)
     {
         if (lifecycle_change_.isValid())
@@ -286,6 +307,7 @@ public:
     }
 
 private:
+    /// Walks backward to the nearest prior data checkpoint.
     const ContigContainerCheckpoint* prevDataCheckpoint_() const
     {
         const auto* checkpoint = prev();
@@ -296,6 +318,7 @@ private:
         return checkpoint;
     }
 
+    /// Maps a contig delta classification to its wire Action byte.
     static Action contigActionFromKind_(ContigDeltaKind kind)
     {
         switch (kind)
@@ -320,8 +343,10 @@ private:
         throw DBException("Invalid contig delta kind");
     }
 
+    /// Appends the FULL tail for the current contig snapshot to \p buf.
     void appendFullTail_(StreamBuffer& buf) const { appendContigBins_(buf, full_bytes_); }
 
+    /// Appends contig bins as [count][bin bytes]... to \p buf.
     static void appendContigBins_(StreamBuffer& buf, const std::vector<std::vector<char>>& bins)
     {
         const auto size = countContigElements(bins);
@@ -332,6 +357,7 @@ private:
         }
     }
 
+    /// Encodes a CLOSED lifecycle wire record.
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
         assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
@@ -341,6 +367,7 @@ private:
         return encoded;
     }
 
+    /// Encodes a FULL snapshot of the current contig container.
     std::unique_ptr<CollectedData> encodeFull_(uint16_t cid)
     {
         auto encoded = std::make_unique<CollectedData>(cid);
@@ -350,6 +377,7 @@ private:
         return encoded;
     }
 
+    /// Encodes a classified contig delta (SWAP, MIMO, etc.) to the wire buffer.
     std::unique_ptr<CollectedData> encodeDelta_(uint16_t cid, const ContigDeltaClassification& classification)
     {
         auto encoded = std::make_unique<CollectedData>(cid);
@@ -405,7 +433,7 @@ private:
 class SparseContainerCheckpoint : public CollectableCheckpoint
 {
 public:
-    // Use this ctor for data collection events
+    /// Creates a data checkpoint holding a full sparse container snapshot.
     SparseContainerCheckpoint(std::shared_ptr<SparseContainerCheckpoint> prev, uint64_t window_id,
                               const std::map<uint16_t, std::vector<char>>& full_bytes) :
         CollectableCheckpoint(prev, window_id),
@@ -413,7 +441,7 @@ public:
     {
     }
 
-    // Use this ctor for close lifecycle events
+    /// Creates a lifecycle checkpoint recording a close transition.
     SparseContainerCheckpoint(std::shared_ptr<SparseContainerCheckpoint> prev, uint64_t window_id,
                               bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
@@ -421,18 +449,25 @@ public:
     {
     }
 
+    /// Returns the previous sparse checkpoint in the chain.
     SparseContainerCheckpoint* prev() { return static_cast<SparseContainerCheckpoint*>(getPrev()); }
 
+    /// Returns the previous sparse checkpoint in the chain.
     const SparseContainerCheckpoint* prev() const { return static_cast<const SparseContainerCheckpoint*>(getPrev()); }
 
+    /// Returns the next sparse checkpoint in the chain.
     SparseContainerCheckpoint* next() { return static_cast<SparseContainerCheckpoint*>(getNext()); }
 
+    /// Returns true when this node holds collected bytes rather than a lifecycle flag.
     bool isDataCheckpoint() const { return !lifecycle_change_.isValid(); }
 
+    /// Returns true when this node records a transition to closed.
     bool isClosedEvent() const { return lifecycle_change_.isValid() && lifecycle_change_.getValue(); }
 
+    /// Returns true for any lifecycle (close) checkpoint.
     bool isLifecycleEvent() const { return lifecycle_change_.isValid(); }
 
+    /// Encodes an unconditional FULL snapshot for heartbeat or absent-CID refresh.
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
         assert(isDataCheckpoint());
@@ -443,6 +478,7 @@ public:
         return encoded;
     }
 
+    /// Encodes CLOSED, FULL, or a sparse delta by diffing against the prior data checkpoint.
     std::unique_ptr<CollectedData> encodeForPipeline(uint16_t cid, bool force_snapshot)
     {
         if (lifecycle_change_.isValid())
@@ -476,6 +512,7 @@ public:
     }
 
 private:
+    /// Walks backward to the nearest prior data checkpoint.
     const SparseContainerCheckpoint* prevDataCheckpoint_() const
     {
         const auto* checkpoint = prev();
@@ -486,6 +523,7 @@ private:
         return checkpoint;
     }
 
+    /// Maps a sparse delta classification to its wire Action byte.
     static Action sparseActionFromKind_(SparseDeltaKind kind)
     {
         switch (kind)
@@ -508,8 +546,10 @@ private:
         throw DBException("Invalid sparse delta kind");
     }
 
+    /// Appends the FULL tail for the current sparse snapshot to \p buf.
     void appendFullTail_(StreamBuffer& buf) const { appendSparseBins_(buf, full_bytes_); }
 
+    /// Appends sparse bins as [count][idx][bin bytes]... to \p buf.
     static void appendSparseBins_(StreamBuffer& buf, const std::map<uint16_t, std::vector<char>>& bins)
     {
         const auto size = countSparseElements(bins);
@@ -524,6 +564,7 @@ private:
         }
     }
 
+    /// Encodes a CLOSED lifecycle wire record.
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
         assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
@@ -533,6 +574,7 @@ private:
         return encoded;
     }
 
+    /// Encodes a FULL snapshot of the current sparse container.
     std::unique_ptr<CollectedData> encodeFull_(uint16_t cid)
     {
         auto encoded = std::make_unique<CollectedData>(cid);
@@ -542,6 +584,7 @@ private:
         return encoded;
     }
 
+    /// Encodes a classified sparse delta (SWAP, ADD, etc.) to the wire buffer.
     std::unique_ptr<CollectedData> encodeDelta_(uint16_t cid, const SparseDeltaClassification& classification)
     {
         auto encoded = std::make_unique<CollectedData>(cid);
