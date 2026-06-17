@@ -81,12 +81,10 @@ public:
 
     virtual void handleScalarClosed(BlobContext&) {}
     virtual void handleScalarCarried(BlobContext&) {}
-    virtual void handleScalarReopened(BlobContext&, const std::vector<char>&) {}
     virtual void handleScalarFullDump(BlobContext&, const std::vector<char>&) {}
 
     virtual void handleContigContainerClosed(BlobContext&) {}
     virtual void handleContigContainerCarried(BlobContext&) {}
-    virtual void handleContigContainerReopened(BlobContext&, const std::vector<std::vector<char>>&) {}
     virtual void handleContigContainerFullDump(BlobContext&, const std::vector<std::vector<char>>&) {}
     virtual void handleContigContainerSwap(BlobContext&, uint16_t, const std::vector<char>&) {}
     virtual void handleContigContainerArrival(BlobContext&, const std::vector<char>&) {}
@@ -95,7 +93,6 @@ public:
 
     virtual void handleSparseContainerClosed(BlobContext&) {}
     virtual void handleSparseContainerCarried(BlobContext&) {}
-    virtual void handleSparseContainerReopened(BlobContext&, const std::map<uint16_t, std::vector<char>>&) {}
     virtual void handleSparseContainerFullDump(BlobContext&, const std::map<uint16_t, std::vector<char>>&) {}
     virtual void handleSparseContainerExchangedBin(BlobContext&, uint16_t, const std::vector<char>&) {}
     virtual void handleSparseContainerRemovedBin(BlobContext&, uint16_t) {}
@@ -232,9 +229,6 @@ inline HandlerStep handleScalarAction(BlobResources& resources, BlobContext& con
 
         switch (static_cast<Action>(action))
         {
-        case Action::REOPENED:
-            resources.handler.handleScalarReopened(context, deserialize(*resources.buf));
-            break;
         case Action::FULL:
             resources.handler.handleScalarFullDump(context, deserialize(*resources.buf));
             break;
@@ -258,7 +252,6 @@ inline HandlerStep handleContigContainerAction(BlobResources& resources, BlobCon
     case Action::CARRY:
         resources.handler.handleContigContainerCarried(context);
         break;
-    case Action::REOPENED:
     case Action::FULL:
     {
         const auto size = resources.buf->read<uint16_t>();
@@ -270,17 +263,7 @@ inline HandlerStep handleContigContainerAction(BlobResources& resources, BlobCon
             bins.emplace_back(resources.deserialize_bin(context.current_cid, *resources.buf));
         }
 
-        switch (static_cast<Action>(action))
-        {
-        case Action::REOPENED:
-            resources.handler.handleContigContainerReopened(context, bins);
-            break;
-        case Action::FULL:
-            resources.handler.handleContigContainerFullDump(context, bins);
-            break;
-        default:
-            break;
-        }
+        resources.handler.handleContigContainerFullDump(context, bins);
         break;
     }
     case Action::CONTIG_CONTAINER_SWAP:
@@ -322,7 +305,6 @@ inline HandlerStep handleSparseContainerAction(BlobResources& resources, BlobCon
     case Action::CARRY:
         resources.handler.handleSparseContainerCarried(context);
         break;
-    case Action::REOPENED:
     case Action::FULL:
     {
         const auto size = resources.buf->read<uint16_t>();
@@ -334,17 +316,7 @@ inline HandlerStep handleSparseContainerAction(BlobResources& resources, BlobCon
             bins.emplace(bin_idx, resources.deserialize_bin(context.current_cid, *resources.buf));
         }
 
-        switch (static_cast<Action>(action))
-        {
-        case Action::REOPENED:
-            resources.handler.handleSparseContainerReopened(context, bins);
-            break;
-        case Action::FULL:
-            resources.handler.handleSparseContainerFullDump(context, bins);
-            break;
-        default:
-            break;
-        }
+        resources.handler.handleSparseContainerFullDump(context, bins);
         break;
     }
     case Action::SPARSE_CONTAINER_SWAP:

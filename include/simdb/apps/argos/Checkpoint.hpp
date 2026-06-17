@@ -17,7 +17,6 @@ namespace simdb::argos {
 enum class Action : uint8_t {
     // Common to all collected types
     CLOSED = 0,
-    REOPENED,
     FULL,
     CARRY,
 
@@ -60,6 +59,25 @@ protected:
         }
     }
 
+    template <typename CheckpointT>
+    static bool closedSincePrevDataCheckpoint_(const CheckpointT* self, const CheckpointT* data_prev)
+    {
+        if (!data_prev)
+        {
+            return false;
+        }
+        const CheckpointT* checkpoint = self->prev();
+        while (checkpoint && checkpoint != data_prev)
+        {
+            if (checkpoint->isClosedEvent())
+            {
+                return true;
+            }
+            checkpoint = checkpoint->prev();
+        }
+        return false;
+    }
+
     std::shared_ptr<CollectableCheckpoint> prev_;
     CollectableCheckpoint* next_ = nullptr;
     const uint64_t window_id_;
@@ -75,7 +93,7 @@ public:
     {
     }
 
-    // Use this ctor for close/reopen lifecycle events
+    // Use this ctor for close lifecycle events
     ScalarCheckpoint(std::shared_ptr<ScalarCheckpoint> prev, uint64_t window_id, bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
         lifecycle_change_(switched_to_closed)
@@ -107,7 +125,6 @@ public:
     {
         // ScalarCheckpoints only return:
         //   CLOSED
-        //   REOPENED
         //   FULL
         //   CARRY
         //
@@ -133,6 +150,11 @@ public:
             return encodeFull_(cid);
         }
 
+        if (closedSincePrevDataCheckpoint_(this, data_prev))
+        {
+            return encodeFull_(cid);
+        }
+
         return encodeDelta_(cid);
     }
 
@@ -149,23 +171,10 @@ private:
 
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        if (lifecycle_change_.getValue())
-        {
-            auto encoded = std::make_unique<CollectedData>(cid);
-            encoded->getBuffer().append(Action::CLOSED);
-            return encoded;
-        }
-
-        const auto* data_anchor = prevDataCheckpoint_();
-        if (!data_anchor)
-        {
-            return nullptr;
-        }
-
+        assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
+        (void)cid;
         auto encoded = std::make_unique<CollectedData>(cid);
-        auto& buf = encoded->getBuffer();
-        buf.append(Action::REOPENED);
-        buf.append(data_anchor->full_bytes_);
+        encoded->getBuffer().append(Action::CLOSED);
         return encoded;
     }
 
@@ -205,7 +214,7 @@ public:
     {
     }
 
-    // Use this ctor for close/reopen lifecycle events
+    // Use this ctor for close lifecycle events
     ContigContainerCheckpoint(std::shared_ptr<ContigContainerCheckpoint> prev, uint64_t window_id,
                               bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
@@ -249,6 +258,11 @@ public:
 
         auto* data_prev = prevDataCheckpoint_();
         if (!data_prev)
+        {
+            return encodeFull_(cid);
+        }
+
+        if (closedSincePrevDataCheckpoint_(this, data_prev))
         {
             return encodeFull_(cid);
         }
@@ -307,23 +321,10 @@ private:
 
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        if (lifecycle_change_.getValue())
-        {
-            auto encoded = std::make_unique<CollectedData>(cid);
-            encoded->getBuffer().append(Action::CLOSED);
-            return encoded;
-        }
-
-        const auto* data_anchor = prevDataCheckpoint_();
-        if (!data_anchor)
-        {
-            return nullptr;
-        }
-
+        assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
+        (void)cid;
         auto encoded = std::make_unique<CollectedData>(cid);
-        auto& buf = encoded->getBuffer();
-        buf.append(Action::REOPENED);
-        appendContigBins_(buf, data_anchor->full_bytes_);
+        encoded->getBuffer().append(Action::CLOSED);
         return encoded;
     }
 
@@ -373,7 +374,7 @@ public:
     {
     }
 
-    // Use this ctor for close/reopen lifecycle events
+    // Use this ctor for close lifecycle events
     SparseContainerCheckpoint(std::shared_ptr<SparseContainerCheckpoint> prev, uint64_t window_id,
                               bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
@@ -417,6 +418,11 @@ public:
 
         const auto* data_prev = prevDataCheckpoint_();
         if (!data_prev)
+        {
+            return encodeFull_(cid);
+        }
+
+        if (closedSincePrevDataCheckpoint_(this, data_prev))
         {
             return encodeFull_(cid);
         }
@@ -475,23 +481,10 @@ private:
 
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        if (lifecycle_change_.getValue())
-        {
-            auto encoded = std::make_unique<CollectedData>(cid);
-            encoded->getBuffer().append(Action::CLOSED);
-            return encoded;
-        }
-
-        const auto* data_anchor = prevDataCheckpoint_();
-        if (!data_anchor)
-        {
-            return nullptr;
-        }
-
+        assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
+        (void)cid;
         auto encoded = std::make_unique<CollectedData>(cid);
-        auto& buf = encoded->getBuffer();
-        buf.append(Action::REOPENED);
-        appendSparseBins_(buf, data_anchor->full_bytes_);
+        encoded->getBuffer().append(Action::CLOSED);
         return encoded;
     }
 

@@ -550,7 +550,7 @@ bool maybeClose(LiveState& state, simdb::argos::EntryPoint* ep)
     return false;
 }
 
-bool maybeReopen(LiveState& state, simdb::argos::EntryPoint* ep)
+bool maybeReopen(LiveState& state, const ActiveCollectable& active, simdb::TinyStrings<>* tiny_strings)
 {
     if (!state.closed)
     {
@@ -563,9 +563,9 @@ bool maybeReopen(LiveState& state, simdb::argos::EntryPoint* ep)
     }
 
     state.closed = false;
-    ep->reopen();
     state.logical = state.latent;
     state.has_data = collectableHasPayload(*state.logical);
+    stageCollectable(active, *state.logical, tiny_strings);
     return true;
 }
 
@@ -584,7 +584,7 @@ public:
 
         if (state.closed)
         {
-            (void)maybeReopen(state, ep);
+            (void)maybeReopen(state, active, tiny_strings);
             return;
         }
 
@@ -614,7 +614,7 @@ public:
 
         if (state.closed)
         {
-            (void)maybeReopen(state, ep);
+            (void)maybeReopen(state, active, tiny_strings);
             return;
         }
 
@@ -670,7 +670,7 @@ public:
 
         if (state.closed)
         {
-            (void)maybeReopen(state, ep);
+            (void)maybeReopen(state, active, tiny_strings);
             return;
         }
 
@@ -790,11 +790,6 @@ public:
 
     void handleScalarCarried(argos_test::BlobContext&) override {}
 
-    void handleScalarReopened(argos_test::BlobContext& context, const std::vector<char>& payload) override
-    {
-        values_by_cid_[context.current_cid] = decodeScalar_(context.current_cid, payload);
-    }
-
     void handleScalarFullDump(argos_test::BlobContext& context, const std::vector<char>& payload) override
     {
         values_by_cid_[context.current_cid] = decodeScalar_(context.current_cid, payload);
@@ -806,12 +801,6 @@ public:
     }
 
     void handleContigContainerCarried(argos_test::BlobContext&) override {}
-
-    void handleContigContainerReopened(argos_test::BlobContext& context,
-                                       const std::vector<std::vector<char>>& bins) override
-    {
-        values_by_cid_[context.current_cid] = CollectableValue{contigBinsToValue(bins, strings_)};
-    }
 
     void handleContigContainerFullDump(argos_test::BlobContext& context,
                                        const std::vector<std::vector<char>>& bins) override
@@ -857,12 +846,6 @@ public:
     }
 
     void handleSparseContainerCarried(argos_test::BlobContext&) override {}
-
-    void handleSparseContainerReopened(argos_test::BlobContext& context,
-                                       const std::map<uint16_t, std::vector<char>>& bins) override
-    {
-        values_by_cid_[context.current_cid] = CollectableValue{sparseBinsToValue(bins, strings_)};
-    }
 
     void handleSparseContainerFullDump(argos_test::BlobContext& context,
                                        const std::map<uint16_t, std::vector<char>>& bins) override
@@ -1272,6 +1255,133 @@ void runHarness(const std::filesystem::path& db_path, size_t heartbeat, uint64_t
     harness.runSimulation(end_sim_time);
 }
 
+class LifecycleReplayHandler final : public DataExtractionHandler
+{
+public:
+    LifecycleReplayHandler(uint16_t cid, const std::unordered_map<uint16_t, std::string>& encoded_type_by_cid,
+                           const std::unordered_map<uint32_t, std::string>& strings) :
+        DataExtractionHandler(encoded_type_by_cid, strings),
+        cid_(cid)
+    {
+    }
+
+    void snapshotTick(argos_test::BlobContext& context) override
+    {
+        const auto iter = getValuesByCid().find(cid_);
+        if (iter == getValuesByCid().end())
+        {
+            snapshots_[context.current_tick] = std::nullopt;
+            return;
+        }
+
+        snapshots_[context.current_tick] = std::get<int32_t>(std::get<ScalarValue>(iter->second));
+    }
+
+    std::optional<int32_t> valueAt(uint64_t tick) const
+    {
+        const auto iter = snapshots_.find(tick);
+        if (iter == snapshots_.end())
+        {
+            return std::nullopt;
+        }
+        return iter->second;
+    }
+
+private:
+    uint16_t cid_;
+    std::map<uint64_t, std::optional<int32_t>> snapshots_;
+};
+
+void testCloseCollectLifecycle()
+{
+    TEST_METHOD_INIT;
+
+    const auto db_path = std::filesystem::current_path() / "lifecycle.db";
+    std::filesystem::remove(db_path);
+
+    simdb::AppManagers app_mgrs;
+    app_mgrs.registerApp<simdb::argos::ArgosCollector>();
+    auto& app_mgr = app_mgrs.createAppManager(db_path.string());
+    auto* db_mgr = app_mgr.getDatabaseManager();
+    app_mgr.enableApp(simdb::argos::ArgosCollector::NAME);
+    app_mgrs.createEnabledApps();
+
+    auto* collector = app_mgr.getApp<simdb::argos::ArgosCollector>();
+    collector->setHeartbeat(10);
+    uint64_t tick = 0;
+    collector->timestampWith(&tick);
+    collector->addClock("root", 1);
+
+    auto* ep = collector->createScalarCollector("top.lifecycle", "root", "int");
+    const auto cid = ep->getID();
+    auto* tiny_strings = collector->getTinyStrings();
+
+    app_mgrs.createSchemas();
+    app_mgrs.postInit(0, nullptr);
+    app_mgrs.initializePipelines();
+    app_mgrs.openPipelines();
+
+    ActiveCollectable active;
+    active.kind = CollectableKind::Scalar;
+    active.encoded_type = "int";
+    active.bin_element_type = "int";
+    active.entry_point = ep;
+
+    const auto advance_to = [&](uint64_t target) {
+        while (tick < target)
+        {
+            ++tick;
+        }
+    };
+
+    advance_to(100);
+    stageCollectable(active, CollectableValue{int32_t{100}}, tiny_strings);
+    advance_to(150);
+    stageCollectable(active, CollectableValue{int32_t{150}}, tiny_strings);
+    advance_to(200);
+    ep->close();
+    advance_to(250);
+    stageCollectable(active, CollectableValue{int32_t{250}}, tiny_strings);
+    advance_to(300);
+    ep->close();
+    advance_to(350);
+
+    app_mgrs.postSimLoopTeardown();
+
+    const auto strings = loadStringTable(db_mgr);
+    argos_test::CollectableRegistry registry(db_mgr);
+    const std::unordered_map<uint16_t, std::string> encoded_type_by_cid{{cid, "int"}};
+
+    const auto deserialize_bin = [&](uint16_t replay_cid, argos_test::ByteBuffer& buf) -> std::vector<char> {
+        const auto start = buf.tell();
+        (void)deserializeScalarValue("int", buf, strings);
+        (void)replay_cid;
+        return buf.slice(start, buf.tell());
+    };
+
+    LifecycleReplayHandler handler(cid, encoded_type_by_cid, strings);
+    argos_test::BlobIterator iterator(db_mgr, registry);
+    iterator.iterate(handler, deserialize_bin);
+
+    const auto expectAbsent = [&](uint64_t at_tick) {
+        const auto value = handler.valueAt(at_tick);
+        EXPECT_EQUAL(value.has_value(), false);
+    };
+
+    const auto expectPresent = [&](uint64_t at_tick, int32_t expected) {
+        const auto value = handler.valueAt(at_tick);
+        EXPECT_EQUAL(value.has_value(), true);
+        EXPECT_EQUAL(value.value(), expected);
+    };
+
+    expectPresent(100, 100);
+    expectPresent(150, 150);
+    expectAbsent(200);
+    expectPresent(250, 250);
+    expectAbsent(300);
+    expectAbsent(350);
+}
+
 } // namespace
 
 constexpr uint64_t DEFAULT_END_SIM_TIME = 1000;
@@ -1279,6 +1389,8 @@ constexpr uint64_t DEFAULT_END_SIM_TIME = 1000;
 int main(int argc, char** argv)
 {
     TEST_METHOD_INIT;
+
+    testCloseCollectLifecycle();
 
     uint64_t end_sim_time = DEFAULT_END_SIM_TIME;
     if (argc > 1)

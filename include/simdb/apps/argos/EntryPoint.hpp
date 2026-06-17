@@ -38,19 +38,6 @@ public:
         }
     }
 
-    /// Re-enable heartbeat re-emission of previously seen bytes.
-    void reopen()
-    {
-        if (closed_)
-        {
-            closed_ = false;
-            stager_interface_->recordLifecycleChange(getID(), closed_);
-        }
-    }
-
-    /// Check whether heartbeat re-emission is suppressed.
-    bool closed() const { return closed_; }
-
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs() { nextCID_() = 0; }
 
@@ -63,18 +50,21 @@ public:
     //! the input data structure).
     void setScalarValueBytes(std::vector<char>&& scalar_bytes)
     {
+        closed_ = false;
         stager_interface_->stage(getID(), std::move(scalar_bytes));
     }
 
     //! \see setScalarValueBytes
     void setContigContainerBinBytes(std::vector<std::vector<char>>&& contig_bin_bytes)
     {
+        closed_ = false;
         stager_interface_->stage(getID(), std::move(contig_bin_bytes));
     }
 
     //! \see setScalarValueBytes
     void setSparseContainerBinBytes(std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes)
     {
+        closed_ = false;
         stager_interface_->stage(getID(), std::move(sparse_bin_bytes));
     }
 

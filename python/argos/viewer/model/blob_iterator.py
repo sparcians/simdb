@@ -20,7 +20,6 @@ class ActionInt:
 
 # Common actions applicable to all
 _CLOSED = ActionInt.Next()
-_REOPENED = ActionInt.Next()
 _FULL = ActionInt.Next()
 _CARRY = ActionInt.Next()
 
@@ -36,7 +35,6 @@ _SPARSE_CONTAINER_REMOVE = ActionInt.Next()
 
 _VALID_COMMON_ACTIONS = {
     _CLOSED,
-    _REOPENED,
     _FULL,
     _CARRY
 }
@@ -107,9 +105,7 @@ def HandleScalarAction(resources, context, action):
         type_deserializer = resources.GetDeserializer(context.current_cid)
         deserialized = type_deserializer.Deserialize(resources.buf)
 
-        if action == _REOPENED:
-            resources.handler.HandleScalarReopened(context, deserialized)
-        elif action == _FULL:
+        if action == _FULL:
             resources.handler.HandleScalarFullDump(context, deserialized)
 
     return HandleCID
@@ -124,16 +120,13 @@ def HandleContigContainerAction(resources, context, action):
     else:
         type_deserializer = resources.GetDeserializer(context.current_cid)
 
-        if action in (_REOPENED, _FULL):
+        if action == _FULL:
             size = resources.buf.Read('H')
             deserialized = []
             for _ in range(size):
                 deserialized.append(type_deserializer.Deserialize(resources.buf))
 
-            if action == _REOPENED:
-                resources.handler.HandleContigContainerReopened(context, deserialized)
-            elif action == _FULL:
-                resources.handler.HandleContigContainerFullDump(context, deserialized)
+            resources.handler.HandleContigContainerFullDump(context, deserialized)
 
         elif action == _CONTIG_CONTAINER_SWAP:
             bin_idx = resources.buf.Read('H')
@@ -163,7 +156,7 @@ def HandleSparseContainerAction(resources, context, action):
     else:
         type_deserializer = resources.GetDeserializer(context.current_cid)
 
-        if action in (_REOPENED, _FULL):
+        if action == _FULL:
             size = resources.buf.Read('H')
             deserialized = {}
             for _ in range(size):
@@ -171,10 +164,7 @@ def HandleSparseContainerAction(resources, context, action):
                 bin_deserialized = type_deserializer.Deserialize(resources.buf)
                 deserialized[bin_idx] = bin_deserialized
 
-            if action == _REOPENED:
-                resources.handler.HandleSparseContainerReopened(context, deserialized)
-            elif action == _FULL:
-                resources.handler.HandleSparseContainerFullDump(context, deserialized)
+            resources.handler.HandleSparseContainerFullDump(context, deserialized)
 
         elif action == _SPARSE_CONTAINER_SWAP:
             bin_idx = resources.buf.Read('H')

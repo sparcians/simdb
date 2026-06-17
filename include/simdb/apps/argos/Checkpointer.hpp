@@ -62,7 +62,7 @@ std::shared_ptr<CheckpointT> getSharedCheckpoint(CheckpointT* raw, const std::sh
 
 inline void recordWireSent(Action action, size_t& wire_distance)
 {
-    if (action == Action::FULL || action == Action::REOPENED)
+    if (action == Action::FULL)
     {
         wire_distance = 0;
     } else
@@ -174,7 +174,7 @@ protected:
     void recordWireSent_(Action action, uint64_t sim_time)
     {
         detail::recordWireSent(action, wire_distance_);
-        if (action == Action::FULL || action == Action::REOPENED)
+        if (action == Action::FULL)
         {
             last_full_wired_sim_time_ = sim_time;
         } else if (action == Action::CLOSED)

@@ -11,9 +11,6 @@ class BlobHandler:
     def HandleScalarCarried(self, context): pass
 
     @abstractmethod
-    def HandleScalarReopened(self, context, deserialized): pass
-
-    @abstractmethod
     def HandleScalarFullDump(self, context, deserialized): pass
 
     @abstractmethod
@@ -21,9 +18,6 @@ class BlobHandler:
 
     @abstractmethod
     def HandleContigContainerCarried(self, context): pass
-
-    @abstractmethod
-    def HandleContigContainerReopened(self, context, deserialized): pass
 
     @abstractmethod
     def HandleContigContainerFullDump(self, context, deserialized): pass
@@ -47,9 +41,6 @@ class BlobHandler:
     def HandleSparseContainerCarried(self, context): pass
 
     @abstractmethod
-    def HandleSparseContainerReopened(self, context, deserialized): pass
-
-    @abstractmethod
     def HandleSparseContainerFullDump(self, context, deserialized): pass
 
     @abstractmethod
@@ -70,9 +61,6 @@ class SmokeTestHandler(BlobHandler):
     def HandleScalarCarried(self, context):
         print(f'At tick {context.current_tick}, scalar cid {context.current_cid} was carried')
 
-    def HandleScalarReopened(self, context, deserialized):
-        print(f'At tick {context.current_tick}, scalar cid {context.current_cid} was reopened')
-
     def HandleScalarFullDump(self, context, deserialized):
         print(f'At tick {context.current_tick}, scalar cid {context.current_cid} was fully dumped')
 
@@ -81,9 +69,6 @@ class SmokeTestHandler(BlobHandler):
 
     def HandleContigContainerCarried(self, context):
         print(f'At tick {context.current_tick}, contig container cid {context.current_cid} was carried')
-
-    def HandleContigContainerReopened(self, context, deserialized):
-        print(f'At tick {context.current_tick}, contig container cid {context.current_cid} was reopened')
 
     def HandleContigContainerFullDump(self, context, deserialized):
         print(f'At tick {context.current_tick}, contig container cid {context.current_cid} was fully dumped')
@@ -105,9 +90,6 @@ class SmokeTestHandler(BlobHandler):
 
     def HandleSparseContainerCarried(self, context):
         print(f'At tick {context.current_tick}, sparse container cid {context.current_cid} was carried')
-
-    def HandleSparseContainerReopened(self, context, deserialized):
-        print(f'At tick {context.current_tick}, sparse container cid {context.current_cid} was reopened')
 
     def HandleSparseContainerFullDump(self, context, deserialized):
         print(f'At tick {context.current_tick}, sparse container cid {context.current_cid} was fully dumped')
@@ -138,9 +120,6 @@ class DataExtractionHandler(BlobHandler):
     def HandleScalarCarried(self, context):
         pass
 
-    def HandleScalarReopened(self, context, deserialized):
-        self._values_by_cid[context.current_cid] = deserialized
-
     def HandleScalarFullDump(self, context, deserialized):
         self._values_by_cid[context.current_cid] = deserialized
 
@@ -149,11 +128,6 @@ class DataExtractionHandler(BlobHandler):
 
     def HandleContigContainerCarried(self, context):
         pass
-
-    def HandleContigContainerReopened(self, context, deserialized):
-        assert isinstance(deserialized, list)
-        assert len(deserialized) <= self._simhier.GetCapacityByCollectionID(context.current_cid)
-        self._values_by_cid[context.current_cid] = deserialized
 
     def HandleContigContainerFullDump(self, context, deserialized):
         assert isinstance(deserialized, list)
@@ -189,9 +163,6 @@ class DataExtractionHandler(BlobHandler):
 
     def HandleSparseContainerCarried(self, context):
         pass
-
-    def HandleSparseContainerReopened(self, context, deserialized):
-        self._ResetSparseContainer(context, deserialized)
 
     def HandleSparseContainerFullDump(self, context, deserialized):
         self._ResetSparseContainer(context, deserialized)
