@@ -12,7 +12,7 @@ class SimHierarchy:
         #    --> This means that we only show collectables that were actually collected.
         #        The database has all the metadata to add everything to the hierarchy,
         #        but without any collected data it just looks cluttered.
-        cmd = "SELECT FullPath,SerializationCID,ClockID,TypeName FROM CollectableTreeNodes"
+        cmd = "SELECT FullPath,CID,ClockID,TypeName FROM CollectableTreeNodes"
         if show_in_ui_only:
             cmd += " WHERE ShowInUI=1"
         cursor.execute(cmd)

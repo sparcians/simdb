@@ -5,7 +5,7 @@
 #include "simdb/apps/App.hpp"
 #include "simdb/apps/argos/ArgosResources.hpp"
 #include "simdb/apps/argos/Checkpointer.hpp"
-#include "simdb/apps/argos/Collectables.hpp"
+#include "simdb/apps/argos/EntryPoint.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStagerInterface.hpp"
 #include "simdb/apps/argos/Timestamps.hpp"
@@ -48,14 +48,14 @@ public:
         clks_tbl.setColumnDefaultValue("Denom", 0);
 
         auto& collectable_tns_tbl = schema.addTable("CollectableTreeNodes");
-        collectable_tns_tbl.addColumn("SerializationCID", dt::int32_t);
+        collectable_tns_tbl.addColumn("CID", dt::int32_t);
         collectable_tns_tbl.addColumn("FullPath", dt::string_t);
         collectable_tns_tbl.addColumn("ClockID", dt::int32_t);
         collectable_tns_tbl.addColumn("TypeName", dt::string_t);
         collectable_tns_tbl.addColumn("ShowInUI", dt::int32_t);
         collectable_tns_tbl.setColumnDefaultValue("ShowInUI", 0);
-        collectable_tns_tbl.ensureUnique("SerializationCID");
-        collectable_tns_tbl.createIndexOn("SerializationCID");
+        collectable_tns_tbl.ensureUnique("CID");
+        collectable_tns_tbl.createIndexOn("CID");
         collectable_tns_tbl.unsetPrimaryKey();
 
         // TODO cnyce: populate this table in SimDB (Sparta will handle it for now)
@@ -96,9 +96,9 @@ public:
         timestamp_clocks_tbl.unsetPrimaryKey();
 
         auto& queue_max_sizes_tbl = schema.addTable("QueueMaxSizes");
-        queue_max_sizes_tbl.addColumn("SerializationCID", dt::int32_t);
+        queue_max_sizes_tbl.addColumn("CID", dt::int32_t);
         queue_max_sizes_tbl.addColumn("MaxSize", dt::int32_t);
-        queue_max_sizes_tbl.ensureUnique("SerializationCID");
+        queue_max_sizes_tbl.ensureUnique("CID");
         queue_max_sizes_tbl.unsetPrimaryKey();
 
         auto& notif_tbl = schema.addTable("Notifications");
@@ -107,15 +107,15 @@ public:
         notif_tbl.addColumn("NotifStr", dt::string_t);
 
         auto& dyn_field_type_changes_tbl = schema.addTable("DynamicFieldTypeChanges");
-        dyn_field_type_changes_tbl.addColumn("SerializationCID", dt::int32_t);
+        dyn_field_type_changes_tbl.addColumn("CID", dt::int32_t);
         dyn_field_type_changes_tbl.addColumn("FieldTypes", dt::string_t);
         dyn_field_type_changes_tbl.addColumn("Timestamp", dt::uint64_t);
-        dyn_field_type_changes_tbl.createCompoundIndexOn({"SerializationCID", "Timestamp"});
+        dyn_field_type_changes_tbl.createCompoundIndexOn({"CID", "Timestamp"});
 
         auto& dyn_field_names_tbl = schema.addTable("DynamicFieldNames");
-        dyn_field_names_tbl.addColumn("SerializationCID", dt::int32_t);
+        dyn_field_names_tbl.addColumn("CID", dt::int32_t);
         dyn_field_names_tbl.addColumn("FieldNames", dt::string_t);
-        dyn_field_names_tbl.createIndexOn("SerializationCID");
+        dyn_field_names_tbl.createIndexOn("CID");
 
         auto& tiny_string_ids_tbl = schema.addTable("TinyStringIDs");
         tiny_string_ids_tbl.addColumn("StringValue", dt::string_t);
@@ -207,10 +207,10 @@ public:
     //!
     //!   For scalar string-like types (std::string, const char*):
     //!       "string"
-    CollectionEntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
-                                                const std::string& encoded_scalar_type)
+    EntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
+                                      const std::string& encoded_scalar_type)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(this);
+        auto entry_point = std::make_unique<EntryPoint>(this);
         encoded_dtypes_[entry_point->getID()] = encoded_scalar_type;
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         entry_points_.emplace_back(std::move(entry_point));
@@ -225,10 +225,10 @@ public:
     //!       "Inst_sparse_capacity32"
     //!       "bool_contig_capacity4"
     //!       ...
-    CollectionEntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
-                                                   const std::string& encoded_container_type)
+    EntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
+                                         const std::string& encoded_container_type)
     {
-        auto entry_point = std::make_unique<CollectionEntryPoint>(this);
+        auto entry_point = std::make_unique<EntryPoint>(this);
         encoded_dtypes_[entry_point->getID()] = encoded_container_type;
         meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
         entry_points_.emplace_back(std::move(entry_point));
@@ -328,11 +328,11 @@ public:
         ledger_->recordSparse(cid, std::move(sparse_bin_bytes));
     }
 
-    void recordOpenChange(uint16_t cid, bool open) override
+    void recordLifecycleChange(uint16_t cid, bool closed) override
     {
         assertLive_();
         checkTimeAdvanced_();
-        ledger_->recordOpenChange(cid, open);
+        ledger_->recordLifecycleChange(cid, closed);
     }
 
     void postNotif(const std::string& notif, NotifType type) override
@@ -375,138 +375,9 @@ public:
     }
 
 private:
-    struct ScalarEntry
-    {
-        uint16_t cid = 0;
-        std::vector<char> scalar_bytes;
-
-        ScalarEntry(uint16_t cid, std::vector<char>&& scalar_bytes) :
-            cid(cid),
-            scalar_bytes(std::move(scalar_bytes))
-        {
-        }
-
-        ScalarEntry() = default;
-        ScalarEntry(ScalarEntry&&) = default;
-        ScalarEntry& operator=(ScalarEntry&&) = default;
-    };
-
-    struct ContigEntry
-    {
-        uint16_t cid = 0;
-        std::vector<std::vector<char>> contig_bin_bytes;
-
-        ContigEntry(uint16_t cid, std::vector<std::vector<char>>&& contig_bin_bytes) :
-            cid(cid),
-            contig_bin_bytes(std::move(contig_bin_bytes))
-        {
-        }
-
-        ContigEntry() = default;
-        ContigEntry(ContigEntry&&) = default;
-        ContigEntry& operator=(ContigEntry&&) = default;
-    };
-
-    struct SparseEntry
-    {
-        uint16_t cid = 0;
-        std::map<uint16_t, std::vector<char>> sparse_bin_bytes;
-
-        SparseEntry(uint16_t cid, std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes) :
-            cid(cid),
-            sparse_bin_bytes(std::move(sparse_bin_bytes))
-        {
-        }
-
-        SparseEntry() = default;
-        SparseEntry(SparseEntry&&) = default;
-        SparseEntry& operator=(SparseEntry&&) = default;
-    };
-
-    struct NotifEntry
-    {
-        ValidValue<uint64_t> sim_time;
-        std::string notif;
-        NotifType type = NotifType::__INVALID__;
-
-        NotifEntry(const Timestamp* timestamp, const std::string& notif, NotifType type) :
-            notif(notif),
-            type(type)
-        {
-            if (timestamp)
-            {
-                sim_time = timestamp->getTime();
-            }
-        }
-
-        NotifEntry() = default;
-        NotifEntry(NotifEntry&&) = default;
-        NotifEntry& operator=(NotifEntry&&) = default;
-    };
-
     ConcurrentQueue<NotifEntry>* notif_head_ = nullptr;
     ConcurrentQueue<NotifEntry> pending_notif_entries_;
 
-    class Ledger
-    {
-    public:
-        Ledger(uint64_t sim_time, uint64_t window_id, uint64_t reserve_num_scalars = 0,
-               uint64_t reserve_num_contigs = 0, uint64_t reserve_num_sparses = 0) :
-            sim_time_(sim_time),
-            window_id_(window_id)
-        {
-            scalar_records_.reserve(reserve_num_scalars);
-            contig_records_.reserve(reserve_num_contigs);
-            sparse_records_.reserve(reserve_num_sparses);
-        }
-
-        Ledger(Ledger&&) = default;
-        Ledger(const Ledger&) = delete;
-
-        void recordScalar(uint16_t cid, std::vector<char>&& scalar_bytes)
-        {
-            scalar_records_.emplace_back(cid, std::move(scalar_bytes));
-        }
-
-        void recordContig(uint16_t cid, std::vector<std::vector<char>>&& contig_bytes)
-        {
-            contig_records_.emplace_back(cid, std::move(contig_bytes));
-        }
-
-        void recordSparse(uint16_t cid, std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes)
-        {
-            sparse_records_.emplace_back(cid, std::move(sparse_bin_bytes));
-        }
-
-        void recordOpenChange(uint16_t cid, bool open) { open_states_[cid] = open; }
-
-        uint64_t getSimTime() const { return sim_time_; }
-
-        uint64_t getWindowId() const { return window_id_; }
-
-        bool hasEntries() const
-        {
-            return !scalar_records_.empty() || !contig_records_.empty() || !sparse_records_.empty();
-        }
-
-        std::vector<ScalarEntry> releaseScalarEntries() { return std::move(scalar_records_); }
-
-        std::vector<ContigEntry> releaseContigEntries() { return std::move(contig_records_); }
-
-        std::vector<SparseEntry> releaseSparseEntries() { return std::move(sparse_records_); }
-
-        const std::unordered_map<uint16_t, bool>& getOpenStates() const { return open_states_; }
-
-    private:
-        uint64_t sim_time_ = 0;
-        uint64_t window_id_ = 0;
-        std::vector<ScalarEntry> scalar_records_;
-        std::vector<ContigEntry> contig_records_;
-        std::vector<SparseEntry> sparse_records_;
-        std::unordered_map<uint16_t, bool> open_states_;
-    };
-
-    using LedgerPtr = std::unique_ptr<Ledger>;
     LedgerPtr ledger_;
     ConcurrentQueue<LedgerPtr>* pipeline_head_ = nullptr;
 
@@ -593,9 +464,9 @@ private:
                     updateContainerMaxSize_(cid, getSize_(data));
                 }
 
-                for (const auto& [cid, open] : ledger->getOpenStates())
+                for (const auto& [cid, closed] : ledger->getClosedStates())
                 {
-                    checkpointers_.at(cid)->recordOpenChange(window_id, open);
+                    checkpointers_.at(cid)->recordLifecycleChange(window_id, closed);
                 }
 
                 QueueCollectionData to_send;
@@ -687,7 +558,7 @@ private:
             if (!valid_cids.empty())
             {
                 std::ostringstream oss;
-                oss << "UPDATE CollectableTreeNodes SET ShowInUI=1 WHERE SerializationCID IN (";
+                oss << "UPDATE CollectableTreeNodes SET ShowInUI=1 WHERE CID IN (";
 
                 bool comma = false;
                 for (const auto cid : valid_cids)
@@ -704,7 +575,7 @@ private:
             }
 
             auto query = db_mgr->createQuery("CollectableTreeNodes");
-            query->addConstraintForInt("SerializationCID", SetConstraints::NOT_IN_SET, valid_cids);
+            query->addConstraintForInt("CID", SetConstraints::NOT_IN_SET, valid_cids);
 
             struct CID_Info
             {
@@ -986,7 +857,7 @@ private:
     }
 
     std::unique_ptr<Timestamp> timestamp_;
-    std::vector<std::unique_ptr<CollectionEntryPoint>> entry_points_;
+    std::vector<std::unique_ptr<EntryPoint>> entry_points_;
     std::unordered_map<uint16_t, std::string> encoded_dtypes_;
     PipelineStager* pipeline_stager_ = nullptr;
     ValidValue<uint64_t> current_stage_time_;

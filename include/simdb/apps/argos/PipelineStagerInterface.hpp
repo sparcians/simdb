@@ -26,7 +26,7 @@ public:
 
     virtual void stage(uint16_t cid, std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes) = 0;
 
-    virtual void recordOpenChange(uint16_t cid, bool open) = 0;
+    virtual void recordLifecycleChange(uint16_t cid, bool closed) = 0;
 
     virtual void postNotif(const std::string& notif, NotifType type) = 0;
 

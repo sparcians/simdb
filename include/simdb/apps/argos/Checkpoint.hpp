@@ -16,10 +16,8 @@ namespace simdb::argos {
 //!   [uint8_t action]   // encoding
 enum class Action : uint8_t {
     // Common to all collected types
-    DISABLED = 0,
-    ENABLED,
-    QUIETED,
-    AWAKENED,
+    CLOSED = 0,
+    REOPENED,
     FULL,
     CARRY,
 
@@ -77,10 +75,10 @@ public:
     {
     }
 
-    // Use this ctor for enable/disabled events
-    ScalarCheckpoint(std::shared_ptr<ScalarCheckpoint> prev, uint64_t window_id, bool switched_to_enabled) :
+    // Use this ctor for close/reopen lifecycle events
+    ScalarCheckpoint(std::shared_ptr<ScalarCheckpoint> prev, uint64_t window_id, bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
-        enabled_change_(switched_to_enabled)
+        lifecycle_change_(switched_to_closed)
     {
     }
 
@@ -90,9 +88,11 @@ public:
 
     ScalarCheckpoint* next() { return static_cast<ScalarCheckpoint*>(getNext()); }
 
-    bool isDataCheckpoint() const { return !enabled_change_.isValid(); }
+    bool isDataCheckpoint() const { return !lifecycle_change_.isValid(); }
 
-    bool isDisabledEvent() const { return enabled_change_.isValid() && !enabled_change_.getValue(); }
+    bool isClosedEvent() const { return lifecycle_change_.isValid() && lifecycle_change_.getValue(); }
+
+    bool isLifecycleEvent() const { return lifecycle_change_.isValid(); }
 
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
@@ -106,15 +106,15 @@ public:
     std::unique_ptr<CollectedData> encodeForPipeline(uint16_t cid, bool force_snapshot)
     {
         // ScalarCheckpoints only return:
-        //   ENABLED
-        //   DISABLED
+        //   CLOSED
+        //   REOPENED
         //   FULL
         //   CARRY
         //
         // The incoming force_snapshot flag is true when we require a heartbeat refresh.
-        if (enabled_change_.isValid())
+        if (lifecycle_change_.isValid())
         {
-            return encodeEnabledEvt_(cid);
+            return encodeLifecycleEvt_(cid);
         }
 
         if (force_snapshot)
@@ -147,37 +147,25 @@ private:
         return checkpoint;
     }
 
-    std::unique_ptr<CollectedData> encodeEnabledEvt_(uint16_t cid)
+    std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        if (enabled_change_)
+        if (lifecycle_change_.getValue())
         {
-            // Get the full bytes from the checkpoint chain
-            auto anchor = prev();
-            while (anchor)
-            {
-                if (!anchor->full_bytes_.empty())
-                {
-                    break;
-                }
-                anchor = anchor->prev();
-            }
-
-            auto valid = anchor && !anchor->full_bytes_.empty();
-            if (!valid)
-            {
-                return nullptr;
-            }
-
             auto encoded = std::make_unique<CollectedData>(cid);
-            auto& buf = encoded->getBuffer();
-            buf.append(Action::ENABLED);
-            buf.append(anchor->full_bytes_);
+            encoded->getBuffer().append(Action::CLOSED);
             return encoded;
+        }
+
+        const auto* data_anchor = prevDataCheckpoint_();
+        if (!data_anchor)
+        {
+            return nullptr;
         }
 
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
-        buf.append(Action::DISABLED);
+        buf.append(Action::REOPENED);
+        buf.append(data_anchor->full_bytes_);
         return encoded;
     }
 
@@ -193,7 +181,9 @@ private:
 
     std::unique_ptr<CollectedData> encodeDelta_(uint16_t cid)
     {
-        assert(prev() && prev()->full_bytes_ == full_bytes_ && !full_bytes_.empty());
+        const auto* data_prev = prevDataCheckpoint_();
+        assert(data_prev && data_prev->full_bytes_ == full_bytes_ && !full_bytes_.empty());
+        (void)data_prev;
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
         buf.append(Action::CARRY);
@@ -201,7 +191,7 @@ private:
     }
 
     std::vector<char> full_bytes_;
-    ValidValue<bool> enabled_change_;
+    ValidValue<bool> lifecycle_change_;
 };
 
 class ContigContainerCheckpoint : public CollectableCheckpoint
@@ -215,11 +205,11 @@ public:
     {
     }
 
-    // Use this ctor for enable/disabled events
+    // Use this ctor for close/reopen lifecycle events
     ContigContainerCheckpoint(std::shared_ptr<ContigContainerCheckpoint> prev, uint64_t window_id,
-                              bool switched_to_enabled) :
+                              bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
-        enabled_change_(switched_to_enabled)
+        lifecycle_change_(switched_to_closed)
     {
     }
 
@@ -229,9 +219,11 @@ public:
 
     ContigContainerCheckpoint* next() { return static_cast<ContigContainerCheckpoint*>(getNext()); }
 
-    bool isDataCheckpoint() const { return !enabled_change_.isValid(); }
+    bool isDataCheckpoint() const { return !lifecycle_change_.isValid(); }
 
-    bool isDisabledEvent() const { return enabled_change_.isValid() && !enabled_change_.getValue(); }
+    bool isClosedEvent() const { return lifecycle_change_.isValid() && lifecycle_change_.getValue(); }
+
+    bool isLifecycleEvent() const { return lifecycle_change_.isValid(); }
 
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
@@ -245,9 +237,9 @@ public:
 
     std::unique_ptr<CollectedData> encodeForPipeline(uint16_t cid, bool force_snapshot)
     {
-        if (enabled_change_.isValid())
+        if (lifecycle_change_.isValid())
         {
-            return encodeEnabledEvt_(cid);
+            return encodeLifecycleEvt_(cid);
         }
 
         if (force_snapshot)
@@ -274,7 +266,7 @@ private:
     const ContigContainerCheckpoint* prevDataCheckpoint_() const
     {
         const auto* checkpoint = prev();
-        while (checkpoint && checkpoint->enabled_change_.isValid())
+        while (checkpoint && !checkpoint->isDataCheckpoint())
         {
             checkpoint = checkpoint->prev();
         }
@@ -313,26 +305,25 @@ private:
         }
     }
 
-    std::unique_ptr<CollectedData> encodeEnabledEvt_(uint16_t cid)
+    std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        if (enabled_change_)
+        if (lifecycle_change_.getValue())
         {
-            const auto* data_anchor = prevDataCheckpoint_();
-            if (!data_anchor)
-            {
-                return nullptr;
-            }
-
             auto encoded = std::make_unique<CollectedData>(cid);
-            auto& buf = encoded->getBuffer();
-            buf.append(Action::ENABLED);
-            appendContigBins_(buf, data_anchor->full_bytes_);
+            encoded->getBuffer().append(Action::CLOSED);
             return encoded;
+        }
+
+        const auto* data_anchor = prevDataCheckpoint_();
+        if (!data_anchor)
+        {
+            return nullptr;
         }
 
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
-        buf.append(Action::DISABLED);
+        buf.append(Action::REOPENED);
+        appendContigBins_(buf, data_anchor->full_bytes_);
         return encoded;
     }
 
@@ -368,7 +359,7 @@ private:
     }
 
     std::vector<std::vector<char>> full_bytes_;
-    ValidValue<bool> enabled_change_;
+    ValidValue<bool> lifecycle_change_;
 };
 
 class SparseContainerCheckpoint : public CollectableCheckpoint
@@ -382,11 +373,11 @@ public:
     {
     }
 
-    // Use this ctor for enable/disabled events
+    // Use this ctor for close/reopen lifecycle events
     SparseContainerCheckpoint(std::shared_ptr<SparseContainerCheckpoint> prev, uint64_t window_id,
-                              bool switched_to_enabled) :
+                              bool switched_to_closed) :
         CollectableCheckpoint(prev, window_id),
-        enabled_change_(switched_to_enabled)
+        lifecycle_change_(switched_to_closed)
     {
     }
 
@@ -396,9 +387,11 @@ public:
 
     SparseContainerCheckpoint* next() { return static_cast<SparseContainerCheckpoint*>(getNext()); }
 
-    bool isDataCheckpoint() const { return !enabled_change_.isValid(); }
+    bool isDataCheckpoint() const { return !lifecycle_change_.isValid(); }
 
-    bool isDisabledEvent() const { return enabled_change_.isValid() && !enabled_change_.getValue(); }
+    bool isClosedEvent() const { return lifecycle_change_.isValid() && lifecycle_change_.getValue(); }
+
+    bool isLifecycleEvent() const { return lifecycle_change_.isValid(); }
 
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
@@ -412,9 +405,9 @@ public:
 
     std::unique_ptr<CollectedData> encodeForPipeline(uint16_t cid, bool force_snapshot)
     {
-        if (enabled_change_.isValid())
+        if (lifecycle_change_.isValid())
         {
-            return encodeEnabledEvt_(cid);
+            return encodeLifecycleEvt_(cid);
         }
 
         if (force_snapshot)
@@ -441,7 +434,7 @@ private:
     const SparseContainerCheckpoint* prevDataCheckpoint_() const
     {
         const auto* checkpoint = prev();
-        while (checkpoint && checkpoint->enabled_change_.isValid())
+        while (checkpoint && !checkpoint->isDataCheckpoint())
         {
             checkpoint = checkpoint->prev();
         }
@@ -480,26 +473,25 @@ private:
         }
     }
 
-    std::unique_ptr<CollectedData> encodeEnabledEvt_(uint16_t cid)
+    std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        if (enabled_change_)
+        if (lifecycle_change_.getValue())
         {
-            const auto* data_anchor = prevDataCheckpoint_();
-            if (!data_anchor)
-            {
-                return nullptr;
-            }
-
             auto encoded = std::make_unique<CollectedData>(cid);
-            auto& buf = encoded->getBuffer();
-            buf.append(Action::ENABLED);
-            appendSparseBins_(buf, data_anchor->full_bytes_);
+            encoded->getBuffer().append(Action::CLOSED);
             return encoded;
+        }
+
+        const auto* data_anchor = prevDataCheckpoint_();
+        if (!data_anchor)
+        {
+            return nullptr;
         }
 
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
-        buf.append(Action::DISABLED);
+        buf.append(Action::REOPENED);
+        appendSparseBins_(buf, data_anchor->full_bytes_);
         return encoded;
     }
 
@@ -535,7 +527,7 @@ private:
     }
 
     std::map<uint16_t, std::vector<char>> full_bytes_;
-    ValidValue<bool> enabled_change_;
+    ValidValue<bool> lifecycle_change_;
 };
 
 } // namespace simdb::argos

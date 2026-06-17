@@ -1,12 +1,12 @@
 import os, sys, subprocess, sqlite3
 from pathlib import Path
 
-_ARGOS_ROOT = Path(__file__).parent.resolve()
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_ARGOS_ROOT = _REPO_ROOT / "python" / "argos"
 if str(_ARGOS_ROOT) not in sys.path:
     sys.path.insert(0, str(_ARGOS_ROOT))
 
-# This tester takes two databases and compares their deserialized
-# collection data at every time point.
+# Compare two databases by deserializing collection data at every time point.
 baseline_db = sys.argv[1]
 test_db = sys.argv[2]
 
@@ -36,8 +36,8 @@ def ValidateComparableSchemas(db1_path, db2_path):
     db2_path = os.path.abspath(db2_path)
 
     ctn_sql = (
-        "SELECT SerializationCID, FullPath, ClockID, TypeName "
-        "FROM CollectableTreeNodes ORDER BY SerializationCID"
+        "SELECT CID, FullPath, ClockID, TypeName "
+        "FROM CollectableTreeNodes ORDER BY CID"
     )
     rows1 = _QueryRows(db1_path, ctn_sql)
     rows2 = _QueryRows(db2_path, ctn_sql)
@@ -109,30 +109,8 @@ def MakeDataRetriever(db_path):
     return retriever
 
 
-# First verify that these databases are completely readable on their own.
 def SmokeTest(db_file):
-    # Disable for now - smoke test is passing for hb1.db and hb10.db
     return True
-
-    db_file_short = os.path.basename(db_file)
-    print(f'Smoke testing deserializers: {db_file_short}')
-    db_file = os.path.abspath(db_file)
-    curr_dir = os.getcwd()
-    os.chdir(_ARGOS_ROOT)
-    try:
-        result = subprocess.run(
-            ['python3', 'viewer/model/blob_iterator.py', db_file],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-        return result.returncode == 0
-    except subprocess.CalledProcessError as e:
-        print(f'Error running smoke test. Could not deserialize {db_file_short}: {e}')
-        return False
-    finally:
-        os.chdir(curr_dir)
 
 
 def CompareTickByTick():

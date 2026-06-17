@@ -1,4 +1,4 @@
-// <Collectables.hpp> -*- C++ -*-
+// <EntryPoint.hpp> -*- C++ -*-
 
 #pragma once
 
@@ -11,15 +11,15 @@
 
 namespace simdb::argos {
 
-//! \class CollectionEntryPoint
+//! \class EntryPoint
 //! \brief Main entry point into Argos collection.
 //!
 //! TODO cnyce: These need to be template classes when the collection
 //! code from Sparta is moved into SimDB.
-class CollectionEntryPoint
+class EntryPoint
 {
 public:
-    CollectionEntryPoint(PipelineStagerInterface* stager_interface) :
+    EntryPoint(PipelineStagerInterface* stager_interface) :
         tiny_strings_(stager_interface->getResources()->getTinyStrings()),
         stager_interface_(stager_interface)
     {
@@ -29,30 +29,27 @@ public:
     uint16_t getID() const { return cid_; }
 
     /// Suppress heartbeat re-emission of previously seen bytes.
-    void quiet()
+    void close()
     {
-        if (!quiet_)
+        if (!closed_)
         {
-            quiet_ = true;
-            stager_interface_->recordOpenChange(getID(), quiet_);
+            closed_ = true;
+            stager_interface_->recordLifecycleChange(getID(), closed_);
         }
     }
 
     /// Re-enable heartbeat re-emission of previously seen bytes.
-    void awaken()
+    void reopen()
     {
-        if (quiet_)
+        if (closed_)
         {
-            quiet_ = false;
-            stager_interface_->recordOpenChange(getID(), quiet_);
+            closed_ = false;
+            stager_interface_->recordLifecycleChange(getID(), closed_);
         }
     }
 
-    /// Check enabled
-    bool enabled() const { return enabled_; }
-
     /// Check whether heartbeat re-emission is suppressed.
-    bool quieted() const { return quiet_; }
+    bool closed() const { return closed_; }
 
     /// For testing purposes only. DO NOT CALL IN PRODUCTION.
     static void resetCIDs() { nextCID_() = 0; }
@@ -66,28 +63,19 @@ public:
     //! the input data structure).
     void setScalarValueBytes(std::vector<char>&& scalar_bytes)
     {
-        if (enabled())
-        {
-            stager_interface_->stage(getID(), std::move(scalar_bytes));
-        }
+        stager_interface_->stage(getID(), std::move(scalar_bytes));
     }
 
     //! \see setScalarValueBytes
     void setContigContainerBinBytes(std::vector<std::vector<char>>&& contig_bin_bytes)
     {
-        if (enabled())
-        {
-            stager_interface_->stage(getID(), std::move(contig_bin_bytes));
-        }
+        stager_interface_->stage(getID(), std::move(contig_bin_bytes));
     }
 
     //! \see setScalarValueBytes
     void setSparseContainerBinBytes(std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes)
     {
-        if (enabled())
-        {
-            stager_interface_->stage(getID(), std::move(sparse_bin_bytes));
-        }
+        stager_interface_->stage(getID(), std::move(sparse_bin_bytes));
     }
 
 private:
@@ -106,11 +94,8 @@ private:
     /// Unique collectable ID
     const uint16_t cid_{nextCID_()};
 
-    /// Enabled flag
-    bool enabled_ = true;
-
     /// Suppress heartbeat re-emission while true
-    bool quiet_ = false;
+    bool closed_ = false;
 
     std::string collectable_type_name_;
     TinyStrings<>* tiny_strings_;

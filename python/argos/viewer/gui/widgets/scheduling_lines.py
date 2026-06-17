@@ -22,7 +22,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid = None
 
         cursor = frame.db.cursor()
-        cmd = 'SELECT SerializationCID,MaxSize FROM QueueMaxSizes'
+        cmd = 'SELECT CID,MaxSize FROM QueueMaxSizes'
 
         cursor.execute(cmd)
         self.queue_max_sizes_by_collection_id = {}

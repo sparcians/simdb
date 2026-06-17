@@ -16,3 +16,10 @@ if [ ${REGRESS_SIMDB} -ne 0 ]; then
     echo "ERROR: regress of SimDB FAILED!!!"
     exit 1
 fi
+
+make ArgosSmoke_10k
+REGRESS_ARGOS=$?
+if [ ${REGRESS_ARGOS} -ne 0 ]; then
+    echo "ERROR: ArgosSmoke 10000 FAILED!!!"
+    exit 1
+fi

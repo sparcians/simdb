@@ -1,9 +1,7 @@
-#simdb_test(SparseCheckpointer SparseCheckpointer/main.cpp)
-#simdb_test(ContigCheckpointer ContigCheckpointer/main.cpp)
-#simdb_test(CheckpointDeltas CheckpointDeltas/main.cpp)
-#simdb_test(ScalarCheckpointer ScalarCheckpointer/main.cpp)
-#simdb_test(ScalarCheckpointerLifecycle ScalarCheckpointerLifecycle/main.cpp)
-#simdb_test(CheckpointStager CheckpointStager/main.cpp)
-simdb_test(PipelineStager PipelineStager/main.cpp)
-simdb_test(PipelineIntegration PipelineIntegration/main.cpp)
+simdb_test(ArgosSmoke main.cpp)
 
+add_custom_target(ArgosSmoke_10k
+    COMMAND $<TARGET_FILE:ArgosSmoke> 10000
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:ArgosSmoke>
+    DEPENDS ArgosSmoke
+    VERBATIM)

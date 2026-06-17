@@ -9,29 +9,34 @@ if _PACKAGE_ROOT not in sys.path:
 from viewer.model.data_deserializers import ByteBuffer
 from viewer.model.blob_handlers import *
 
+class ActionInt:
+    NEXT: int = 0
+
+    @classmethod
+    def Next(cls):
+        next = cls.NEXT
+        cls.NEXT += 1
+        return next
+
 # Common actions applicable to all
-_DISABLED = 0
-_ENABLED = 1
-_QUIETED = 2
-_AWAKENED = 3
-_FULL = 4
-_CARRY = 5
+_CLOSED = ActionInt.Next()
+_REOPENED = ActionInt.Next()
+_FULL = ActionInt.Next()
+_CARRY = ActionInt.Next()
 
 # Contig container-specific actions
-_CONTIG_CONTAINER_SWAP = 6
-_CONTIG_CONTAINER_ARRIVE = 7
-_CONTIG_CONTAINER_DEPART = 8
-_CONTIG_CONTAINER_BOOKENDS = 9
+_CONTIG_CONTAINER_SWAP = ActionInt.Next()
+_CONTIG_CONTAINER_ARRIVE = ActionInt.Next()
+_CONTIG_CONTAINER_DEPART = ActionInt.Next()
+_CONTIG_CONTAINER_BOOKENDS = ActionInt.Next()
 
 # Sparse container-specific actions
-_SPARSE_CONTAINER_SWAP = 10
-_SPARSE_CONTAINER_REMOVE = 11
+_SPARSE_CONTAINER_SWAP = ActionInt.Next()
+_SPARSE_CONTAINER_REMOVE = ActionInt.Next()
 
 _VALID_COMMON_ACTIONS = {
-    _DISABLED,
-    _ENABLED,
-    _QUIETED,
-    _AWAKENED,
+    _CLOSED,
+    _REOPENED,
     _FULL,
     _CARRY
 }
@@ -94,20 +99,16 @@ def HandleAction(resources, context):
 def HandleScalarAction(resources, context, action):
     assert action in _VALID_SCALAR_ACTIONS
 
-    if action == _DISABLED:
-        resources.handler.HandleScalarDisabled(context)
-    elif action == _QUIETED:
-        resources.handler.HandleScalarQuieted(context)
+    if action == _CLOSED:
+        resources.handler.HandleScalarClosed(context)
     elif action == _CARRY:
         resources.handler.HandleScalarCarried(context)
     else:
         type_deserializer = resources.GetDeserializer(context.current_cid)
         deserialized = type_deserializer.Deserialize(resources.buf)
 
-        if action == _ENABLED:
-            resources.handler.HandleScalarEnabled(context, deserialized)
-        elif action == _AWAKENED:
-            resources.handler.HandleScalarAwakened(context, deserialized)
+        if action == _REOPENED:
+            resources.handler.HandleScalarReopened(context, deserialized)
         elif action == _FULL:
             resources.handler.HandleScalarFullDump(context, deserialized)
 
@@ -116,25 +117,21 @@ def HandleScalarAction(resources, context, action):
 def HandleContigContainerAction(resources, context, action):
     assert action in _VALID_CONTIG_CONTAINER_ACTIONS
 
-    if action == _DISABLED:
-        resources.handler.HandleContigContainerDisabled(context)
-    elif action == _QUIETED:
-        resources.handler.HandleContigContainerQuieted(context)
+    if action == _CLOSED:
+        resources.handler.HandleContigContainerClosed(context)
     elif action == _CARRY:
         resources.handler.HandleContigContainerCarried(context)
     else:
         type_deserializer = resources.GetDeserializer(context.current_cid)
 
-        if action in (_ENABLED, _AWAKENED, _FULL):
+        if action in (_REOPENED, _FULL):
             size = resources.buf.Read('H')
             deserialized = []
             for _ in range(size):
                 deserialized.append(type_deserializer.Deserialize(resources.buf))
 
-            if action == _ENABLED:
-                resources.handler.HandleContigContainerEnabled(context, deserialized)
-            elif action == _AWAKENED:
-                resources.handler.HandleContigContainerAwakened(context, deserialized)
+            if action == _REOPENED:
+                resources.handler.HandleContigContainerReopened(context, deserialized)
             elif action == _FULL:
                 resources.handler.HandleContigContainerFullDump(context, deserialized)
 
@@ -159,16 +156,14 @@ def HandleContigContainerAction(resources, context, action):
 def HandleSparseContainerAction(resources, context, action):
     assert action in _VALID_SPARSE_CONTAINER_ACTIONS
 
-    if action == _DISABLED:
-        resources.handler.HandleSparseContainerDisabled(context)
-    elif action == _QUIETED:
-        resources.handler.HandleSparseContainerQuieted(context)
+    if action == _CLOSED:
+        resources.handler.HandleSparseContainerClosed(context)
     elif action == _CARRY:
         resources.handler.HandleSparseContainerCarried(context)
     else:
         type_deserializer = resources.GetDeserializer(context.current_cid)
 
-        if action in (_ENABLED, _AWAKENED, _FULL):
+        if action in (_REOPENED, _FULL):
             size = resources.buf.Read('H')
             deserialized = {}
             for _ in range(size):
@@ -176,10 +171,8 @@ def HandleSparseContainerAction(resources, context, action):
                 bin_deserialized = type_deserializer.Deserialize(resources.buf)
                 deserialized[bin_idx] = bin_deserialized
 
-            if action == _ENABLED:
-                resources.handler.HandleSparseContainerEnabled(context, deserialized)
-            elif action == _AWAKENED:
-                resources.handler.HandleSparseContainerAwakened(context, deserialized)
+            if action == _REOPENED:
+                resources.handler.HandleSparseContainerReopened(context, deserialized)
             elif action == _FULL:
                 resources.handler.HandleSparseContainerFullDump(context, deserialized)
 

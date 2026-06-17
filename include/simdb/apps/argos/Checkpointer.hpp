@@ -62,7 +62,7 @@ std::shared_ptr<CheckpointT> getSharedCheckpoint(CheckpointT* raw, const std::sh
 
 inline void recordWireSent(Action action, size_t& wire_distance)
 {
-    if (action == Action::FULL || action == Action::ENABLED)
+    if (action == Action::FULL || action == Action::REOPENED)
     {
         wire_distance = 0;
     } else
@@ -113,7 +113,7 @@ public:
         throw DBException("Not implemented");
     }
 
-    virtual void recordOpenChange(uint64_t window_id, bool open) = 0;
+    virtual void recordLifecycleChange(uint64_t window_id, bool closed) = 0;
 
     virtual std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
                                                                           uint16_t cid) = 0;
@@ -147,22 +147,21 @@ protected:
         return last_full_wired_sim_time_.getValue() < window_lo;
     }
 
-    bool shouldAbsentHeartbeatRefresh_(uint64_t sim_time, bool tip_disabled) const
+    bool shouldAbsentHeartbeatRefresh_(uint64_t sim_time, bool tip_closed) const
     {
         if (shouldHeartbeatRefresh_(sim_time))
         {
             return true;
         }
-        if (!tip_disabled || !last_disabled_wired_sim_time_.isValid() ||
-            sim_time <= last_disabled_wired_sim_time_.getValue())
+        if (!tip_closed || !last_closed_wired_sim_time_.isValid() || sim_time <= last_closed_wired_sim_time_.getValue())
         {
             return false;
         }
         const uint64_t window_lo = sim_time >= heartbeat_ ? sim_time - heartbeat_ + 1 : 0;
-        return last_disabled_wired_sim_time_.getValue() < window_lo;
+        return last_closed_wired_sim_time_.getValue() < window_lo;
     }
 
-    bool needsDisabledPriming_(uint64_t sim_time) const
+    bool needsClosedPriming_(uint64_t sim_time) const
     {
         if (!last_full_wired_sim_time_.isValid())
         {
@@ -175,19 +174,19 @@ protected:
     void recordWireSent_(Action action, uint64_t sim_time)
     {
         detail::recordWireSent(action, wire_distance_);
-        if (action == Action::FULL || action == Action::ENABLED)
+        if (action == Action::FULL || action == Action::REOPENED)
         {
             last_full_wired_sim_time_ = sim_time;
-        } else if (action == Action::DISABLED)
+        } else if (action == Action::CLOSED)
         {
-            last_disabled_wired_sim_time_ = sim_time;
+            last_closed_wired_sim_time_ = sim_time;
         }
     }
 
     const size_t heartbeat_;
     size_t wire_distance_ = 0;
     ValidValue<uint64_t> last_full_wired_sim_time_;
-    ValidValue<uint64_t> last_disabled_wired_sim_time_;
+    ValidValue<uint64_t> last_closed_wired_sim_time_;
 };
 
 //! \class ScalarCheckpointer
@@ -211,9 +210,9 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void recordOpenChange(uint64_t window_id, bool open) override
+    void recordLifecycleChange(uint64_t window_id, bool closed) override
     {
-        head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, open);
+        head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, closed);
         if (!tail_)
         {
             tail_ = head_;
@@ -235,12 +234,12 @@ public:
         }
 
         auto* tip = head_.get();
-        const bool tip_disabled = tip && tip->isDisabledEvent();
-        if (shouldAbsentHeartbeatRefresh_(sim_time, tip_disabled))
+        const bool tip_closed = tip && tip->isClosedEvent();
+        if (shouldAbsentHeartbeatRefresh_(sim_time, tip_closed))
         {
-            if (tip_disabled)
+            if (tip_closed)
             {
-                return emitDisabledWires_(cid, sim_time);
+                return emitClosedWires_(cid, sim_time);
             }
 
             auto* latest = latestDataCheckpoint_();
@@ -268,10 +267,10 @@ private:
         return checkpoint;
     }
 
-    std::vector<std::unique_ptr<CollectedData>> emitDisabledWires_(uint16_t cid, uint64_t sim_time)
+    std::vector<std::unique_ptr<CollectedData>> emitClosedWires_(uint16_t cid, uint64_t sim_time)
     {
         std::vector<std::unique_ptr<CollectedData>> out;
-        if (needsDisabledPriming_(sim_time))
+        if (needsClosedPriming_(sim_time))
         {
             if (auto* latest = latestDataCheckpoint_())
             {
@@ -281,8 +280,8 @@ private:
         }
 
         auto encoded = std::make_unique<CollectedData>(cid);
-        encoded->getBuffer().append(Action::DISABLED);
-        recordWireSent_(Action::DISABLED, sim_time);
+        encoded->getBuffer().append(Action::CLOSED);
+        recordWireSent_(Action::CLOSED, sim_time);
         out.push_back(std::move(encoded));
         return out;
     }
@@ -297,10 +296,10 @@ private:
         }
 
         const auto action = detail::readEncodedAction(*encoded);
-        if (action == Action::DISABLED)
+        if (action == Action::CLOSED)
         {
             cleanupThrough_(anchor, action);
-            return emitDisabledWires_(cid, sim_time);
+            return emitClosedWires_(cid, sim_time);
         }
 
         recordWireSent_(action, sim_time);
@@ -349,9 +348,9 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void recordOpenChange(uint64_t window_id, bool open) override
+    void recordLifecycleChange(uint64_t window_id, bool closed) override
     {
-        head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, open);
+        head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, closed);
         if (!tail_)
         {
             tail_ = head_;
@@ -373,12 +372,12 @@ public:
         }
 
         auto* tip = head_.get();
-        const bool tip_disabled = tip && tip->isDisabledEvent();
-        if (shouldAbsentHeartbeatRefresh_(sim_time, tip_disabled))
+        const bool tip_closed = tip && tip->isClosedEvent();
+        if (shouldAbsentHeartbeatRefresh_(sim_time, tip_closed))
         {
-            if (tip_disabled)
+            if (tip_closed)
             {
-                return emitDisabledWires_(cid, sim_time);
+                return emitClosedWires_(cid, sim_time);
             }
 
             auto* latest = latestDataCheckpoint_();
@@ -411,10 +410,10 @@ private:
         return checkpoint;
     }
 
-    std::vector<std::unique_ptr<CollectedData>> emitDisabledWires_(uint16_t cid, uint64_t sim_time)
+    std::vector<std::unique_ptr<CollectedData>> emitClosedWires_(uint16_t cid, uint64_t sim_time)
     {
         std::vector<std::unique_ptr<CollectedData>> out;
-        if (needsDisabledPriming_(sim_time))
+        if (needsClosedPriming_(sim_time))
         {
             if (auto* latest = latestDataCheckpoint_())
             {
@@ -424,8 +423,8 @@ private:
         }
 
         auto encoded = std::make_unique<CollectedData>(cid);
-        encoded->getBuffer().append(Action::DISABLED);
-        recordWireSent_(Action::DISABLED, sim_time);
+        encoded->getBuffer().append(Action::CLOSED);
+        recordWireSent_(Action::CLOSED, sim_time);
         out.push_back(std::move(encoded));
         return out;
     }
@@ -440,10 +439,10 @@ private:
         }
 
         const auto action = detail::readEncodedAction(*encoded);
-        if (action == Action::DISABLED)
+        if (action == Action::CLOSED)
         {
             cleanupThrough_(anchor, action);
-            return emitDisabledWires_(cid, sim_time);
+            return emitClosedWires_(cid, sim_time);
         }
 
         recordWireSent_(action, sim_time);
@@ -513,9 +512,9 @@ public:
 
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
-    void recordOpenChange(uint64_t window_id, bool open) override
+    void recordLifecycleChange(uint64_t window_id, bool closed) override
     {
-        head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, open);
+        head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, closed);
         if (!tail_)
         {
             tail_ = head_;
@@ -537,12 +536,12 @@ public:
         }
 
         auto* tip = head_.get();
-        const bool tip_disabled = tip && tip->isDisabledEvent();
-        if (shouldAbsentHeartbeatRefresh_(sim_time, tip_disabled))
+        const bool tip_closed = tip && tip->isClosedEvent();
+        if (shouldAbsentHeartbeatRefresh_(sim_time, tip_closed))
         {
-            if (tip_disabled)
+            if (tip_closed)
             {
-                return emitDisabledWires_(cid, sim_time);
+                return emitClosedWires_(cid, sim_time);
             }
 
             auto* latest = latestDataCheckpoint_();
@@ -575,10 +574,10 @@ private:
         return checkpoint;
     }
 
-    std::vector<std::unique_ptr<CollectedData>> emitDisabledWires_(uint16_t cid, uint64_t sim_time)
+    std::vector<std::unique_ptr<CollectedData>> emitClosedWires_(uint16_t cid, uint64_t sim_time)
     {
         std::vector<std::unique_ptr<CollectedData>> out;
-        if (needsDisabledPriming_(sim_time))
+        if (needsClosedPriming_(sim_time))
         {
             if (auto* latest = latestDataCheckpoint_())
             {
@@ -588,8 +587,8 @@ private:
         }
 
         auto encoded = std::make_unique<CollectedData>(cid);
-        encoded->getBuffer().append(Action::DISABLED);
-        recordWireSent_(Action::DISABLED, sim_time);
+        encoded->getBuffer().append(Action::CLOSED);
+        recordWireSent_(Action::CLOSED, sim_time);
         out.push_back(std::move(encoded));
         return out;
     }
@@ -604,10 +603,10 @@ private:
         }
 
         const auto action = detail::readEncodedAction(*encoded);
-        if (action == Action::DISABLED)
+        if (action == Action::CLOSED)
         {
             cleanupThrough_(anchor, action);
-            return emitDisabledWires_(cid, sim_time);
+            return emitClosedWires_(cid, sim_time);
         }
 
         recordWireSent_(action, sim_time);

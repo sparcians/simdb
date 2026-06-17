@@ -14,7 +14,7 @@ class CollectionLogs(scrolled.ScrolledPanel):
                        "FROM Notifications ORDER BY Timestamp ASC")
         rows = cursor.fetchall()
 
-        cursor.execute("SELECT SerializationCID, FullPath FROM CollectableTreeNodes")
+        cursor.execute("SELECT CID, FullPath FROM CollectableTreeNodes")
         paths_by_cid = {cid: fp.replace('root.', '') for cid, fp in cursor.fetchall()}
 
         mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)

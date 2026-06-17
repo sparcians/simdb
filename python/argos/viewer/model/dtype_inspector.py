@@ -78,7 +78,7 @@ class DataTypeInspector:
     def _load(self):
         # type: () -> None
         cur = self._conn.cursor()
-        cur.execute("SELECT SerializationCID,TypeName FROM CollectableTreeNodes")
+        cur.execute("SELECT CID,TypeName FROM CollectableTreeNodes")
         self._dtypes_by_cid = {cid:type_name for cid,type_name in cur.fetchall()}
 
         cur.execute("SELECT Id, RootTypeName FROM DataTypeSchemas ORDER BY Id")
