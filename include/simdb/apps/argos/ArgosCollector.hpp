@@ -481,8 +481,8 @@ private:
                         continue;
                     }
 
-                    auto wires = checkpointer->encodeForPipeline(window_id, sim_time, cid);
-                    for (auto& entry : wires)
+                    auto entries = checkpointer->encodeForPipeline(window_id, sim_time, cid);
+                    for (auto& entry : entries)
                     {
                         cids_with_data_.insert(cid);
                         to_send.entries.emplace_back(std::move(entry));
@@ -510,7 +510,7 @@ private:
             auto it = container_max_sizes_.find(cid);
             if (it == container_max_sizes_.end())
             {
-                container_max_sizes_.emplace(cid, size).first;
+                container_max_sizes_.emplace(cid, size);
             } else
             {
                 it->second = std::max(it->second, size);
