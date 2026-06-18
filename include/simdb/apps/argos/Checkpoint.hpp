@@ -14,6 +14,8 @@ namespace simdb::argos {
 //!
 //!   [uint16_t cid]     // collectable ID
 //!   [uint8_t action]   // encoding
+//!
+//! See CheckpointEncodings.hpp for full action / byte layout documentation.
 enum class Action : uint8_t {
     // Tier 1: 0x00–0x0F — lifecycle / common (scalars + all collectables)
     CLOSED = 0x00,
@@ -37,7 +39,7 @@ enum class Action : uint8_t {
     SPARSE_REMOVE = 0x30,
     SPARSE_ADD = 0x31,
     SPARSE_MULTI_REMOVE = 0x32,
-    // 0x33–0x3F reserved (SPARSE_BATCH future)
+    // 0x33–0x3F reserved
 };
 
 //! \class CollectableCheckpoint
