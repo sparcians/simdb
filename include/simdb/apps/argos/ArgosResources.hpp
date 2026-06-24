@@ -85,34 +85,25 @@ private:
         void dumpEnumMap(DatabaseManager* db_mgr) const override final
         {
             using underlying_t = std::underlying_type_t<E>;
-            using dump_int_t = std::conditional_t<std::is_signed_v<underlying_t>, int64_t, uint64_t>;
-            using enum_map_t = std::map<dump_int_t, std::string>;
+            const auto itype = demangle_type<underlying_t>();
+            const auto enum_name = demangle_type<E>();
+            const auto enum_id = db_mgr->INSERT(SQL_TABLE("CollectedEnums"), SQL_VALUES(enum_name, itype))->getId();
 
-            enum_map_t enum_map;
+            auto inserter = db_mgr->prepareINSERT(SQL_TABLE("EnumMembers"));
             for (auto e : all_seen_)
             {
                 std::ostringstream oss;
                 oss << e;
-                enum_map[static_cast<dump_int_t>(e)] = oss.str();
-            }
 
-            dumpEnumMap_(db_mgr, enum_map);
+                const auto member_name = oss.str();
+                const auto raw_enum_val = static_cast<underlying_t>(e);
+                const auto raw_enum_str = std::to_string(raw_enum_val);
+
+                inserter->createRecordWithColValues(enum_id, member_name, raw_enum_str);
+            }
         }
 
     private:
-        template <typename IntType>
-        void dumpEnumMap_(DatabaseManager* db_mgr, const std::map<IntType, std::string>& enum_map) const
-        {
-            constexpr auto table_name = std::is_signed_v<IntType> ? "SignedEnumMappings" : "UnsignedEnumMappings";
-            auto inserter = db_mgr->prepareINSERT(SQL_TABLE(table_name));
-
-            const auto enum_name = demangle_type<E>();
-            for (const auto& [enum_val, enum_str] : enum_map)
-            {
-                inserter->createRecordWithColValues(enum_name, enum_str, enum_val);
-            }
-        }
-
         std::vector<E> all_seen_;
         std::optional<E> last_seen_;
     };

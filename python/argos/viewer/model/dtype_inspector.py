@@ -110,29 +110,16 @@ class DataTypeInspector:
 
         cur.execute(
             """
-            SELECT EnumName, EnumString, EnumInt
-            FROM SignedEnumMappings
+            SELECT ce.EnumName, ce.EnumIntTypeName, em.MemberName, em.MemberValueStr
+            FROM CollectedEnums ce
+            JOIN EnumMembers em ON em.EnumID = ce.Id
             """
         )
-        signed_enum_rows = cur.fetchall()
-        for enum_name, enum_str, enum_int in signed_enum_rows:
+        for enum_name, int_type_name, member_name, member_value_str in cur.fetchall():
             if enum_name not in enum_defns:
                 enum_defns[enum_name] = {}
-            enum_defns[enum_name][enum_str] = enum_int
-            enum_backings[enum_name] = "long"
-
-        cur.execute(
-            """
-            SELECT EnumName, EnumString, EnumInt
-            FROM UnsignedEnumMappings
-            """
-        )
-        unsigned_enum_rows = cur.fetchall()
-        for enum_name, enum_str, enum_int in unsigned_enum_rows:
-            if enum_name not in enum_defns:
-                enum_defns[enum_name] = {}
-            enum_defns[enum_name][enum_str] = int(enum_int)
-            enum_backings[enum_name] = "unsigned long"
+            enum_defns[enum_name][member_name] = int(member_value_str)
+            enum_backings[enum_name] = int_type_name
 
         self._nodes_by_id.clear()
         self._top_by_schema = {sid: [] for sid in self._schemas}

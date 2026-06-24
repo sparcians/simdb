@@ -158,7 +158,7 @@ def CreateDeserializer(inspector, dtype_name, tiny_strings=None):
     enum_map = inspector.GetEnumMap(dtype_name)
     if enum_map:
         backing_kind = inspector.GetEnumBackingKind(dtype_name)
-        if backing_kind in ('long', 'unsigned long'):
+        if backing_kind in SimpleDeserializer.CONVERTERS:
             val_deserializer = SimpleDeserializer(backing_kind, "")
             return EnumDeserializer(val_deserializer, enum_map)
 

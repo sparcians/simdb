@@ -6,6 +6,7 @@
 #include "simdb/apps/argos/ArgosCollector.hpp"
 #include "simdb/apps/argos/StreamBuffer.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
+#include "simdb/utils/Demangle.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -76,14 +77,14 @@ std::string randomString(size_t num_chars = 8)
 enum class UnsignedEnum : uint32_t { __MIN__ = 0, RED = __MIN__, GREEN = 1, BLUE = 2, __MAX__, __INVALID__ = 100};
 enum class SignedEnum   : int32_t  { __MIN__ = -1, RED = __MIN__, GREEN = 0, BLUE = 1, __MAX__, __INVALID__ = 100};
 
-static std::map<UnsignedEnum, std::string_view> unsigned_enum_map{
+static std::map<UnsignedEnum, std::string> unsigned_enum_map{
     {UnsignedEnum::RED, "RED"},
     {UnsignedEnum::GREEN, "GREEN"},
     {UnsignedEnum::BLUE, "BLUE"},
     {UnsignedEnum::__INVALID__, "INVALID"}
 };
 
-static std::map<SignedEnum, std::string_view> signed_enum_map{
+static std::map<SignedEnum, std::string> signed_enum_map{
     {SignedEnum::RED, "RED"},
     {SignedEnum::GREEN, "GREEN"},
     {SignedEnum::BLUE, "BLUE"},
@@ -124,24 +125,11 @@ E randomEnum()
     }
 }
 
-void appendEnum(simdb::argos::StreamBuffer& buf, UnsignedEnum val)
+template <typename E>
+E readEnum(argos_test::ByteBuffer& buf)
 {
-    buf.append(static_cast<uint64_t>(static_cast<uint32_t>(val)));
-}
-
-void appendEnum(simdb::argos::StreamBuffer& buf, SignedEnum val)
-{
-    buf.append(static_cast<int64_t>(static_cast<int32_t>(val)));
-}
-
-UnsignedEnum readUnsignedEnum(argos_test::ByteBuffer& buf)
-{
-    return static_cast<UnsignedEnum>(static_cast<uint32_t>(buf.read<uint64_t>()));
-}
-
-SignedEnum readSignedEnum(argos_test::ByteBuffer& buf)
-{
-    return static_cast<SignedEnum>(static_cast<int32_t>(buf.read<int64_t>()));
+    using underlying_t = std::underlying_type_t<E>;
+    return static_cast<E>(buf.read<underlying_t>());
 }
 
 struct MultipleTypes
@@ -167,8 +155,8 @@ struct MultipleTypes
         buf.append(i);
         buf.append(s);
         buf.append(b);
-        appendEnum(buf, ue);
-        appendEnum(buf, se);
+        buf.append(ue);
+        buf.append(se);
     }
 
     static MultipleTypes readFromBuffer(argos_test::ByteBuffer& buf, const std::unordered_map<uint32_t, std::string>& strings)
@@ -183,8 +171,8 @@ struct MultipleTypes
         }
         val.s = str_iter->second;
         val.b = static_cast<bool>(buf.read<uint8_t>());
-        val.ue = readUnsignedEnum(buf);
-        val.se = readSignedEnum(buf);
+        val.ue = readEnum<UnsignedEnum>(buf);
+        val.se = readEnum<SignedEnum>(buf);
         return val;
     }
 };
@@ -247,27 +235,12 @@ std::ostream& operator<<(std::ostream& os, const CollectableValue& val)
 template <typename ScalarT>
 std::vector<char> getScalarBytes(const ScalarT& val, simdb::TinyStrings<>* tiny_strings)
 {
-    if constexpr (std::is_same_v<ScalarT, UnsignedEnum>)
-    {
-        std::vector<char> bytes;
-        simdb::argos::StreamBuffer buf(bytes);
-        appendEnum(buf, val);
-        return bytes;
-    } else if constexpr (std::is_same_v<ScalarT, SignedEnum>)
-    {
-        std::vector<char> bytes;
-        simdb::argos::StreamBuffer buf(bytes);
-        appendEnum(buf, val);
-        return bytes;
-    } else if constexpr (std::is_enum_v<ScalarT>)
-    {
-        using underlying_t = std::underlying_type_t<ScalarT>;
-        return getScalarBytes(static_cast<underlying_t>(val), tiny_strings);
-    } else if constexpr (std::is_same_v<ScalarT, std::string>)
+    if constexpr (std::is_same_v<ScalarT, std::string>)
     {
         auto sid = tiny_strings->getStringID(val);
         return getScalarBytes(sid, tiny_strings);
-    } else
+    }
+    else
     {
         static_assert(std::is_trivial_v<ScalarT> && std::is_standard_layout_v<ScalarT>);
         std::vector<char> bytes;
@@ -332,11 +305,11 @@ ScalarValue deserializeScalarValue(const std::string& encoded_type,
     }
     if (encoded_type == "UnsignedEnum")
     {
-        return readUnsignedEnum(buf);
+        return readEnum<UnsignedEnum>(buf);
     }
     if (encoded_type == "SignedEnum")
     {
-        return readSignedEnum(buf);
+        return readEnum<SignedEnum>(buf);
     }
     if (encoded_type == "MultipleTypes")
     {
@@ -364,18 +337,22 @@ void writeMultipleTypesMetadata(simdb::DatabaseManager* db_mgr)
     node_inserter->createRecordWithColValues(struct_schema_id, "ue", "UnsignedEnum", "");
     node_inserter->createRecordWithColValues(struct_schema_id, "se", "SignedEnum", "");
 
-    auto uenum_inserter = db_mgr->prepareINSERT(SQL_TABLE("UnsignedEnumMappings"));
-    for (const auto& [enumerator, name] : unsigned_enum_map)
+    auto collected_enums = db_mgr->prepareINSERT(SQL_TABLE("CollectedEnums"));
+    auto unsigned_enum_id =
+        collected_enums->createRecordWithColValues("UnsignedEnum", simdb::demangle_type<uint32_t>());
+    auto signed_enum_id = collected_enums->createRecordWithColValues("SignedEnum", simdb::demangle_type<int32_t>());
+
+    auto enum_members = db_mgr->prepareINSERT(SQL_TABLE("EnumMembers"));
+    for (const auto& [e, name] : unsigned_enum_map)
     {
-        uenum_inserter->createRecordWithColValues("UnsignedEnum", std::string(name),
-                                                  static_cast<uint64_t>(static_cast<uint32_t>(enumerator)));
+        auto e_str = std::to_string(static_cast<long>(e));
+        enum_members->createRecordWithColValues(unsigned_enum_id, name, e_str);
     }
 
-    auto senum_inserter = db_mgr->prepareINSERT(SQL_TABLE("SignedEnumMappings"));
-    for (const auto& [enumerator, name] : signed_enum_map)
+    for (const auto& [e, name] : signed_enum_map)
     {
-        senum_inserter->createRecordWithColValues("SignedEnum", std::string(name),
-                                                  static_cast<int64_t>(static_cast<int32_t>(enumerator)));
+        auto e_str = std::to_string(static_cast<long>(e));
+        enum_members->createRecordWithColValues(signed_enum_id, name, e_str);
     }
 }
 

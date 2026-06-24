@@ -69,15 +69,14 @@ public:
         dtype_nodes_tbl.addColumn("TypeName", dt::string_t);
         dtype_nodes_tbl.addColumn("FormatStr", dt::string_t);
 
-        auto& signed_enum_map_tbl = schema.addTable("SignedEnumMappings");
-        signed_enum_map_tbl.addColumn("EnumName", dt::string_t);
-        signed_enum_map_tbl.addColumn("EnumString", dt::string_t);
-        signed_enum_map_tbl.addColumn("EnumInt", dt::int64_t);
+        auto& enum_itypes_tbl = schema.addTable("CollectedEnums");
+        enum_itypes_tbl.addColumn("EnumName", dt::string_t);
+        enum_itypes_tbl.addColumn("EnumIntTypeName", dt::string_t);
 
-        auto& unsigned_enum_map_tbl = schema.addTable("UnsignedEnumMappings");
-        unsigned_enum_map_tbl.addColumn("EnumName", dt::string_t);
-        unsigned_enum_map_tbl.addColumn("EnumString", dt::string_t);
-        unsigned_enum_map_tbl.addColumn("EnumInt", dt::uint64_t);
+        auto& enum_members_tbl = schema.addTable("EnumMembers");
+        enum_members_tbl.addColumn("EnumID", dt::int32_t);
+        enum_members_tbl.addColumn("MemberName", dt::string_t);
+        enum_members_tbl.addColumn("MemberValueStr", dt::string_t);
 
         auto& timestamps_tbl = schema.addTable("Timestamps");
         timestamps_tbl.addColumn("Timestamp", dt::uint64_t);
@@ -105,17 +104,6 @@ public:
         notif_tbl.addColumn("Timestamp", dt::uint64_t);
         notif_tbl.addColumn("NotifType", dt::int32_t);
         notif_tbl.addColumn("NotifStr", dt::string_t);
-
-        auto& dyn_field_type_changes_tbl = schema.addTable("DynamicFieldTypeChanges");
-        dyn_field_type_changes_tbl.addColumn("CID", dt::int32_t);
-        dyn_field_type_changes_tbl.addColumn("FieldTypes", dt::string_t);
-        dyn_field_type_changes_tbl.addColumn("Timestamp", dt::uint64_t);
-        dyn_field_type_changes_tbl.createCompoundIndexOn({"CID", "Timestamp"});
-
-        auto& dyn_field_names_tbl = schema.addTable("DynamicFieldNames");
-        dyn_field_names_tbl.addColumn("CID", dt::int32_t);
-        dyn_field_names_tbl.addColumn("FieldNames", dt::string_t);
-        dyn_field_names_tbl.createIndexOn("CID");
 
         auto& tiny_string_ids_tbl = schema.addTable("TinyStringIDs");
         tiny_string_ids_tbl.addColumn("StringValue", dt::string_t);
@@ -192,6 +180,7 @@ public:
     //!       "IssueType"
     //!       "MMUState"
     //!       ...
+    //!   Enum values in collection blobs are serialized as std::underlying_type_t<T>.
     //!
     //!   For scalar enums without operator<< (treated just like int PODs):
     //!   typeid(std::underlying_type_t<T>).name()
@@ -366,11 +355,10 @@ public:
             dumpTable(db_mgr_, "CollectableTreeNodes");
             dumpTable(db_mgr_, "DataTypeSchemas");
             dumpTable(db_mgr_, "DataTypeNodes");
-            dumpTable(db_mgr_, "SignedEnumMappings");
-            dumpTable(db_mgr_, "UnsignedEnumMappings");
+            dumpTable(db_mgr_, "CollectedEnums");
+            dumpTable(db_mgr_, "EnumMembers");
             dumpTable(db_mgr_, "QueueMaxSizes");
             dumpTable(db_mgr_, "Notifications");
-            dumpTable(db_mgr_, "DynamicFieldTypeChanges");
         }
     }
 
