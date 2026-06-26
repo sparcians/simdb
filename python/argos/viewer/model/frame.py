@@ -10,12 +10,11 @@ from viewer.model.simhier import SimHierarchy
 from viewer.gui.widgets.splitter_window import DirtySplitterWindow
 
 class ArgosFrame(wx.Frame):
-    def __init__(self, db_path, view_settings, dev_debug):
+    def __init__(self, db_path, view_settings):
         super().__init__(None, title=db_path)
         
         self.db = sqlite3.connect(db_path)
         self.view_settings = view_settings
-        self.dev_debug = dev_debug
         self.dtype_inspector = DataTypeInspector(db_path)
         self.simhier = SimHierarchy(self.db, self.dtype_inspector)
         self.widget_renderer = WidgetRenderer(self)

@@ -47,9 +47,6 @@ class DataRetriever:
 
         self.ResetToDefaultViewSettings(update_widgets=False)
 
-    def IsDevDebug(self):
-        return self.frame.dev_debug
-
     def GetCurrentViewSettings(self):
         settings = {}
         assert set(self._displayed_columns_by_elem_path.keys()) == set(self._auto_colorize_column_by_elem_path.keys())

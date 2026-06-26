@@ -17,7 +17,6 @@ class _StubInspector:
 
 
 class _StubFrame:
-    dev_debug = False
     inspector = _StubInspector()
 
 
