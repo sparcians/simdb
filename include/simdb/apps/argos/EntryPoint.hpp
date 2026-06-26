@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/apps/argos/ArgosResources.hpp"
+#include "simdb/apps/argos/EnumInspector.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStagerInterface.hpp"
 #include "simdb/utils/Demangle.hpp"
@@ -19,9 +19,9 @@ namespace simdb::argos {
 class EntryPoint
 {
 public:
-    EntryPoint(PipelineStagerInterface* stager_interface) :
-        tiny_strings_(stager_interface->getResources()->getTinyStrings()),
-        stager_interface_(stager_interface)
+    EntryPoint(PipelineStagerInterface* stager_interface, TinyStrings<>* tiny_strings) :
+        stager_interface_(stager_interface),
+        tiny_strings_(tiny_strings)
     {
     }
 
@@ -34,7 +34,7 @@ public:
         if (!closed_)
         {
             closed_ = true;
-            stager_interface_->closeRecord(getID(), closed_);
+            stager_interface_->closeRecord(getID());
         }
     }
 
@@ -87,9 +87,11 @@ private:
     /// Suppress heartbeat re-emission while true
     bool closed_ = false;
 
-    std::string collectable_type_name_;
-    TinyStrings<>* tiny_strings_;
+    /// Most of what EntryPoint does is forward to the stager (ledger)
     PipelineStagerInterface* const stager_interface_;
+
+    /// DB-backed string-to-int mapping
+    TinyStrings<>* const tiny_strings_;
 };
 
 } // namespace simdb::argos

@@ -42,7 +42,7 @@ public:
     }
 
     /// Records a close (or reopen) lifecycle event at \p window_id.
-    virtual void closeRecord(uint64_t window_id, bool closed) = 0;
+    virtual void closeRecord(uint64_t window_id) = 0;
 
     /// Encodes wire records for \p cid at \p sim_time, using the checkpoint for \p window_id when present.
     virtual std::vector<std::unique_ptr<CollectedData>> encodeForPipeline(uint64_t window_id, uint64_t sim_time,
@@ -223,8 +223,9 @@ public:
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
     /// Appends a scalar close lifecycle checkpoint for \p window_id.
-    void closeRecord(uint64_t window_id, bool closed) override
+    void closeRecord(uint64_t window_id) override
     {
+        constexpr bool closed = true;
         head_ = std::make_shared<ScalarCheckpoint>(head_, window_id, closed);
         if (!tail_)
         {
@@ -366,8 +367,9 @@ public:
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
     /// Appends a contig close lifecycle checkpoint for \p window_id.
-    void closeRecord(uint64_t window_id, bool closed) override
+    void closeRecord(uint64_t window_id) override
     {
+        constexpr bool closed = true;
         head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, closed);
         if (!tail_)
         {
@@ -537,8 +539,9 @@ public:
     using CollectableCheckpointer::createCheckpoint; // un-hide the other two
 
     /// Appends a sparse close lifecycle checkpoint for \p window_id.
-    void closeRecord(uint64_t window_id, bool closed) override
+    void closeRecord(uint64_t window_id) override
     {
+        constexpr bool closed = true;
         head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, closed);
         if (!tail_)
         {

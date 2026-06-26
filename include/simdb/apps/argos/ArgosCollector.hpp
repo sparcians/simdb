@@ -3,9 +3,9 @@
 #pragma once
 
 #include "simdb/apps/App.hpp"
-#include "simdb/apps/argos/ArgosResources.hpp"
 #include "simdb/apps/argos/Checkpointer.hpp"
 #include "simdb/apps/argos/EntryPoint.hpp"
+#include "simdb/apps/argos/EnumInspector.hpp"
 #include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/apps/argos/PipelineStagerInterface.hpp"
 #include "simdb/apps/argos/Timestamps.hpp"
@@ -199,9 +199,8 @@ public:
     EntryPoint* createScalarCollector(const std::string& path, const std::string& clk_name,
                                       const std::string& encoded_scalar_type)
     {
-        auto entry_point = std::make_unique<EntryPoint>(this);
-        encoded_dtypes_[entry_point->getID()] = encoded_scalar_type;
-        meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
+        auto entry_point = std::make_unique<EntryPoint>(this, &tiny_strings_);
+        meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name, encoded_scalar_type);
         entry_points_.emplace_back(std::move(entry_point));
         return entry_points_.back().get();
     }
@@ -217,16 +216,15 @@ public:
     EntryPoint* createContainerCollector(const std::string& path, const std::string& clk_name,
                                          const std::string& encoded_container_type)
     {
-        auto entry_point = std::make_unique<EntryPoint>(this);
-        encoded_dtypes_[entry_point->getID()] = encoded_container_type;
-        meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name);
+        auto entry_point = std::make_unique<EntryPoint>(this, &tiny_strings_);
+        meta_by_cid_[entry_point->getID()] = std::make_tuple(path, clk_name, encoded_container_type);
         entry_points_.emplace_back(std::move(entry_point));
         return entry_points_.back().get();
     }
 
     TinyStrings<>* getTinyStrings() { return &tiny_strings_; }
 
-    ArgosResources* getResources() override { return &resources_; }
+    EnumInspector* getEnumInspector() { return &enum_inspector_; }
 
     void createPipeline(pipeline::PipelineManager* pipeline_mgr) override
     {
@@ -244,12 +242,14 @@ public:
         pipeline_head_ = pipeline->getInPortQueue<LedgerPtr>("stager.main_input_queue");
         notif_head_ = pipeline->getInPortQueue<NotifEntry>("writer.notif_input_queue");
 
-        for (const auto& [cid, encoded_dtype] : encoded_dtypes_)
+        for (const auto& [cid, meta] : meta_by_cid_)
         {
-            ContainerMeta meta;
-            if (extractContainerMeta_(encoded_dtype, meta))
+            const auto& encoded_dtype = std::get<2>(meta);
+
+            ContainerMeta container_meta;
+            if (extractContainerMeta_(encoded_dtype, container_meta))
             {
-                pipeline_stager_->setContainerDataType(cid, meta.sparse, meta.capacity);
+                pipeline_stager_->setContainerDataType(cid, container_meta.sparse, container_meta.capacity);
             } else
             {
                 pipeline_stager_->setScalarDataType(cid);
@@ -290,8 +290,8 @@ public:
             auto cid = (int)collector->getID();
             const auto& full_path = std::get<0>(meta_by_cid_.at(cid));
             const auto& clk_name = std::get<1>(meta_by_cid_.at(cid));
+            const auto& dtype_name = std::get<2>(meta_by_cid_.at(cid));
             const auto clk_id = clk_ids.at(clk_name);
-            const auto dtype_name = encoded_dtypes_.at(cid);
             ctn_inserter->createRecordWithColValues(cid, full_path, clk_id, dtype_name);
         }
     }
@@ -317,11 +317,11 @@ public:
         ledger_->recordSparse(cid, std::move(sparse_bin_bytes));
     }
 
-    void closeRecord(uint16_t cid, bool closed) override
+    void closeRecord(uint16_t cid) override
     {
         assertLive_();
         checkTimeAdvanced_();
-        ledger_->closeRecord(cid, closed);
+        ledger_->closeRecord(cid);
     }
 
     void postNotif(const std::string& notif, NotifType type) override
@@ -345,7 +345,8 @@ public:
         {
             pipeline_stager_->writeMetaOnPostTeardown(db_mgr_);
         }
-        resources_.writeMetaOnPostTeardown(db_mgr_);
+        tiny_strings_.serialize(db_mgr_);
+        enum_inspector_.serializeEnumMaps(db_mgr_);
 
         if (verbose())
         {
@@ -363,12 +364,21 @@ public:
     }
 
 private:
-    ConcurrentQueue<NotifEntry>* notif_head_ = nullptr;
-    ConcurrentQueue<NotifEntry> pending_notif_entries_;
-
-    LedgerPtr ledger_;
+    /// Entry to the DB pipeline (1st async stage input)
     ConcurrentQueue<LedgerPtr>* pipeline_head_ = nullptr;
 
+    /// Entry to the DB writer stage's notifications
+    ConcurrentQueue<NotifEntry>* notif_head_ = nullptr;
+
+    /// Queued notifications prior to createPipeline()
+    ConcurrentQueue<NotifEntry> pending_notif_entries_;
+
+    /// Ledger of all collection activity at one simulation time point
+    LedgerPtr ledger_;
+
+    /// \class PipelineStager
+    /// \brief 1st async stage. Takes collected data from the Ledger and appends checkpoints to the
+    /// CID's checkpoint chains for snapshot-delta compression.
     class PipelineStager : public pipeline::Stage
     {
     public:
@@ -379,18 +389,21 @@ private:
             addOutPort_<QueueCollectionData>("data_output_queue", data_output_queue_);
         }
 
+        /// Must be called from main thread
         void setCollectableClock(uint16_t cid, uint32_t clock_id)
         {
             collectable_clock_ids_[cid] = clock_id;
             clock_ids_.insert(clock_id);
         }
 
+        /// Must be called from main thread
         void setScalarDataType(uint16_t cid)
         {
             checkpointers_[cid] = std::make_unique<ScalarCheckpointer>(heartbeat_);
             ++num_scalars_;
         }
 
+        /// Must be called from main thread
         void setContainerDataType(uint16_t cid, bool sparse, size_t capacity)
         {
             if (sparse)
@@ -410,6 +423,7 @@ private:
 
         size_t getNumSparses() const { return num_sparses_; }
 
+        /// Must be called from main thread
         void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
         {
             writeShowInUI_(db_mgr);
@@ -452,9 +466,9 @@ private:
                     updateContainerMaxSize_(cid, getSize_(data));
                 }
 
-                for (const auto& [cid, closed] : ledger->getClosedStates())
+                for (const auto cid : ledger->getClosedCIDs())
                 {
-                    checkpointers_.at(cid)->closeRecord(window_id, closed);
+                    checkpointers_.at(cid)->closeRecord(window_id);
                 }
 
                 QueueCollectionData to_send;
@@ -534,15 +548,10 @@ private:
             return size;
         }
 
+        // Set ShowInUI=1 for all the collectables that actually collected data
         void writeShowInUI_(DatabaseManager* db_mgr) const
         {
-            std::vector<int> valid_cids;
-            valid_cids.reserve(cids_with_data_.size());
-            for (const auto cid : cids_with_data_)
-            {
-                valid_cids.push_back(cid);
-            }
-
+            const std::vector<int> valid_cids(cids_with_data_.begin(), cids_with_data_.end());
             if (!valid_cids.empty())
             {
                 std::ostringstream oss;
@@ -653,6 +662,8 @@ private:
         size_t num_sparses_ = 0;
     };
 
+    /// \class Compressor
+    /// \brief 2nd async stage. Performs zlib compression.
     class Compressor : public pipeline::Stage
     {
     public:
@@ -678,7 +689,7 @@ private:
                 CompressedQueueCollectionData compressed;
                 compressData(uncompressed, compressed.compressed_collection_data);
                 compressed.sim_time = collection_at_time.sim_time;
-                compressed.clock_ids = collection_at_time.clock_ids;
+                compressed.clock_ids = std::move(collection_at_time.clock_ids);
                 output_queue_->emplace(std::move(compressed));
                 return pipeline::PipelineAction::PROCEED;
             }
@@ -690,6 +701,9 @@ private:
         ConcurrentQueue<CompressedQueueCollectionData>* output_queue_ = nullptr;
     };
 
+    /// \class Writer
+    /// \brief Final async stage. Writes collected/checkpointed/compressed data and notifications
+    /// to the database.
     class Writer : public pipeline::DatabaseStage<ArgosCollector>
     {
     public:
@@ -702,7 +716,6 @@ private:
     private:
         pipeline::PipelineAction run_(bool) override
         {
-            // If anything is ready for collection, process one of them and PROCEED.
             auto action = pipeline::PipelineAction::SLEEP;
 
             CompressedQueueCollectionData collection_at_time;
@@ -783,6 +796,7 @@ private:
         {
             if (ledger_)
             {
+                // Send current ledger to the pipeline and create a new one.
                 pipeline_head_->emplace(std::move(ledger_));
 
                 ledger_ =
@@ -803,7 +817,7 @@ private:
     static bool extractContainerMeta_(const std::string& encoded_dtype, ContainerMeta& meta)
     {
         auto extract_capacity = [&](const bool contig) {
-            std::string lookfor = contig ? "_contig_capacity" : "_sparse_capacity";
+            const std::string lookfor = contig ? "_contig_capacity" : "_sparse_capacity";
             if (auto idx = encoded_dtype.find(lookfor); idx != std::string::npos)
             {
                 auto capacity = std::stoi(encoded_dtype.substr(idx + lookfor.size()));
@@ -840,18 +854,18 @@ private:
     std::vector<ClockDescriptor> clocks_;
 
     using CollectableMeta = std::tuple<std::string, // dot-delimited path
-                                       std::string  // clk name
+                                       std::string, // clk name
+                                       std::string  // encoded data type
                                        >;
     std::map<uint16_t, CollectableMeta> meta_by_cid_;
 
     std::unique_ptr<Timestamp> timestamp_;
     std::vector<std::unique_ptr<EntryPoint>> entry_points_;
-    std::unordered_map<uint16_t, std::string> encoded_dtypes_;
     PipelineStager* pipeline_stager_ = nullptr;
     ValidValue<uint64_t> current_stage_time_;
     uint64_t current_window_id_ = 1;
     TinyStrings<> tiny_strings_;
-    ArgosResources resources_{&tiny_strings_};
+    EnumInspector enum_inspector_;
     bool is_live_ = false;
 };
 

@@ -1,14 +1,14 @@
-// <ArgosResources.hpp> -*- C++ -*-
+// <EnumInspector.hpp> -*- C++ -*-
 
 #pragma once
 
-#include "simdb/apps/argos/PipelineDataTypes.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
-#include "simdb/utils/TinyStrings.hpp"
+#include "simdb/utils/Demangle.hpp"
+#include "simdb/utils/TypeTraits.hpp"
 
-#include <map>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace simdb::argos {
@@ -109,29 +109,6 @@ private:
     };
 
     std::unordered_map<std::string, std::unique_ptr<EnumMapBase>> enum_maps_;
-};
-
-class ArgosResources
-{
-public:
-    explicit ArgosResources(TinyStrings<>* tiny_strings) :
-        tiny_strings_(tiny_strings)
-    {
-    }
-
-    TinyStrings<>* getTinyStrings() const { return tiny_strings_; }
-
-    EnumInspector* getEnumInspector() { return &enum_map_resource_; }
-
-    void writeMetaOnPostTeardown(DatabaseManager* db_mgr)
-    {
-        tiny_strings_->serialize(db_mgr);
-        enum_map_resource_.serializeEnumMaps(db_mgr);
-    }
-
-private:
-    TinyStrings<>* tiny_strings_;
-    EnumInspector enum_map_resource_;
 };
 
 } // namespace simdb::argos

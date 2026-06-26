@@ -21,6 +21,13 @@
 
 namespace simdb::argos {
 
+//! \brief Holds onto all byte buffers containing collected data and open/close state changes.
+//! All records of everything that happened at a given simulation time T are processed together
+//! and end up in the DB in the same blob/rowid. Clocks are tracked so we can support multi-clock
+//! simulations. The clock_ids are a set (not a scalar) since two clocks can collect at the same
+//! time (example: one clock might be exactly twice as fast as another).
+//!
+//! Used as input to the zlib pipeline stage.
 struct QueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
@@ -28,6 +35,7 @@ struct QueueCollectionData
     std::unordered_set<uint32_t> clock_ids;
 };
 
+//! \brief Output data structure from the zlib pipeline stage.
 struct CompressedQueueCollectionData
 {
     ValidValue<uint64_t> sim_time;
@@ -35,8 +43,10 @@ struct CompressedQueueCollectionData
     std::unordered_set<uint32_t> clock_ids;
 };
 
+//! \brief Enum used for warning/error/message filtering in Argos.
 enum class NotifType { WARNING, ERROR, MESSAGE, __INVALID__ };
 
+//! \brief Notification captured during collection. These appear in a dedicated tab in Argos.
 struct Notification
 {
     ValidValue<uint16_t> cid;
@@ -63,6 +73,7 @@ struct Notification
     Notification() = default;
 };
 
+//! \brief Single byte buffer with CID for scalar collectables (including scalar structs).
 struct ScalarEntry
 {
     uint16_t cid = 0;
@@ -79,6 +90,7 @@ struct ScalarEntry
     ScalarEntry& operator=(ScalarEntry&&) = default;
 };
 
+//! \brief Vector of byte buffers with CID for contig container collectables.
 struct ContigEntry
 {
     uint16_t cid = 0;
@@ -95,6 +107,7 @@ struct ContigEntry
     ContigEntry& operator=(ContigEntry&&) = default;
 };
 
+//! \brief Bin-mapped byte buffers with CID for sparse container collectables.
 struct SparseEntry
 {
     uint16_t cid = 0;
@@ -111,6 +124,7 @@ struct SparseEntry
     SparseEntry& operator=(SparseEntry&&) = default;
 };
 
+//! \brief Timestamped notification.
 struct NotifEntry
 {
     ValidValue<uint64_t> sim_time;
@@ -132,6 +146,11 @@ struct NotifEntry
     NotifEntry& operator=(NotifEntry&&) = default;
 };
 
+//! \brief This class is used to create all the *Entries above. Tracks everything that happened
+//! across all collectables at a specific simulation time point. A ledger is filled at time T
+//! until simulation has moved forward, then the ledger is moved to the 1st async stage of
+//! the DB pipeline. ArgosCollector will create a new Ledger and add to it until time advances
+//! again.
 class Ledger
 {
 public:
@@ -163,7 +182,7 @@ public:
         sparse_records_.emplace_back(cid, std::move(sparse_bin_bytes));
     }
 
-    void closeRecord(uint16_t cid, bool closed) { closed_states_[cid] = closed; }
+    void closeRecord(uint16_t cid) { closed_cids_.insert(cid); }
 
     uint64_t getSimTime() const { return sim_time_; }
 
@@ -172,7 +191,7 @@ public:
     bool hasEntries() const
     {
         return !scalar_records_.empty() || !contig_records_.empty() || !sparse_records_.empty() ||
-               !closed_states_.empty();
+               !closed_cids_.empty();
     }
 
     std::vector<ScalarEntry> releaseScalarEntries() { return std::move(scalar_records_); }
@@ -181,7 +200,7 @@ public:
 
     std::vector<SparseEntry> releaseSparseEntries() { return std::move(sparse_records_); }
 
-    const std::unordered_map<uint16_t, bool>& getClosedStates() const { return closed_states_; }
+    const std::unordered_set<uint16_t>& getClosedCIDs() const { return closed_cids_; }
 
 private:
     uint64_t sim_time_ = 0;
@@ -189,7 +208,7 @@ private:
     std::vector<ScalarEntry> scalar_records_;
     std::vector<ContigEntry> contig_records_;
     std::vector<SparseEntry> sparse_records_;
-    std::unordered_map<uint16_t, bool> closed_states_;
+    std::unordered_set<uint16_t> closed_cids_;
 };
 
 using LedgerPtr = std::unique_ptr<Ledger>;
