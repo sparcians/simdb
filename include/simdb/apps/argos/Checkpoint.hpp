@@ -58,7 +58,7 @@ public:
     /// Returns the collection window that created this checkpoint.
     uint64_t getWindowID() const { return window_id_; }
 
-    /// Drops the link to the previous checkpoint without deleting it.
+    /// Drops the link to the previous checkpoint.
     void detachPrev() { prev_.reset(); }
 
     /// Returns the shared_ptr to the previous checkpoint, if any.
@@ -194,7 +194,6 @@ private:
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
         assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
-        (void)cid;
         auto encoded = std::make_unique<CollectedData>(cid);
         encoded->getBuffer().append(Action::CLOSED);
         return encoded;

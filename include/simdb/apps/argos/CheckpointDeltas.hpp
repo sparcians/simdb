@@ -12,11 +12,10 @@
 
 namespace simdb::argos {
 
-//! Result of comparing two consecutive scalar payloads (raw bytes, no framing).
+//! Result of comparing two consecutive scalar payloads.
 enum class ScalarDeltaKind { UNCHANGED, CHANGED };
 
 //! Compare previous and current scalar payloads.
-//!
 //! Returns CHANGED when \p prev is empty (first collection has no baseline).
 //! Scalars only support CARRY when UNCHANGED; CHANGED implies a FULL snapshot.
 inline ScalarDeltaKind classifyScalarChange(const std::vector<char>& prev, const std::vector<char>& curr)
@@ -41,7 +40,7 @@ inline std::ostream& operator<<(std::ostream& os, ScalarDeltaKind kind)
     throw DBException("Invalid ScalarDeltaKind");
 }
 
-//! Contiguous-container delta kinds (wire action without heartbeat forcing).
+//! Contiguous-container delta kinds.
 enum class ContigDeltaKind {
     CARRY,
     SWAP,
@@ -53,7 +52,7 @@ enum class ContigDeltaKind {
     FULL,
 };
 
-//! Result of classifying a contig container transition (no CID/action framing).
+//! Result of classifying a contig container transition.
 struct ContigDeltaClassification
 {
     ContigDeltaKind kind = ContigDeltaKind::FULL;
@@ -283,7 +282,7 @@ inline std::ostream& operator<<(std::ostream& os, ContigDeltaKind kind)
     throw DBException("Invalid ContigDeltaKind");
 }
 
-//! Sparse-container delta kinds (wire action without heartbeat forcing).
+//! Sparse-container delta kinds.
 enum class SparseDeltaKind {
     CARRY,
     SWAP,
@@ -294,7 +293,7 @@ enum class SparseDeltaKind {
     FULL,
 };
 
-//! Result of classifying a sparse container transition (no CID/action framing).
+//! Result of classifying a sparse container transition.
 struct SparseDeltaClassification
 {
     SparseDeltaKind kind = SparseDeltaKind::FULL;

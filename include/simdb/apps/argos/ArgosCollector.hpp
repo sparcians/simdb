@@ -454,7 +454,7 @@ private:
                     auto cid = contig.cid;
                     auto data = std::move(contig.contig_bin_bytes);
                     checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
-                    updateContainerMaxSize_(cid, getSize_(data));
+                    updateContainerMaxSize_(cid, detail::getContainerSize(data));
                 }
 
                 auto sparses = ledger->releaseSparseEntries();
@@ -463,7 +463,7 @@ private:
                     auto cid = sparse.cid;
                     auto data = std::move(sparse.sparse_bin_bytes);
                     checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
-                    updateContainerMaxSize_(cid, getSize_(data));
+                    updateContainerMaxSize_(cid, detail::getContainerSize(data));
                 }
 
                 for (const auto cid : ledger->getClosedCIDs())
@@ -507,7 +507,7 @@ private:
             return action;
         }
 
-        void updateContainerMaxSize_(uint16_t cid, size_t size)
+        void updateContainerMaxSize_(uint16_t cid, uint16_t size)
         {
             auto it = container_max_sizes_.find(cid);
             if (it == container_max_sizes_.end())
@@ -517,35 +517,6 @@ private:
             {
                 it->second = std::max(it->second, size);
             }
-        }
-
-        static size_t getSize_(const std::vector<std::vector<char>>& contig_bin_bytes)
-        {
-            size_t size = 0;
-            for (const auto& bin_bytes : contig_bin_bytes)
-            {
-                if (!bin_bytes.empty())
-                {
-                    ++size;
-                } else
-                {
-                    break;
-                }
-            }
-            return size;
-        }
-
-        static size_t getSize_(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
-        {
-            size_t size = 0;
-            for (const auto& [_, bin_bytes] : sparse_bin_bytes)
-            {
-                if (!bin_bytes.empty())
-                {
-                    ++size;
-                }
-            }
-            return size;
         }
 
         // Set ShowInUI=1 for all the collectables that actually collected data
@@ -655,7 +626,7 @@ private:
         std::unordered_set<uint16_t> cids_with_data_;
 
         std::unordered_map<uint16_t, std::unique_ptr<CollectableCheckpointer>> checkpointers_;
-        std::unordered_map<uint16_t, size_t> container_max_sizes_;
+        std::unordered_map<uint16_t, uint16_t> container_max_sizes_;
 
         size_t num_scalars_ = 0;
         size_t num_contigs_ = 0;

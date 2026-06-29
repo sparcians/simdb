@@ -10,6 +10,41 @@
 
 namespace simdb::argos {
 
+namespace detail {
+/// Counts occupied front-packed bins in a contig snapshot.
+inline uint16_t getContainerSize(const std::vector<std::vector<char>>& contig_bin_bytes)
+{
+    uint64_t size = 0;
+    for (const auto& bin_bytes : contig_bin_bytes)
+    {
+        if (!bin_bytes.empty())
+        {
+            ++size;
+        } else
+        {
+            break;
+        }
+    }
+    assert(size <= UINT16_MAX);
+    return size;
+}
+
+/// Counts occupied bins in a sparse snapshot.
+inline uint16_t getContainerSize(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes)
+{
+    uint64_t size = 0;
+    for (const auto& [_, bin_bytes] : sparse_bin_bytes)
+    {
+        if (!bin_bytes.empty())
+        {
+            ++size;
+        }
+    }
+    assert(size <= UINT16_MAX);
+    return size;
+}
+} // namespace detail
+
 //! \class CollectableCheckpointer
 class CollectableCheckpointer
 {
@@ -41,7 +76,7 @@ public:
         throw DBException("Not implemented");
     }
 
-    /// Records a close (or reopen) lifecycle event at \p window_id.
+    /// Records a closed lifecycle event at \p window_id.
     virtual void closeRecord(uint64_t window_id) = 0;
 
     /// Encodes wire records for \p cid at \p sim_time, using the checkpoint for \p window_id when present.
@@ -115,7 +150,7 @@ protected:
     /// Reads the action byte from an encoded wire record (after the CID prefix).
     static Action readEncodedAction_(const CollectedData& encoded)
     {
-        return static_cast<Action>(encoded.getData()[sizeof(uint16_t)]);
+        return static_cast<Action>(encoded.getData().at(sizeof(uint16_t)));
     }
 
     /// Wraps a single encoded record in a one-element vector.
@@ -356,7 +391,11 @@ public:
     /// Appends a contig container data checkpoint for \p window_id.
     void createCheckpoint(uint64_t window_id, const std::vector<std::vector<char>>& contig_bin_bytes) override
     {
-        max_container_size_ = std::max(max_container_size_, getSize_(contig_bin_bytes));
+        auto size = detail::getContainerSize(contig_bin_bytes);
+        assert(size <= capacity_);
+        (void)capacity_;
+        max_container_size_ = std::max(max_container_size_, size);
+
         head_ = std::make_shared<ContigContainerCheckpoint>(head_, window_id, contig_bin_bytes);
         if (!tail_)
         {
@@ -488,30 +527,10 @@ private:
         tail_ = sp;
     }
 
-    /// Counts occupied front-packed bins in a contig snapshot.
-    size_t getSize_(const std::vector<std::vector<char>>& contig_bin_bytes) const
-    {
-        size_t size = 0;
-        for (const auto& bin_bytes : contig_bin_bytes)
-        {
-            if (!bin_bytes.empty())
-            {
-                ++size;
-            } else
-            {
-                break;
-            }
-        }
-        assert(size <= UINT16_MAX);
-        assert(size <= capacity_);
-        (void)capacity_;
-        return size;
-    }
-
     std::shared_ptr<ContigContainerCheckpoint> head_;
     std::shared_ptr<ContigContainerCheckpoint> tail_;
-    size_t max_container_size_ = 0;
-    const size_t capacity_;
+    uint16_t max_container_size_ = 0;
+    const uint16_t capacity_;
 };
 
 //! \class SparseContainerCheckpointer
@@ -528,7 +547,11 @@ public:
     /// Appends a sparse container data checkpoint for \p window_id.
     void createCheckpoint(uint64_t window_id, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes) override
     {
-        max_container_size_ = std::max(max_container_size_, getSize_(sparse_bin_bytes));
+        auto size = detail::getContainerSize(sparse_bin_bytes);
+        assert(size <= capacity_);
+        (void)capacity_;
+        max_container_size_ = std::max(max_container_size_, size);
+
         head_ = std::make_shared<SparseContainerCheckpoint>(head_, window_id, sparse_bin_bytes);
         if (!tail_)
         {
@@ -660,27 +683,10 @@ private:
         tail_ = sp;
     }
 
-    /// Counts occupied bins in a sparse snapshot.
-    size_t getSize_(const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes) const
-    {
-        size_t size = 0;
-        for (const auto& [_, bin_bytes] : sparse_bin_bytes)
-        {
-            if (!bin_bytes.empty())
-            {
-                ++size;
-            }
-        }
-        assert(size <= UINT16_MAX);
-        assert(size <= capacity_);
-        (void)capacity_;
-        return size;
-    }
-
     std::shared_ptr<SparseContainerCheckpoint> head_;
     std::shared_ptr<SparseContainerCheckpoint> tail_;
-    size_t max_container_size_ = 0;
-    const size_t capacity_;
+    uint16_t max_container_size_ = 0;
+    const uint16_t capacity_;
 };
 
 } // namespace simdb::argos
