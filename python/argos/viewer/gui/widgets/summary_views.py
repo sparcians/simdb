@@ -172,6 +172,9 @@ class SummaryViews(wx.Panel):
                 'elem_paths': elem_paths,
                 'only_show_selected': only_show_selected,
             })
+            return True
+        else:
+            return False
 
 class SummaryGrid(wx.Panel):
     def __init__(self, parent, frame, elem_paths, summary_views):

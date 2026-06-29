@@ -195,7 +195,11 @@ class CanvasGrid(wx.Panel):
 
         widget_container.SetWidget(widget)
 
-    def __OnSplitVertically(self, event):
+    def AddQuickLinks(self, links):
+        links.append(("Split left/right", self.__OnSplitVertically))
+        links.append(("Split top/bottom", self.__OnSplitHorizontally))
+
+    def __OnSplitVertically(self, event=None):
         widget_creation_str, widget_settings = self.__GetWidgetState()
 
         if self.container:
@@ -215,7 +219,7 @@ class CanvasGrid(wx.Panel):
         splitter.SetSashPosition(splitter.GetSize().GetWidth() // 2)
         self.frame.view_settings.SetDirty(reason=DirtyReasons.WidgetSplit)
 
-    def __OnSplitHorizontally(self, event):
+    def __OnSplitHorizontally(self, event=None):
         widget_creation_str, widget_settings = self.__GetWidgetState()
 
         if self.container:
@@ -366,8 +370,15 @@ class WidgetContainer(wx.Panel):
 
     def LaunchWatchlistBuilder(self):
         widget = SummaryViews(self, self.frame)
-        widget.EditWidget(None, title="Make Data Selections")
-        self.SetWidget(widget)
+        widget.Hide()
+        if widget.EditWidget(None):
+            widget.Show()
+            self.SetWidget(widget)
+        else:
+            widget.Destroy()
+
+    def AddQuickLinks(self, links):
+        self.GetParent().AddQuickLinks(links)
 
     def __RefreshWidget(self):
         self.UpdateWidgets()
@@ -377,27 +388,35 @@ class WidgetQuickLinks(wx.Panel):
     def __init__(self, widget_container):
         wx.Panel.__init__(self, widget_container)
 
+        def AddLinks(label, links):
+            label = wx.StaticText(self, label=label)
+            vsizer.Add(label)
+            for label, callback in links:
+                row = wx.BoxSizer(wx.HORIZONTAL)
+                bullet = wx.StaticText(self, label="\u2022")
+                link = wx.adv.HyperlinkCtrl(self, label=label)
+                link.Bind(wx.adv.EVT_HYPERLINK, lambda evt, cb=callback: cb())
+                row.Add(bullet, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8)
+                row.Add(link)
+                vsizer.Add(row, 0, wx.LEFT, 5)
+
+        vsizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(vsizer)
+
+        # Links to create widgets
         links = [
             ("Queue Inspector", widget_container.LaunchQueueViewer),
             ("Queue Utilizations", widget_container.LaunchQueueUtilizViewer),
             ("Scheduling Lines", widget_container.LaunchSchedulingLinesViewer),
             ("Watchlist", widget_container.LaunchWatchlistBuilder)
         ]
+        AddLinks("Create widget:", links)
 
-        vsizer = wx.BoxSizer(wx.VERTICAL)
-        quick_links = wx.StaticText(self, label="Quick Links:")
-        vsizer.Add(quick_links)
+        # Links to split canvas
+        links = []
+        widget_container.AddQuickLinks(links)
+        AddLinks("Split canvas:", links)
 
-        for label, callback in links:
-            row = wx.BoxSizer(wx.HORIZONTAL)
-            bullet = wx.StaticText(self, label="\u2022")
-            link = wx.adv.HyperlinkCtrl(self, label=label)
-            link.Bind(wx.adv.EVT_HYPERLINK, lambda evt, cb=callback: cb())
-            row.Add(bullet, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8)
-            row.Add(link)
-            vsizer.Add(row, 0, wx.LEFT, 5)
-
-        self.SetSizer(vsizer)
         self.Layout()
 
 class WidgetContainerDropTarget(wx.TextDropTarget):
