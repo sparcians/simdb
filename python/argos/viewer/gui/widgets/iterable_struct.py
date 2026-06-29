@@ -1,6 +1,6 @@
 import wx, wx.grid
 from collections.abc import Iterable
-from viewer.gui.dialogs.queue_table_customization import QueueTableCustomizationDlg
+from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
@@ -144,19 +144,23 @@ class IterableStruct(wx.Panel):
                 self.grid.SetCellBackgroundColour(i, j, wx.WHITE)
 
     def __EditWidget(self, event):
-        all_field_names = self.deserializer.GetAllFieldNames()
-        auto_colorize_col = self.frame.data_retriever.GetAutoColorizeColumn(self.elem_path)
-        dlg = QueueTableCustomizationDlg(self,
-                                         all_field_names,
-                                         self.visible_field_names,
-                                         auto_colorize_col)
+        assert self.elem_path not in (None, '')
+        selected = [self.elem_path]
+        dlg = WidgetDataSelectionsDlg(self, self.frame, selected, queues_only=True, single_selection=True)
+        result = dlg.ShowModal()
 
-        if dlg.ShowModal() == wx.ID_OK:
-            # Note that the data retriever will update all widgets when these method is called
-            self.frame.data_retriever.SetVisibleFieldNames(self.elem_path, dlg.GetDisplayedColumns())
-            self.frame.data_retriever.SetAutoColorizeColumn(self.elem_path, dlg.GetAutoColorizeColumn())
-
+        if result == wx.ID_OK:
+            selected = dlg.GetSelectedElemPaths()
+            assert len(selected) == 1
+            selected = selected[0]
+        else:
+            selected = None
         dlg.Destroy()
+
+        if selected:
+            widget_container = self.GetParent()
+            widget = IterableStruct(widget_container, self.frame, selected)
+            widget_container.SetWidget(widget)
 
 class UtilizElement(wx.StaticText):
     def __init__(self, parent, frame, capacity):

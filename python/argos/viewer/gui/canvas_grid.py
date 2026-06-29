@@ -5,6 +5,7 @@ from viewer.gui.widgets.queue_utiliz import QueueUtilizWidget
 from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
 from viewer.gui.widgets.summary_views import SummaryViews
 from viewer.gui.widgets.iterable_struct import IterableStruct
+from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from functools import partial
 
 class CanvasGrid(wx.Panel):
@@ -358,7 +359,23 @@ class WidgetContainer(wx.Panel):
         return self._widget
 
     def LaunchQueueViewer(self):
-        print ('TODO: Queue Viewer')
+        selected = [self._widget.elem_path] if self._widget else []
+        dlg = WidgetDataSelectionsDlg(self, self.frame, selected, queues_only=True, single_selection=True, title="Select queue")
+        result = dlg.ShowModal()
+
+        if result == wx.ID_OK:
+            selected = dlg.GetSelectedElemPaths()
+            assert len(selected) == 1
+            selected = selected[0]
+        else:
+            selected = None
+        dlg.Destroy()
+
+        if not selected:
+            return
+
+        widget = IterableStruct(self, self.frame, selected)
+        self.SetWidget(widget)
 
     def LaunchQueueUtilizViewer(self):
         widget = QueueUtilizWidget(self, self.frame)

@@ -2,10 +2,8 @@ import wx
 from functools import partial
 
 class WidgetDataSelectionsDlg(wx.Dialog):
-    _TREE_STYLE = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT | wx.TR_MULTIPLE
-
     def __init__(
-        self, parent, frame, elem_paths, only_show_selected=False, queues_only=False, title="Edit Data Selections",
+        self, parent, frame, elem_paths, only_show_selected=False, queues_only=False, single_selection=False, title="Edit Data Selections",
     ):
         _, screen_h = wx.GetDisplaySize()
         super().__init__(parent, title=title, size=(600, int(screen_h * 0.75)))
@@ -22,23 +20,35 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         self._initial_paths = list(self._selected_paths)
         self._initial_only_show_selected = only_show_selected
         self._only_show_selected = only_show_selected
+        self._single_selection = single_selection
+        self._single_selected_path = None
 
         self._tree_items_by_id = {}
         self._leaf_paths_by_tree_item = {}
         self._list_indices_by_path = {}
         self._syncing_list_checkboxes = False
 
-        instruction_label = wx.StaticText(
-            self, label='Right-click nodes to add/remove from widget',
-        )
-        self.hier_tree = wx.TreeCtrl(self, style=self._TREE_STYLE)
-        self.selections_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        self.selections_list.EnableCheckBoxes(True)
-        self.selections_list.InsertColumn(0, 'Current Selections', width=550)
+        if single_selection and queues_only:
+            instruction_text = 'Select a leaf queue from the tree'
+        elif single_selection:
+            instruction_text = 'Select a leaf node from the tree'
+        else:
+            instruction_text = 'Right-click nodes to add/remove from widget'
 
-        self.only_selected_cb = wx.CheckBox(self, label='Only show selected data')
-        self.only_selected_cb.SetValue(only_show_selected)
-        self.only_selected_cb.Bind(wx.EVT_CHECKBOX, self.__OnOnlyShowSelectedChanged)
+        instruction_label = wx.StaticText(self, label=instruction_text)
+        tree_style = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT
+        if not single_selection:
+            tree_style = tree_style | wx.TR_MULTIPLE
+        self.hier_tree = wx.TreeCtrl(self, style=tree_style)
+
+        if not single_selection:
+            self.selections_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+            self.selections_list.EnableCheckBoxes(True)
+            self.selections_list.InsertColumn(0, 'Current Selections', width=550)
+
+            self.only_selected_cb = wx.CheckBox(self, label='Only show selected data')
+            self.only_selected_cb.SetValue(only_show_selected)
+            self.only_selected_cb.Bind(wx.EVT_CHECKBOX, self.__OnOnlyShowSelectedChanged)
 
         btn_sizer = wx.StdDialogButtonSizer()
         self.ok_btn = wx.Button(self, wx.ID_OK)
@@ -49,20 +59,27 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(instruction_label, 0, wx.ALL, 5)
         sizer.Add(self.hier_tree, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-        sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-        sizer.Add(self.only_selected_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+        if not single_selection:
+            sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+            sizer.Add(self.only_selected_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizer(sizer)
 
-        self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
-        self.selections_list.Bind(wx.EVT_LIST_ITEM_CHECKED, self.__OnListItemChecked)
-        self.selections_list.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.__OnListItemUnchecked)
+        if not single_selection:
+            self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
+            self.selections_list.Bind(wx.EVT_LIST_ITEM_CHECKED, self.__OnListItemChecked)
+            self.selections_list.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.__OnListItemUnchecked)
+        else:
+            self.hier_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnTreeSelectionChanged)
+            self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
 
         self.__BuildTree()
         self.__BuildSelectionsList()
         self.__UpdateOkButton()
 
     def GetSelectedElemPaths(self):
+        if self._single_selection:
+            return [self._single_selected_path] if self._single_selected_path else []
         return list(self._selected_paths)
 
     def GetOnlyShowSelected(self):
@@ -102,8 +119,18 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.__UpdateOkButton()
         evt.Skip()
 
-    def __OnTreeRightClick(self, event, tree):
-        item = tree.HitTest(event.GetPosition())
+    def __OnTreeSelectionChanged(self, evt):
+        item = self.hier_tree.GetSelection()
+        if item.IsOk() and item in self._leaf_paths_by_tree_item:
+            self._single_selected_path = self._leaf_paths_by_tree_item[item]
+        else:
+            self._single_selected_path = None
+
+        self.__UpdateOkButton()
+        evt.Skip()
+
+    def __OnTreeRightClick(self, evt, tree):
+        item = tree.HitTest(evt.GetPosition())
         if not item:
             return
 
@@ -111,9 +138,12 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         if not item.IsOk():
             return
 
-        selections = tree.GetSelections()
-        if item not in selections:
+        if self._single_selection:
             tree.SelectItem(item)
+        else:
+            selections = tree.GetSelections()
+            if item not in selections:
+                tree.SelectItem(item)
         self.__PopupTreeContextMenu(tree, item)
 
     def __GetSelectedLeafPaths(self, tree):
@@ -131,68 +161,63 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
     def __PopupTreeContextMenu(self, tree, item):
         menu = wx.Menu()
+        if not self._single_selection:
+            if item in self._leaf_paths_by_tree_item:
+                target_paths = self.__GetTargetLeafPathsForMenu(tree, item)
+                in_widget = [path for path in target_paths if path in self._selected_paths]
+                not_in_widget = [path for path in target_paths if path not in self._selected_paths]
+                if not_in_widget:
+                    add_item = menu.Append(-1, 'Add to Widget')
+                    self.Bind(
+                        wx.EVT_MENU,
+                        partial(self.__OnAddLeavesFromBranch, paths=not_in_widget),
+                        add_item,
+                    )
+                if in_widget:
+                    remove_item = menu.Append(-1, 'Remove from Widget')
+                    self.Bind(
+                        wx.EVT_MENU,
+                        partial(self.__OnRemoveLeavesFromBranch, paths=in_widget),
+                        remove_item,
+                    )
+            else:
+                leaves = self.__CollectLeavesFromItem(tree, item)
+                selected_leaves = [path for path in leaves if path in self._selected_paths]
+                if len(selected_leaves) < len(leaves):
+                    add_leaves = menu.Append(-1, 'Add leaves to widget')
+                    self.Bind(
+                        wx.EVT_MENU,
+                        partial(self.__OnAddLeavesFromBranch, paths=leaves),
+                        add_leaves,
+                    )
+                if selected_leaves:
+                    remove_leaves = menu.Append(-1, 'Remove leaves from widget')
+                    self.Bind(
+                        wx.EVT_MENU,
+                        partial(self.__OnRemoveLeavesFromBranch, paths=selected_leaves),
+                        remove_leaves,
+                    )
+            menu.AppendSeparator()
+        self.__AppendExpandCollapseSubmenu(menu, tree)
+        tree.PopupMenu(menu)
+        menu.Destroy()
 
-        if item in self._leaf_paths_by_tree_item:
-            target_paths = self.__GetTargetLeafPathsForMenu(tree, item)
-            in_widget = [path for path in target_paths if path in self._selected_paths]
-            not_in_widget = [path for path in target_paths if path not in self._selected_paths]
-            if not_in_widget:
-                add_item = menu.Append(-1, 'Add to Widget')
-                self.Bind(
-                    wx.EVT_MENU,
-                    partial(self.__OnAddLeavesFromBranch, paths=not_in_widget),
-                    add_item,
-                )
-            if in_widget:
-                remove_item = menu.Append(-1, 'Remove from Widget')
-                self.Bind(
-                    wx.EVT_MENU,
-                    partial(self.__OnRemoveLeavesFromBranch, paths=in_widget),
-                    remove_item,
-                )
-        else:
-            leaves = self.__CollectLeavesFromItem(tree, item)
-            selected_leaves = [path for path in leaves if path in self._selected_paths]
-            if len(selected_leaves) < len(leaves):
-                add_leaves = menu.Append(-1, 'Add leaves to widget')
-                self.Bind(
-                    wx.EVT_MENU,
-                    partial(self.__OnAddLeavesFromBranch, paths=leaves),
-                    add_leaves,
-                )
-            if selected_leaves:
-                remove_leaves = menu.Append(-1, 'Remove leaves from widget')
-                self.Bind(
-                    wx.EVT_MENU,
-                    partial(self.__OnRemoveLeavesFromBranch, paths=selected_leaves),
-                    remove_leaves,
-                )
-
-        menu.AppendSeparator()
-
+    def __AppendExpandCollapseSubmenu(self, menu, tree):
         expand_submenu = wx.Menu()
         all_expanded, all_collapsed = self.__GetTreeExpandCollapseState(tree)
-
         def ExpandAll(evt, **kwargs):
             kwargs['tree'].ExpandAll()
             evt.Skip()
-
         def CollapseAll(evt, **kwargs):
             kwargs['tree'].CollapseAll()
             evt.Skip()
-
         if not all_expanded:
             expand_all = expand_submenu.Append(-1, 'Expand All')
             self.Bind(wx.EVT_MENU, partial(ExpandAll, tree=tree), expand_all)
-
         if not all_collapsed:
             collapse_all = expand_submenu.Append(-1, 'Collapse All')
             self.Bind(wx.EVT_MENU, partial(CollapseAll, tree=tree), collapse_all)
-
         menu.AppendSubMenu(expand_submenu, 'Expand / Collapse')
-
-        tree.PopupMenu(menu)
-        menu.Destroy()
 
     def __OnAddLeavesFromBranch(self, evt, paths):
         self.__SetPathsSelected(paths, True)
@@ -220,10 +245,17 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.__UpdateOkButton()
 
     def __UpdateOkButton(self):
-        self.ok_btn.Enable(
-            self._selected_paths != self._initial_paths
-            or self._only_show_selected != self._initial_only_show_selected
-        )
+        if self._single_selection:
+            enable = (
+                self._single_selected_path is not None
+                and self._single_selected_path not in set(self._initial_paths)
+            )
+        else:
+            enable = (
+                self._selected_paths != self._initial_paths
+                or self._only_show_selected != self._initial_only_show_selected
+            )
+        self.ok_btn.Enable(enable)
 
     def __BuildTree(self):
         self._tree_items_by_id = {}
@@ -270,6 +302,9 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.__SyncSelectionCheckboxes()
 
     def __BuildSelectionsList(self):
+        if self._single_selection:
+            return
+
         self.selections_list.Freeze()
         try:
             self.selections_list.DeleteAllItems()
