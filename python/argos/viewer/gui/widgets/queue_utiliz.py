@@ -1,5 +1,5 @@
 import wx, copy
-from viewer.gui.dialogs.string_list_selection import StringListSelectionDlg
+from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from viewer.gui.view_settings import DirtyReasons
 
 class QueueUtilizWidget(wx.Panel):
@@ -18,7 +18,7 @@ class QueueUtilizWidget(wx.Panel):
         # this with the 'pos' argument to the wx.BitmapButton constructor.
         gear_btn = frame.CreateSettingsButton(self)
         gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-        gear_btn.SetToolTip('Edit widget settings')
+        gear_btn.SetToolTip('Edit data selections')
 
         # The layout of this widget is like a barchart:
         #
@@ -92,9 +92,11 @@ class QueueUtilizWidget(wx.Panel):
             event.Skip()
 
     def __EditWidget(self, event):
-        dlg = StringListSelectionDlg(self, self.frame.simhier.GetContainerElemPaths(), self.container_elem_paths, 'Displayed queues:')
+        dlg = WidgetDataSelectionsDlg(
+            self, self.frame, self.container_elem_paths, queues_only=True,
+        )
         if dlg.ShowModal() == wx.ID_OK:
-            self.ApplyViewSettings({'displayed_elem_paths': dlg.GetSelectedStrings()})
+            self.ApplyViewSettings({'displayed_elem_paths': dlg.GetSelectedElemPaths()})
 
         dlg.Destroy()
 

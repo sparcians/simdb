@@ -1,8 +1,8 @@
-import wx, copy, re
+import wx, re
 from collections import OrderedDict
-from functools import partial
 from viewer.model.data_deserializers import StructDeserializer
 from viewer.gui.view_settings import DirtyReasons
+from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 
 class SummaryViews(wx.Panel):
     def __init__(self, parent, frame):
@@ -14,6 +14,7 @@ class SummaryViews(wx.Panel):
         self.summary = None
         self._summary_grid_dirty = True
         self._elem_paths_by_cid = {}
+        self._only_show_selected = False
         self.__ShowEmptyPlaceholder()
 
     @property
@@ -39,13 +40,19 @@ class SummaryViews(wx.Panel):
     def GetCurrentViewSettings(self):
         settings = {}
         settings['elem_paths'] = self.elem_paths
+        settings['only_show_selected'] = self._only_show_selected
         return settings
 
     def GetCurrentUserSettings(self):
         return {}
 
     def ApplyViewSettings(self, settings):
-        dirty = self.elem_paths != settings['elem_paths'] or self._summary_grid_dirty
+        only_show_selected = settings.get('only_show_selected', False)
+        dirty = (
+            self.elem_paths != settings['elem_paths']
+            or self._only_show_selected != only_show_selected
+            or self._summary_grid_dirty
+        )
         if not dirty:
             return
 
@@ -53,6 +60,7 @@ class SummaryViews(wx.Panel):
             self.frame.simhier.GetCollectionID(path):path
             for path in settings['elem_paths']
         }
+        self._only_show_selected = only_show_selected
 
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SummaryViewsWidgetChanged)
         self._summary_grid_dirty = True
@@ -150,14 +158,20 @@ class SummaryViews(wx.Panel):
         self.SetSizer(vsizer)
         self.Layout()
 
-    def EditWidget(self, evt):
-        dlg = SummaryViewsEditDialog(self, self.frame, self.elem_paths)
+    def EditWidget(self, evt, title="Edit Data Selections"):
+        dlg = WidgetDataSelectionsDlg(
+            self, self.frame, self.elem_paths, self._only_show_selected, title=title
+        )
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
+            only_show_selected = dlg.GetOnlyShowSelected()
         dlg.Destroy()
         if result == wx.ID_OK:
-            self.ApplyViewSettings({'elem_paths': elem_paths})
+            self.ApplyViewSettings({
+                'elem_paths': elem_paths,
+                'only_show_selected': only_show_selected,
+            })
 
 class SummaryGrid(wx.Panel):
     def __init__(self, parent, frame, elem_paths, summary_views):
@@ -191,7 +205,7 @@ class SummaryGrid(wx.Panel):
 
         self.gear_btn = frame.CreateSettingsButton(self)
         self.gear_btn.Bind(wx.EVT_BUTTON, self.summary_views.EditWidget)
-        self.gear_btn.SetToolTip('Edit widget settings')
+        self.gear_btn.SetToolTip('Edit data selections')
 
         row = 0
         sizer.Add(self.gear_btn, pos=(row,0))
@@ -318,289 +332,3 @@ class SummaryGrid(wx.Panel):
                 self.SetLabel(label)
             else:
                 self.SetLabel('(no data)')
-
-class SummaryViewsEditDialog(wx.Dialog):
-    _TREE_STYLE = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT | wx.TR_MULTIPLE
-
-    def __init__(self, parent, frame, elem_paths):
-        _, screen_h = wx.GetDisplaySize()
-        super().__init__(parent, title='Edit Summary Views', size=(600, int(screen_h * 0.75)))
-
-        self.frame = frame
-        self.simhier = frame.simhier
-        self._all_leaf_paths = list(self.simhier.GetElemPaths(True))
-
-        initial_paths = set(elem_paths)
-        self._selected_paths = [path for path in self._all_leaf_paths if path in initial_paths]
-        self._initial_paths = list(self._selected_paths)
-
-        self._avail_tree_items_by_id = {}
-        self._avail_leaf_paths_by_tree_item = {}
-        self._avail_placeholder_item = None
-        self._sel_tree_items_by_id = {}
-        self._sel_leaf_paths_by_tree_item = {}
-        self._sel_placeholder_item = None
-
-        available_label = wx.StaticText(self, label='Select collectables to add:')
-        self.available_tree = wx.TreeCtrl(self, style=self._TREE_STYLE)
-
-        self.add_btn = wx.Button(self, label='Add Selections')
-        self.add_btn.Bind(wx.EVT_BUTTON, self.__OnAddSelections)
-        self.add_btn.Disable()
-
-        add_action_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        add_action_sizer.Add(self.add_btn, 0, wx.ALL, 5)
-
-        selections_label = wx.StaticText(self, label='Displayed collectables:')
-        self.selections_tree = wx.TreeCtrl(self, style=self._TREE_STYLE)
-
-        self.remove_btn = wx.Button(self, label='Remove Selections')
-        self.remove_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveSelections)
-        self.remove_btn.Disable()
-
-        remove_action_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        remove_action_sizer.Add(self.remove_btn, 0, wx.ALL, 5)
-
-        btn_sizer = wx.StdDialogButtonSizer()
-        self.ok_btn = wx.Button(self, wx.ID_OK)
-        btn_sizer.AddButton(self.ok_btn)
-        btn_sizer.AddButton(wx.Button(self, wx.ID_CANCEL))
-        btn_sizer.Realize()
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(available_label, 0, wx.ALL, 5)
-        sizer.Add(self.available_tree, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-        sizer.Add(add_action_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
-        sizer.Add(selections_label, 0, wx.ALL, 5)
-        sizer.Add(self.selections_tree, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-        sizer.Add(remove_action_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
-        sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
-        self.SetSizer(sizer)
-
-        self.available_tree.Bind(wx.EVT_TREE_SEL_CHANGING, self.__OnAvailableTreeSelectionChanging)
-        self.available_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnAvailableTreeSelectionChanged)
-        self.available_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.available_tree))
-        self.selections_tree.Bind(wx.EVT_TREE_SEL_CHANGING, self.__OnSelectionsTreeSelectionChanging)
-        self.selections_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnSelectionsTreeSelectionChanged)
-        self.selections_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.selections_tree))
-
-        self.__RebuildBothTrees()
-        self.__UpdateButtonStates()
-
-    def GetSelectedElemPaths(self):
-        return list(self._selected_paths)
-
-    def __OnAvailableTreeSelectionChanging(self, evt):
-        if self.__IsPlaceholderItem(self.available_tree, evt.GetItem()):
-            evt.Veto()
-            return
-
-        evt.Skip()
-
-    def __OnSelectionsTreeSelectionChanging(self, evt):
-        if self.__IsPlaceholderItem(self.selections_tree, evt.GetItem()):
-            evt.Veto()
-            return
-
-        evt.Skip()
-
-    def __OnAvailableTreeSelectionChanged(self, evt):
-        self.__UpdateButtonStates()
-        evt.Skip()
-
-    def __OnSelectionsTreeSelectionChanged(self, evt):
-        self.__UpdateButtonStates()
-        evt.Skip()
-
-    def __OnTreeRightClick(self, event, tree):
-        item = tree.HitTest(event.GetPosition())
-        if not item:
-            return
-
-        item = item[0]
-        if not item.IsOk():
-            return
-
-        if self.__IsPlaceholderItem(tree, item):
-            return
-
-        tree.SelectItem(item)
-        self.__PopupTreeExpandCollapseMenu(tree)
-
-    def __PopupTreeExpandCollapseMenu(self, tree):
-        menu = wx.Menu()
-
-        def ExpandAll(evt, **kwargs):
-            kwargs['tree'].ExpandAll()
-            evt.Skip()
-
-        def CollapseAll(evt, **kwargs):
-            kwargs['tree'].CollapseAll()
-            evt.Skip()
-
-        expand_all = menu.Append(-1, 'Expand All')
-        self.Bind(wx.EVT_MENU, partial(ExpandAll, tree=tree), expand_all)
-
-        collapse_all = menu.Append(-1, 'Collapse All')
-        self.Bind(wx.EVT_MENU, partial(CollapseAll, tree=tree), collapse_all)
-
-        tree.PopupMenu(menu)
-        menu.Destroy()
-
-    def __OnAddSelections(self, evt):
-        paths_to_add = []
-        for item in self.available_tree.GetSelections():
-            if item.IsOk():
-                paths_to_add.extend(
-                    self.__CollectLeavesFromItem(
-                        self.available_tree, self._avail_leaf_paths_by_tree_item, item,
-                    )
-                )
-
-        self.__AddSelectedPaths(paths_to_add)
-
-    def __OnRemoveSelections(self, evt):
-        paths_to_remove = set()
-        for item in self.selections_tree.GetSelections():
-            if item.IsOk():
-                paths_to_remove.update(
-                    self.__CollectLeavesFromItem(
-                        self.selections_tree, self._sel_leaf_paths_by_tree_item, item,
-                    )
-                )
-
-        if not paths_to_remove:
-            return
-
-        self._selected_paths = [path for path in self._selected_paths if path not in paths_to_remove]
-        self.__RebuildBothTrees()
-        self.__UpdateButtonStates()
-
-    def __AddSelectedPaths(self, paths):
-        selected = set(self._selected_paths)
-        changed = False
-        for path in paths:
-            if path not in selected:
-                selected.add(path)
-                changed = True
-
-        if changed:
-            self._selected_paths = [path for path in self._all_leaf_paths if path in selected]
-            self.__RebuildBothTrees()
-            self.__UpdateButtonStates()
-
-    def __UpdateButtonStates(self):
-        self.add_btn.Enable(
-            bool(self.available_tree.GetSelections()) and bool(self._avail_leaf_paths_by_tree_item)
-        )
-        self.remove_btn.Enable(
-            bool(self.selections_tree.GetSelections()) and bool(self._sel_leaf_paths_by_tree_item)
-        )
-        self.ok_btn.Enable(self._selected_paths != self._initial_paths)
-
-    def __RebuildBothTrees(self):
-        self.__RebuildAvailableTree()
-        self.__RebuildSelectionsTree()
-
-    def __RebuildAvailableTree(self):
-        hidden = set(self._selected_paths)
-        visible_leaves = [path for path in self._all_leaf_paths if path not in hidden]
-        (
-            self._avail_tree_items_by_id,
-            self._avail_leaf_paths_by_tree_item,
-            self._avail_placeholder_item,
-        ) = self.__BuildTree(
-            self.available_tree, visible_leaves, empty_label='(everything selected)',
-        )
-
-    def __RebuildSelectionsTree(self):
-        (
-            self._sel_tree_items_by_id,
-            self._sel_leaf_paths_by_tree_item,
-            self._sel_placeholder_item,
-        ) = self.__BuildTree(
-            self.selections_tree, self._selected_paths, empty_label='(nothing selected)',
-        )
-
-    def __IsPlaceholderItem(self, tree, item):
-        if not item or not item.IsOk():
-            return False
-
-        if tree is self.available_tree:
-            placeholder_item = self._avail_placeholder_item
-        else:
-            placeholder_item = self._sel_placeholder_item
-
-        return placeholder_item is not None and item == placeholder_item
-
-    def __BuildTree(self, tree_ctrl, leaf_elem_paths, empty_label=None):
-        tree_items_by_id = {}
-        leaf_paths_by_tree_item = {}
-        placeholder_item = None
-
-        tree_ctrl.DeleteAllItems()
-        root = tree_ctrl.AddRoot('root')
-        tree_items_by_id[0] = root
-
-        if not leaf_elem_paths:
-            if empty_label:
-                placeholder_item = tree_ctrl.AppendItem(root, empty_label)
-            return tree_items_by_id, leaf_paths_by_tree_item, placeholder_item
-
-        visible_paths = self.__BuildVisibleElemPaths(leaf_elem_paths)
-        self.__RecurseBuildTree(
-            tree_ctrl, self.simhier.GetTree().GetRoot(), visible_paths,
-            tree_items_by_id, leaf_paths_by_tree_item,
-        )
-
-        return tree_items_by_id, leaf_paths_by_tree_item, placeholder_item
-
-    def __RecurseBuildTree(self, tree_ctrl, node, visible_paths, tree_items_by_id, leaf_paths_by_tree_item):
-        if node is self.simhier.GetTree().GetRoot():
-            for child in node.GetChildren():
-                self.__RecurseBuildTree(
-                    tree_ctrl, child, visible_paths, tree_items_by_id, leaf_paths_by_tree_item,
-                )
-            return
-
-        elem_path = node.GetPath()
-        if elem_path not in visible_paths:
-            return
-
-        if node.GetParent():
-            parent_id = node.GetParent().GetID()
-        else:
-            parent_id = 0
-
-        tree_item = tree_ctrl.AppendItem(tree_items_by_id[parent_id], node.GetName())
-        node_id = node.GetID()
-        tree_items_by_id[node_id] = tree_item
-
-        if not node.children:
-            leaf_paths_by_tree_item[tree_item] = elem_path
-
-        for child in node.GetChildren():
-            self.__RecurseBuildTree(
-                tree_ctrl, child, visible_paths, tree_items_by_id, leaf_paths_by_tree_item,
-            )
-
-    def __CollectLeavesFromItem(self, tree, leaf_paths_by_tree_item, item):
-        if item in leaf_paths_by_tree_item:
-            return [leaf_paths_by_tree_item[item]]
-
-        paths = []
-        child, cookie = tree.GetFirstChild(item)
-        while child.IsOk():
-            paths.extend(self.__CollectLeavesFromItem(tree, leaf_paths_by_tree_item, child))
-            child = tree.GetNextSibling(child)
-
-        return paths
-
-    @staticmethod
-    def __BuildVisibleElemPaths(leaf_elem_paths):
-        visible_paths = set()
-        for leaf_path in leaf_elem_paths:
-            parts = leaf_path.split('.')
-            for i in range(1, len(parts) + 1):
-                visible_paths.add('.'.join(parts[:i]))
-        return visible_paths

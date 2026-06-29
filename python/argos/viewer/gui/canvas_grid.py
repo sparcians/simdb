@@ -1,6 +1,11 @@
-import wx
+import wx, wx.adv
 from viewer.gui.widgets.splitter_window import DirtySplitterWindow
 from viewer.gui.view_settings import DirtyReasons
+from viewer.gui.widgets.queue_utiliz import QueueUtilizWidget
+from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
+from viewer.gui.widgets.summary_views import SummaryViews
+from viewer.gui.widgets.iterable_struct import IterableStruct
+from functools import partial
 
 class CanvasGrid(wx.Panel):
     def __init__(self, parent, rows=1, cols=1):
@@ -61,12 +66,14 @@ class CanvasGrid(wx.Panel):
     def __RecursivelyApplyViewSettings(self, settings, window):
         if settings['window_type'] == 'widget_container':
             widget_creation_str = settings['widget_creation_str']
-            if widget_creation_str:
+            if widget_creation_str and widget_creation_str != 'NO_WIDGET':
                 widget = self.frame.widget_creator.CreateWidget(widget_creation_str, window.container)
                 if 'widget_settings' in settings:
                     widget.ApplyViewSettings(settings['widget_settings'])
 
                 window.container.SetWidget(widget)
+            else:
+                window.container.SetWidget(None)
         elif settings['window_type'] == 'splitter':
             if settings['split_mode'] == 'horizontal':
                 window.__OnSplitHorizontally(None)
@@ -193,6 +200,8 @@ class CanvasGrid(wx.Panel):
 
         if self.container:
             self.container.DestroyAllWidgets()
+            self.container.Destroy()
+            self.container = None
 
         self.GetSizer().Clear()
         self.container = CanvasGrid(self, rows=1, cols=2)
@@ -211,6 +220,8 @@ class CanvasGrid(wx.Panel):
 
         if self.container:
             self.container.DestroyAllWidgets()
+            self.container.Destroy()
+            self.container = None
 
         self.GetSizer().Clear()
         self.container = CanvasGrid(self, rows=2, cols=1)
@@ -267,14 +278,12 @@ class WidgetContainer(wx.Panel):
     def __init__(self, parent):
         super(WidgetContainer, self).__init__(parent)
         self._widget = None
-
-        frame = parent 
-        while frame and not isinstance(frame, wx.Frame):
-            frame = frame.GetParent()
+        self._quick_links = WidgetQuickLinks(self)
 
         self.SetDropTarget(WidgetContainerDropTarget(self, self.frame.widget_creator))
 
         sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self._quick_links, 1, wx.EXPAND | wx.LEFT | wx.TOP, 5)
         self.SetSizer(sizer)
 
     @property
@@ -284,19 +293,50 @@ class WidgetContainer(wx.Panel):
             frame = frame.GetParent()
 
         return frame
-    
-    def SetWidget(self, widget):
-        if self._widget:
-            self.GetSizer().Detach(self._widget)
-            self._widget.Destroy()
 
-        self._widget = widget
+    def __HideQuickLinks(self):
+        if not self._quick_links.IsShown():
+            return
+
+        sizer = self.GetSizer()
+        for item in sizer.GetChildren():
+            if item.GetWindow() == self._quick_links:
+                sizer.Detach(self._quick_links)
+                break
+        self._quick_links.Hide()
+
+    def __ShowQuickLinks(self):
+        sizer = self.GetSizer()
+        self._quick_links.Show()
+        for item in sizer.GetChildren():
+            if item.GetWindow() == self._quick_links:
+                return
+        sizer.Add(self._quick_links, 1, wx.EXPAND | wx.LEFT | wx.TOP, 5)
+
+    def SetWidget(self, widget):
+        sizer = self.GetSizer()
         if widget:
-            sizer = self.GetSizer()
+            dirty_reason = DirtyReasons.WidgetDropped
+        elif self._widget:
+            dirty_reason = DirtyReasons.WidgetRemoved
+        else:
+            dirty_reason = None
+
+        if self._widget:
+            sizer.Detach(self._widget)
+            self._widget.Destroy()
+            self._widget = None
+
+        if widget:
+            self.__HideQuickLinks()
+            self._widget = widget
             sizer.Add(widget, 1, wx.EXPAND)
+        else:
+            self.__ShowQuickLinks()
 
         self.Layout()
-        self.frame.view_settings.SetDirty(reason=DirtyReasons.WidgetDropped)
+        if dirty_reason is not None:
+            self.frame.view_settings.SetDirty(reason=dirty_reason)
         wx.CallAfter(self.__RefreshWidget)
 
     def SetWidgetFocus(self):
@@ -304,10 +344,7 @@ class WidgetContainer(wx.Panel):
             self._widget.SetFocus()
 
     def DestroyAllWidgets(self):
-        if self._widget:
-            self.GetSizer().Detach(self._widget)
-            self._widget.Destroy()
-            self._widget = None
+        self.SetWidget(None)
 
     def UpdateWidgets(self):
         if self._widget:
@@ -315,20 +352,53 @@ class WidgetContainer(wx.Panel):
 
     def GetWidget(self):
         return self._widget
-    
-    def SplitCanvas(self, split_mode, sash_position):
-        assert not self.GetSizer().GetChildren(), 'Cannot split a non-empty widget container'
 
-        if split_mode == 'horizontal':
-            self.SplitHorizontally(WidgetContainer(self), WidgetContainer(self))
-        elif split_mode == 'vertical':
-            self.SplitVertically(WidgetContainer(self), WidgetContainer(self))
+    def LaunchQueueViewer(self):
+        print ('TODO: Queue Viewer')
 
-        self.SetSashPosition(sash_position)
-    
+    def LaunchQueueUtilizViewer(self):
+        widget = QueueUtilizWidget(self, self.frame)
+        self.SetWidget(widget)
+
+    def LaunchSchedulingLinesViewer(self):
+        widget = SchedulingLinesWidget(self, self.frame)
+        self.SetWidget(widget)
+
+    def LaunchWatchlistBuilder(self):
+        widget = SummaryViews(self, self.frame)
+        widget.EditWidget(None, title="Make Data Selections")
+        self.SetWidget(widget)
+
     def __RefreshWidget(self):
         self.UpdateWidgets()
         self.SetWidgetFocus()
+
+class WidgetQuickLinks(wx.Panel):
+    def __init__(self, widget_container):
+        wx.Panel.__init__(self, widget_container)
+
+        links = [
+            ("Queue Inspector", widget_container.LaunchQueueViewer),
+            ("Queue Utilizations", widget_container.LaunchQueueUtilizViewer),
+            ("Scheduling Lines", widget_container.LaunchSchedulingLinesViewer),
+            ("Watchlist", widget_container.LaunchWatchlistBuilder)
+        ]
+
+        vsizer = wx.BoxSizer(wx.VERTICAL)
+        quick_links = wx.StaticText(self, label="Quick Links:")
+        vsizer.Add(quick_links)
+
+        for label, callback in links:
+            row = wx.BoxSizer(wx.HORIZONTAL)
+            bullet = wx.StaticText(self, label="\u2022")
+            link = wx.adv.HyperlinkCtrl(self, label=label)
+            link.Bind(wx.adv.EVT_HYPERLINK, lambda evt, cb=callback: cb())
+            row.Add(bullet, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8)
+            row.Add(link)
+            vsizer.Add(row, 0, wx.LEFT, 5)
+
+        self.SetSizer(vsizer)
+        self.Layout()
 
 class WidgetContainerDropTarget(wx.TextDropTarget):
     def __init__(self, widget_container, widget_creator):
