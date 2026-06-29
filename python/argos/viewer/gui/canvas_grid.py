@@ -382,8 +382,20 @@ class WidgetContainer(wx.Panel):
         self.SetWidget(widget)
 
     def LaunchSchedulingLinesViewer(self):
-        widget = SchedulingLinesWidget(self, self.frame)
-        self.SetWidget(widget)
+        if isinstance(self._widget, SchedulingLinesWidget):
+            elem_paths = self._widget.caption_mgr.GetAllMatchingElemPaths()
+        else:
+            elem_paths = []
+
+        dlg = WidgetDataSelectionsDlg(self, self.frame, elem_paths, queues_only=True)
+        result = dlg.ShowModal()
+        if result == wx.ID_OK:
+            elem_paths = dlg.GetSelectedElemPaths()
+            assert len(elem_paths) > 0
+            widget = SchedulingLinesWidget(self, self.frame, elem_paths)
+            self.SetWidget(widget)
+
+        dlg.Destroy()
 
     def LaunchWatchlistBuilder(self):
         widget = SummaryViews(self, self.frame)

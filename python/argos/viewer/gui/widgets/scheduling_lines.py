@@ -6,7 +6,7 @@ from viewer.gui.dialogs.scheduling_lines_customization import SchedulingLinesCus
 from functools import partial
 
 class SchedulingLinesWidget(wx.Panel):
-    def __init__(self, parent, frame):
+    def __init__(self, parent, frame, elem_paths=None):
         super().__init__(parent)
         self.frame = frame
         self.num_ticks_before = 5
@@ -30,7 +30,10 @@ class SchedulingLinesWidget(wx.Panel):
         for collection_id,max_size in cursor.fetchall():
             self.queue_max_sizes_by_collection_id[collection_id] = max_size
 
-        self.__ShowUsageInfo()
+        if elem_paths:
+            self.SetElements(elem_paths)
+        else:
+            self.__ShowUsageInfo()
 
     def GetWidgetCreationString(self):
         return 'Scheduling Lines'
@@ -64,6 +67,37 @@ class SchedulingLinesWidget(wx.Panel):
 
     def AddElement(self, elem_path):
         self.__AddElement(elem_path)
+        self.__Refresh()
+
+        if not self.gear_btn:
+            self.gear_btn = self.frame.CreateSettingsButton(self)
+            self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
+            self.gear_btn.SetToolTip('Edit widget settings')
+
+        self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
+
+    def SetElements(self, elem_paths):
+        # Filter out all the collectables that did not collect any data
+        warning = []
+        elem_paths_with_data = []
+        for elem_path in elem_paths:
+            elem_cid = self.frame.simhier.GetCollectionID(elem_path)
+            has_data = self.queue_max_sizes_by_collection_id.get(elem_cid, 0) > 0
+            if has_data:
+                elem_paths_with_data.append(elem_path)
+            else:
+                if not warning:
+                    warning.append('No data collected and will not be displayed:')
+                warning.append('  - ' + elem_path)
+
+        if warning:
+            warning = '\n'.join(warning)
+            wx.MessageBox(warning, 'Warning', wx.OK | wx.ICON_WARNING)
+
+        self.caption_mgr.ClearSelections()
+        for elem_path in elem_paths_with_data:
+            self.__AddElement(elem_path)
+
         self.__Refresh()
 
         if not self.gear_btn:
@@ -257,7 +291,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         num_cols = self.num_ticks_before + self.num_ticks_after + 1
         if self.show_detailed_queue_packets:
-            num_cols += 3
+            num_cols += 2
 
         # Create 8-point monospace font for the grid cells
         font8 = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
@@ -268,7 +302,6 @@ class SchedulingLinesWidget(wx.Panel):
         if new_grid or self.grid is None:
             self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
         self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
-        self.grid.GetGridWindow().Bind(wx.EVT_RIGHT_DOWN, self.__OnGridRightClick)
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
@@ -279,10 +312,10 @@ class SchedulingLinesWidget(wx.Panel):
         current_tick = self.frame.widget_renderer.tick
         col_labels = []
         time_vals = self.frame.data_retriever.GetAllTimeVals()
-        time_vals = {float(val) for val in time_vals}
+        time_vals = {int(val) for val in time_vals}
         for col in range(1, self.num_ticks_before + self.num_ticks_after + 1):
             tick = current_tick - self.num_ticks_before + col - 1
-            if float(tick) in time_vals:
+            if int(tick) in time_vals:
                 self.grid.SetColLabelValue(col, str(tick))
                 col_labels.append(str(tick))
             else:
@@ -310,8 +343,6 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.__SetElementCaptions(0)
         if self.show_detailed_queue_packets:
-            self.__SetElementCaptions(self.num_ticks_before + self.num_ticks_after + 2)
-
             # Clear the column labels for the detailed queue packets section
             for i in range(self.num_ticks_before + self.num_ticks_after + 1, self.grid.GetNumberCols()):
                 self.grid.SetColLabelValue(i, '')
@@ -336,13 +367,14 @@ class SchedulingLinesWidget(wx.Panel):
 
         # Left-justify the detailed packet column
         if self.show_detailed_queue_packets:
-            col = self.num_ticks_before + self.num_ticks_after + 3
+            col = self.num_ticks_before + self.num_ticks_after + 2
             labels = [self.grid.GetCellValue(row,col) for row in range(self.grid.GetNumberRows())]
             max_num_chars = max([len(label) for label in labels])
             for row in range(self.grid.GetNumberRows()):
                 label = self.grid.GetCellValue(row, col).strip()
                 label = label.strip() + ' '*(max_num_chars - len(label))
                 self.grid.SetCellValue(row, col, label)
+                #TODO XXX: Justify fields
 
         self.grid.AutoSize()
         self.Layout()
@@ -388,7 +420,7 @@ class SchedulingLinesWidget(wx.Panel):
                 if self.grid.IsColShown(i):
                     num_visible_columns += 1
 
-            detailed_pkt_col = num_visible_columns - 1
+            detailed_pkt_col = num_visible_columns - 1#TODO XXX
         else:
             detailed_pkt_col = -1
 
@@ -433,7 +465,10 @@ class SchedulingLinesWidget(wx.Panel):
         captions = []
         if max_size < num_bins:
             caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
-            captions.append('{}[{}-{}]'.format(caption_prefix, max_size-1, num_bins-1))
+            if max_size == 0:
+                captions.append('{}(no data)'.format(caption_prefix))
+            else:
+                captions.append('{}[{}-{}]'.format(caption_prefix, max_size-1, num_bins-1))
 
             for i in range(1, max_size):
                 bin_idx = max_size - i - 1
@@ -461,91 +496,6 @@ class SchedulingLinesWidget(wx.Panel):
         else:
             self.grid.UnsetToolTip()
 
-    def __OnGridRightClick(self, evt):
-        x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
-        row, col = self.grid.XYToCell(x, y)
-
-        if col == 0:
-            return
-
-        if self.show_detailed_queue_packets and col > self.num_ticks_before + self.num_ticks_after:
-            return
-
-        # Extract the element path from the row label's tooltip e.g. "top.cpu.core0.rob.stats.num_insts_retired"
-        elem_path = self.grid.GetCellToolTip(row, 0)
-
-        # Extract the caption for this row e.g. "NumInstsRetired[3]"
-        caption = self.grid.GetCellValue(row, 0)
-
-        # Extract the bin index from the caption
-        match = re.match(r'(.+)\[(\d+)\]', caption)
-
-        # Don't do anything when we right-click on a cell for e.g. InstQueue[29-31]
-        # as those are just "filler" rows to indicate the full queue capacity (32).
-        # There is no data here, so there is no tooltip.
-        if not match:
-            return
-
-        bin_idx = match.group(2)
-
-        # Remove the [bin_idx] suffix from elem_path
-        elem_path = elem_path.replace('[{}]'.format(bin_idx), '')
-
-        # Get the tick for the cell we right-clicked
-        cell_tick = float(self.grid.GetColLabelValue(col))
-
-        auto_colorize_column = self.frame.data_retriever.GetAutoColorizeColumn(elem_path)
-        unpacked = self.frame.data_retriever.Unpack(elem_path, cell_tick)
-        data_vals = unpacked['DataVals'][0]
-        if data_vals is None or int(bin_idx) >= len(data_vals):
-            return
-
-        bin_data = data_vals[int(bin_idx)]
-        if auto_colorize_column not in bin_data:
-            return
-
-        auto_colorize_value = bin_data[auto_colorize_column]
-        menu_anno = '{}({})'.format(auto_colorize_column, auto_colorize_value)
-
-        menu = wx.Menu()
-
-        if menu_anno not in {'{}({})'.format(k,v) for k,v in self.tracked_annos.items()}:
-            opt = menu.Append(wx.ID_ANY, 'Highlight cells with annotation "{}"'.format(menu_anno))
-            self.grid.Bind(wx.EVT_MENU, partial(self.__HighlightCellsWithTag, key=auto_colorize_column, value=auto_colorize_value, highlight=True), opt)
-        else:
-            opt = menu.Append(wx.ID_ANY, 'Unhighlight cells with annotation "{}"'.format(menu_anno))
-            self.grid.Bind(wx.EVT_MENU, partial(self.__HighlightCellsWithTag, key=auto_colorize_column, value=auto_colorize_value, highlight=False), opt)
-
-        #opt = menu.Append(wx.ID_ANY, 'Go to next cycle where different')
-        #self.grid.Bind(wx.EVT_MENU, partial(self.__GoToNextCycleWhereDifferent, elem_path=elem_path, bin_idx=bin_idx), opt)
-
-        #opt = menu.Append(wx.ID_ANY, 'Go to previous cycle where different')
-        #self.grid.Bind(wx.EVT_MENU, partial(self.__GoToPrevCycleWhereDifferent, elem_path=elem_path, bin_idx=bin_idx), opt)
-
-        self.grid.PopupMenu(menu)
-
-    def __HighlightCellsWithTag(self, evt, key, value, highlight):
-        if highlight:
-            self.tracked_annos[key] = value
-            dirty = True
-        else:
-            if key in self.tracked_annos:
-                del self.tracked_annos[key]
-                dirty = True
-            else:
-                dirty = False
-
-        if dirty:
-            self.frame.view_settings.SetDirty(reason=DirtyReasons.TrackedPacketChanged)
-
-        self.UpdateWidgetData(True)
-
-    def __GoToNextCycleWhereDifferent(self, evt, elem_path, bin_idx):
-        print ('TODO: Go to next cycle where different')
-
-    def __GoToPrevCycleWhereDifferent(self, evt, elem_path, bin_idx):
-        print ('TODO: Go to previous cycle where different')
-
     def __EditWidget(self, evt):
         dlg = SchedulingLinesCustomizationDlg(
             self, self.caption_mgr, self.num_ticks_before, self.num_ticks_after,
@@ -565,6 +515,9 @@ class SchedulingLinesWidget(wx.Panel):
 class CaptionManager:
     def __init__(self, simhier):
         self.simhier = simhier
+        self.ClearSelections()
+
+    def ClearSelections(self):
         self.regex_replacements_by_elem_path_regex = OrderedDict()
 
     def SetElemPathRegexReplacement(self, elem_path_regex, regex_replacement):
@@ -727,11 +680,11 @@ class Rasterizer:
 
             col_label = self.grid.GetColLabelValue(col)
             try:
-                col_label = float(col_label)
+                col_label = int(col_label)
             except:
                 continue
 
-            if col_label == float(time_val):
+            if col_label == int(time_val):
                 self.grid.SetCellValue(self.row, col, auto_label)
                 self.grid.SetCellBackgroundColour(self.row, col, auto_color)
                 self.grid.SetCellToolTip(self.row, col, stringized_tooltip)

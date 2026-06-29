@@ -268,7 +268,6 @@ class SummaryGrid(wx.Panel):
         elem_paths = list(self.value_handlers.keys())
         all_data = self.frame.data_retriever.UnpackRange(current_tick, current_tick, elem_paths)
 
-        #import pdb; pdb.set_trace()
         for elem_path, elem_data in all_data.items():
             handler = self.value_handlers[elem_path]
             if len(elem_data['DataVals']) == 1:
