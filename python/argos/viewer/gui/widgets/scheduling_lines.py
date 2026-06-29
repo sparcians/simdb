@@ -368,13 +368,31 @@ class SchedulingLinesWidget(wx.Panel):
         # Left-justify the detailed packet column
         if self.show_detailed_queue_packets:
             col = self.num_ticks_before + self.num_ticks_after + 2
-            labels = [self.grid.GetCellValue(row,col) for row in range(self.grid.GetNumberRows())]
-            max_num_chars = max([len(label) for label in labels])
-            for row in range(self.grid.GetNumberRows()):
-                label = self.grid.GetCellValue(row, col).strip()
-                label = label.strip() + ' '*(max_num_chars - len(label))
+            labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
+
+            def AlignColumns(strings):
+                # Split each row into columns
+                rows = [s.split() for s in strings]
+
+                # Find max width for each column
+                widths = [
+                    max(len(row[i]) for row in rows)
+                    for i in range(len(rows[0]))
+                ]
+
+                # Pad each column except the last, preserve trailing spaces
+                result = []
+                for row in rows:
+                    aligned = ''.join(
+                        col.ljust(width + 1)   # +1 ensures at least one separating space
+                        for col, width in zip(row, widths)
+                    )
+                    result.append(aligned)
+
+                return result
+
+            for row, label in enumerate(AlignColumns(labels)):
                 self.grid.SetCellValue(row, col, label)
-                #TODO XXX: Justify fields
 
         self.grid.AutoSize()
         self.Layout()
