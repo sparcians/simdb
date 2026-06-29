@@ -1,6 +1,5 @@
 import wx, sqlite3, os
 from viewer.gui.widgets.playback_bar import PlaybackBar
-from viewer.gui.explorer import DataExplorer
 from viewer.gui.inspector import DataInspector
 from viewer.gui.widgets.widget_renderer import WidgetRenderer
 from viewer.gui.widgets.widget_creator import WidgetCreator
@@ -20,14 +19,8 @@ class ArgosFrame(wx.Frame):
         self.widget_renderer = WidgetRenderer(self)
         self.widget_creator = WidgetCreator(self)
         self.data_retriever = DataRetriever(self, db_path, self.simhier, self.dtype_inspector)
-
-        self.frame_splitter = DirtySplitterWindow(self, self, style=wx.SP_LIVE_UPDATE)
-        self.explorer = DataExplorer(self.frame_splitter, self)
-        self.inspector = DataInspector(self.frame_splitter, self)
+        self.inspector = DataInspector(self, self)
         self.playback_bar = PlaybackBar(self)
-
-        self.frame_splitter.SplitVertically(self.explorer, self.inspector, sashPosition=300)
-        self.frame_splitter.SetMinimumPaneSize(300)
 
         self.menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
@@ -48,16 +41,13 @@ class ArgosFrame(wx.Frame):
 
         # Layout
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self.frame_splitter, 1, wx.EXPAND)
+        sizer.Add(self.inspector, 1, wx.EXPAND)
         sizer.Add(self.playback_bar, 0, wx.EXPAND)
         self.SetSizer(sizer)
         self.Layout()
         self.Maximize()
 
     def PostLoad(self, view_file):
-        self.widget_creator.BindToWidgetSource(self.explorer.queues_tree)
-        self.widget_creator.BindToWidgetSource(self.explorer.scalars_tree)
-        self.widget_creator.BindToWidgetSource(self.explorer.tools)
         self.view_settings.PostLoad(self, view_file)
 
     def CreateResourceBitmap(self, filename, size=(16, 16)):

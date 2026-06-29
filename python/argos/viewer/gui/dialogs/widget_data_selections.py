@@ -16,6 +16,9 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self._all_leaf_paths = sorted(self.simhier.GetElemPaths(True))
 
         initial_paths = set(elem_paths)
+        if single_selection:
+            assert len(initial_paths) <= 1
+
         self._selected_paths = [path for path in self._all_leaf_paths if path in initial_paths]
         self._initial_paths = list(self._selected_paths)
         self._initial_only_show_selected = only_show_selected
@@ -50,6 +53,10 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.only_selected_cb.SetValue(only_show_selected)
             self.only_selected_cb.Bind(wx.EVT_CHECKBOX, self.__OnOnlyShowSelectedChanged)
 
+        self.ok_btn_disabled_reason = wx.StaticText(self)
+        self.ok_btn_disabled_reason.SetForegroundColour(wx.RED)
+        self.ok_btn_disabled_reason.Hide()
+
         btn_sizer = wx.StdDialogButtonSizer()
         self.ok_btn = wx.Button(self, wx.ID_OK)
         btn_sizer.AddButton(self.ok_btn)
@@ -62,6 +69,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         if not single_selection:
             sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
             sizer.Add(self.only_selected_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+        sizer.Add(self.ok_btn_disabled_reason, 0, wx.LEFT, 5)
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizer(sizer)
 
@@ -256,6 +264,18 @@ class WidgetDataSelectionsDlg(wx.Dialog):
                 or self._only_show_selected != self._initial_only_show_selected
             )
         self.ok_btn.Enable(enable)
+        if enable:
+            self.ok_btn_disabled_reason.Hide()
+        else:
+            if self._single_selection:
+                if self._single_selected_path is not None:
+                    reason = "Selected queue has not changed"
+                else:
+                    reason = ""
+            else:
+                reason = "Selections have not changed"
+            self.ok_btn_disabled_reason.SetLabel(reason)
+            self.ok_btn_disabled_reason.Show()
 
     def __BuildTree(self):
         self._tree_items_by_id = {}

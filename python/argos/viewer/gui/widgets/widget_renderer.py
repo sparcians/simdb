@@ -109,8 +109,7 @@ class WidgetRenderer:
         return tag
 
     def __UpdateWidgetsOnCurrentTab(self):
-        self.frame.explorer.queues_tree.UpdateUtilizBitmaps()
-
+        # TODO XXX: refresh when switching tabs
         notebook = self.frame.inspector
         page_idx = notebook.GetSelection()
         page = notebook.GetPage(page_idx)

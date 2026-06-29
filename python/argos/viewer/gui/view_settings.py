@@ -60,8 +60,6 @@ class ViewSettings:
         try:
             with open(view_file, 'r') as fin:
                 settings = yaml.load(fin, Loader=yaml.FullLoader)
-                self._frame.explorer.queues_tree.ApplyViewSettings(settings['QueuesTree'])
-                self._frame.explorer.scalars_tree.ApplyViewSettings(settings['ScalarsTree'])
                 self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
                 self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
                 self._frame.inspector.ApplyViewSettings(settings['Inspector'])
@@ -231,8 +229,6 @@ class ViewSettings:
 
     def __WriteViewSettings(self, view_file):
         settings = {
-            'QueuesTree': self._frame.explorer.queues_tree.GetCurrentViewSettings(),
-            'ScalarsTree': self._frame.explorer.scalars_tree.GetCurrentViewSettings(),
             'PlaybackBar': self._frame.playback_bar.GetCurrentViewSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentViewSettings(),
             'Inspector': self._frame.inspector.GetCurrentViewSettings(),
@@ -270,8 +266,6 @@ class ViewSettings:
         settings_file = os.path.join(settings_dir, 'user_settings.yaml')
 
         settings = {
-            'QueuesTree': self._frame.explorer.queues_tree.GetCurrentUserSettings(),
-            'ScalarsTree': self._frame.explorer.scalars_tree.GetCurrentUserSettings(),
             'PlaybackBar': self._frame.playback_bar.GetCurrentUserSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentUserSettings(),
             'Inspector': self._frame.inspector.GetCurrentUserSettings(),
@@ -297,8 +291,6 @@ class ViewSettings:
         try:
             with open(settings_file, 'r') as fin:
                 settings = yaml.load(fin, Loader=yaml.FullLoader)
-                self._frame.explorer.queues_tree.ApplyUserSettings(settings['QueuesTree'])
-                self._frame.explorer.scalars_tree.ApplyUserSettings(settings['ScalarsTree'])
                 self._frame.playback_bar.ApplyUserSettings(settings['PlaybackBar'])
                 self._frame.data_retriever.ApplyUserSettings(settings['DataRetriever'])
                 self._frame.inspector.ApplyUserSettings(settings['Inspector'])
@@ -315,8 +307,6 @@ class ViewSettings:
         return result
     
     def __ResetDefaultViewSettings(self):
-        self._frame.explorer.queues_tree.ResetToDefaultViewSettings(False)
-        self._frame.explorer.scalars_tree.ResetToDefaultViewSettings(False)
         self._frame.playback_bar.ResetToDefaultViewSettings(False)
         self._frame.data_retriever.ResetToDefaultViewSettings(False)
         self._frame.inspector.ResetToDefaultViewSettings(False)

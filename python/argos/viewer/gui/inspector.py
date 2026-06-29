@@ -185,6 +185,8 @@ class DataInspector(wx.aui.AuiNotebook):
         new_page_index = event.GetSelection()
         if not self.__suppress_add_tab_dialog and new_page_index == self.GetPageCount() - 1:
             self.__ShowAddTabDialog()
+        else:
+            self.RefreshWidgetsOnCurrentTab()
 
         event.Skip()
 

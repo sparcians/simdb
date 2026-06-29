@@ -3,7 +3,7 @@ from functools import partial
 
 class PlaybackBar(wx.Panel):
     def __init__(self, frame):
-        super(PlaybackBar, self).__init__(frame, size=(frame.GetSize().width, 100))
+        super(PlaybackBar, self).__init__(frame, size=(frame.GetSize().width, -1))
         self.SetBackgroundColour('light gray')
         widget_renderer = self.frame.widget_renderer
 
