@@ -3,7 +3,7 @@ from functools import partial
 
 class WidgetDataSelectionsDlg(wx.Dialog):
     def __init__(
-        self, parent, frame, elem_paths, only_show_selected=False, queues_only=False, single_selection=False, title="Edit Data Selections",
+        self, parent, frame, elem_paths, queues_only=False, single_selection=False, title="Edit Data Selections",
     ):
         _, screen_h = wx.GetDisplaySize()
         super().__init__(parent, title=title, size=(600, int(screen_h * 0.75)))
@@ -15,14 +15,13 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         else:
             self._all_leaf_paths = sorted(self.simhier.GetElemPaths(True))
 
-        initial_paths = set(elem_paths)
-        if single_selection:
-            assert len(initial_paths) <= 1
+        initial_paths_set = set(elem_paths)
+        self._selected_paths = [p for p in elem_paths if p in self._all_leaf_paths]
+        for p in self._all_leaf_paths:
+            if p in initial_paths_set and p not in self._selected_paths:
+                self._selected_paths.append(p)
 
-        self._selected_paths = [path for path in self._all_leaf_paths if path in initial_paths]
         self._initial_paths = list(self._selected_paths)
-        self._initial_only_show_selected = only_show_selected
-        self._only_show_selected = only_show_selected
         self._single_selection = single_selection
         self._single_selected_path = None
 
@@ -49,13 +48,11 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.selections_list.EnableCheckBoxes(True)
             self.selections_list.InsertColumn(0, 'Current Selections', width=550)
 
-            self.only_selected_cb = wx.CheckBox(self, label='Only show selected data')
-            self.only_selected_cb.SetValue(only_show_selected)
-            self.only_selected_cb.Bind(wx.EVT_CHECKBOX, self.__OnOnlyShowSelectedChanged)
+            self.move_up_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_UP, wx.ART_BUTTON))
+            self.move_up_btn.Bind(wx.EVT_BUTTON, self.__MoveSelectedElemUp)
 
-        #self.ok_btn_disabled_reason = wx.StaticText(self)
-        #self.ok_btn_disabled_reason.SetForegroundColour(wx.RED)
-        #self.ok_btn_disabled_reason.Hide()
+            self.move_down_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_DOWN, wx.ART_BUTTON))
+            self.move_down_btn.Bind(wx.EVT_BUTTON, self.__MoveSelectedElemDown)
 
         btn_sizer = wx.StdDialogButtonSizer()
         self.ok_btn = wx.Button(self, wx.ID_OK)
@@ -67,9 +64,15 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         sizer.Add(instruction_label, 0, wx.ALL, 5)
         sizer.Add(self.hier_tree, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
         if not single_selection:
-            sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-            sizer.Add(self.only_selected_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
-        #sizer.Add(self.ok_btn_disabled_reason, 0, wx.LEFT, 5)
+            list_sizer = wx.BoxSizer(wx.HORIZONTAL)
+            list_sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+
+            arrow_btns_sizer = wx.BoxSizer(wx.VERTICAL)
+            arrow_btns_sizer.Add(self.move_up_btn)
+            arrow_btns_sizer.Add(self.move_down_btn)
+            list_sizer.Add(arrow_btns_sizer)
+            sizer.Add(list_sizer)
+
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizer(sizer)
 
@@ -77,27 +80,32 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
             self.selections_list.Bind(wx.EVT_LIST_ITEM_CHECKED, self.__OnListItemChecked)
             self.selections_list.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.__OnListItemUnchecked)
+            self.selections_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.__UpdateButtonStates)
         else:
             self.hier_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnTreeSelectionChanged)
             self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
 
         self.__BuildTree()
         self.__BuildSelectionsList()
-        self.__UpdateOkButton()
+        self.__UpdateButtonStates()
 
     def GetSelectedElemPaths(self):
         if self._single_selection:
             return [self._single_selected_path] if self._single_selected_path else []
-        return list(self._selected_paths)
 
-    def GetOnlyShowSelected(self):
-        return self._only_show_selected
+        selected_paths = []
+        for idx in range(self.selections_list.GetItemCount()):
+            if self.selections_list.IsItemChecked(idx):
+                selected_paths.append(self.selections_list.GetItemText(idx))
 
-    def __OnOnlyShowSelectedChanged(self, evt):
-        self._only_show_selected = self.only_selected_cb.IsChecked()
-        self.__BuildSelectionsList()
-        self.__UpdateOkButton()
-        evt.Skip()
+        return selected_paths
+
+    def __RebuildSelectedPaths(self, selected_paths_set):
+        kept = [p for p in self._selected_paths if p in selected_paths_set]
+        for p in self._all_leaf_paths:
+            if p in selected_paths_set and p not in kept:
+                kept.append(p)
+        self._selected_paths = kept
 
     def __OnListItemChecked(self, evt):
         if self._syncing_list_checkboxes:
@@ -108,8 +116,8 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         if path not in self._selected_paths:
             selected_paths = set(self._selected_paths)
             selected_paths.add(path)
-            self._selected_paths = [p for p in self._all_leaf_paths if p in selected_paths]
-            self.__UpdateOkButton()
+            self.__RebuildSelectedPaths(selected_paths)
+            self.__UpdateButtonStates()
         evt.Skip()
 
     def __OnListItemUnchecked(self, evt):
@@ -121,10 +129,8 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         if path in self._selected_paths:
             selected_paths = set(self._selected_paths)
             selected_paths.remove(path)
-            self._selected_paths = [p for p in self._all_leaf_paths if p in selected_paths]
-            if self._only_show_selected:
-                self.__BuildSelectionsList()
-            self.__UpdateOkButton()
+            self.__RebuildSelectedPaths(selected_paths)
+            self.__UpdateButtonStates()
         evt.Skip()
 
     def __OnTreeSelectionChanged(self, evt):
@@ -134,7 +140,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         else:
             self._single_selected_path = None
 
-        self.__UpdateOkButton()
+        self.__UpdateButtonStates()
         evt.Skip()
 
     def __OnTreeRightClick(self, evt, tree):
@@ -153,6 +159,46 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             if item not in selections:
                 tree.SelectItem(item)
         self.__PopupTreeContextMenu(tree, item)
+
+    def __MoveSelectedElemUp(self, evt):
+        selected_rows = self.__GetListCtrlSelectedRows()
+        assert len(selected_rows) == 1
+        src_row = selected_rows[0]
+        assert src_row > 0
+        dst_row = src_row - 1
+        self.__SwapListCtrlItems(src_row, dst_row)
+
+    def __MoveSelectedElemDown(self, evt):
+        selected_rows = self.__GetListCtrlSelectedRows()
+        assert len(selected_rows) == 1
+        src_row = selected_rows[0]
+        dst_row = src_row + 1
+        assert dst_row < self.selections_list.GetItemCount()
+        self.__SwapListCtrlItems(src_row, dst_row)
+
+    def __SwapListCtrlItems(self, src_row, dst_row):
+        src_text = self.selections_list.GetItemText(src_row)
+        dst_text = self.selections_list.GetItemText(dst_row)
+        self.selections_list.SetItemText(dst_row, src_text)
+        self.selections_list.SetItemText(src_row, dst_text)
+
+        src_checked = self.selections_list.IsItemChecked(src_row)
+        dst_checked = self.selections_list.IsItemChecked(dst_row)
+        self.selections_list.CheckItem(src_row, dst_checked)
+        self.selections_list.CheckItem(dst_row, src_checked)
+
+        src_selected = self.selections_list.IsSelected(src_row)
+        dst_selected = self.selections_list.IsSelected(dst_row)
+        self.selections_list.Select(src_row, dst_selected)
+        self.selections_list.Select(dst_row, src_selected)
+
+        self.selections_list.EnsureVisible(dst_row)
+
+        self._selected_paths = [
+            self.selections_list.GetItemText(i)
+            for i in range(self.selections_list.GetItemCount())
+            if self.selections_list.IsItemChecked(i)
+        ]
 
     def __GetSelectedLeafPaths(self, tree):
         paths = []
@@ -248,34 +294,35 @@ class WidgetDataSelectionsDlg(wx.Dialog):
                 changed = True
 
         if changed:
-            self._selected_paths = [p for p in self._all_leaf_paths if p in selected_paths]
+            self.__RebuildSelectedPaths(selected_paths)
             self.__ApplySelectionToList()
-            self.__UpdateOkButton()
+            self.__UpdateButtonStates()
 
-    def __UpdateOkButton(self):
-        if self._single_selection:
-            enable = (
-                self._single_selected_path is not None
-                and self._single_selected_path not in set(self._initial_paths)
-            )
+    def __UpdateButtonStates(self, *args):
+        list_ctrl_count = self.selections_list.GetItemCount()
+        selected_rows = self.__GetListCtrlSelectedRows()
+        if list_ctrl_count <= 1 or len(selected_rows) > 1 or len(selected_rows) == 0:
+            self.move_up_btn.Disable()
+            self.move_down_btn.Disable()
         else:
-            enable = (
-                self._selected_paths != self._initial_paths
-                or self._only_show_selected != self._initial_only_show_selected
-            )
-        self.ok_btn.Enable(enable)
-        #if enable:
-        #    self.ok_btn_disabled_reason.Hide()
-        #else:
-        #    if self._single_selection:
-        #        if self._single_selected_path is not None:
-        #            reason = "Selected queue has not changed"
-        #        else:
-        #            reason = ""
-        #    else:
-        #        reason = "Selections have not changed"
-        #    self.ok_btn_disabled_reason.SetLabel(reason)
-        #    self.ok_btn_disabled_reason.Show()
+            selected_row = selected_rows[0]
+            if selected_row == 0:
+                self.move_up_btn.Disable()
+                self.move_down_btn.Enable()
+            elif selected_row == list_ctrl_count - 1:
+                self.move_up_btn.Enable()
+                self.move_down_btn.Disable()
+            else:
+                self.move_up_btn.Enable()
+                self.move_down_btn.Enable()
+
+    def __GetListCtrlSelectedRows(self):
+        rows = []
+        for idx in range(self.selections_list.GetItemCount()):
+            if self.selections_list.IsSelected(idx):
+                rows.append(idx)
+
+        return rows
 
     def __BuildTree(self):
         self._tree_items_by_id = {}
@@ -316,10 +363,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.__RecurseBuildTree(tree_ctrl, child, visible_paths)
 
     def __ApplySelectionToList(self):
-        if self._only_show_selected:
-            self.__BuildSelectionsList()
-        else:
-            self.__SyncSelectionCheckboxes()
+        self.__SyncSelectionCheckboxes()
 
     def __BuildSelectionsList(self):
         if self._single_selection:
@@ -354,9 +398,9 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self._syncing_list_checkboxes = False
 
     def __GetDisplayedListPaths(self):
-        if self._only_show_selected:
-            return list(self._selected_paths)
-        return list(self._all_leaf_paths)
+        selected = list(self._selected_paths)
+        unselected = [p for p in self._all_leaf_paths if p not in selected]
+        return selected + unselected
 
     def __CollectLeavesFromItem(self, tree, item):
         if item in self._leaf_paths_by_tree_item:

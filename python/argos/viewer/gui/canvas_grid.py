@@ -345,9 +345,9 @@ class WidgetContainer(wx.Panel):
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
-            assert len(elem_paths) > 0
-            widget = SchedulingLinesWidget(self, self.frame, elem_paths)
-            self.SetWidget(widget)
+            if len(elem_paths) > 0:
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths)
+                self.SetWidget(widget)
 
         dlg.Destroy()
 

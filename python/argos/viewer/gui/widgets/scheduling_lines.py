@@ -2,7 +2,6 @@ import wx, copy, re
 from collections import OrderedDict
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.grid import Grid
-from viewer.gui.dialogs.scheduling_lines_customization import SchedulingLinesCustomizationDlg
 from functools import partial
 
 class SchedulingLinesWidget(wx.Panel):
@@ -167,8 +166,7 @@ class SchedulingLinesWidget(wx.Panel):
         #   NumInstsRetired1[0]
         #
         # The user can adjust these settings in the widget settings dialog.
-        regex_replacement = GetHeadsUpCamelCaseQueueName(elem_path)
-        self.caption_mgr.SetElemPathRegexReplacement(elem_path, regex_replacement)
+        self.caption_mgr.SetElemPathRegexReplacement(elem_path, elem_path)
 
     def __Refresh(self, new_grid=True):
         if len(self.caption_mgr.GetAllMatchingElemPaths()) > 0:
@@ -205,12 +203,28 @@ class SchedulingLinesWidget(wx.Panel):
         #     c. If A>B, then the number of rows is B+1. Otherwise, the number of rows is A. (C)
         #  >>> The required number of rows is the sum of all (C) values in the (1) loop.
 
+        self._struct_dtypes_by_row = {}
+        self._elem_paths_by_row = {}
         num_rows = 0
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
             collection_id = self.frame.simhier.GetCollectionID(elem_path)
             num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id) # (A)
             max_size = self.queue_max_sizes_by_collection_id[collection_id]        # (B)
             elem_num_rows = max_size + 1 if max_size < num_bins else num_bins      # (C)
+
+            for i in range(num_rows, num_rows + elem_num_rows):
+                dtype = self.frame.dtype_inspector.GetDataTypeForCollectionID(collection_id)
+                idx = dtype.find('_sparse_capacity')
+                if idx != -1:
+                    dtype = dtype[:idx]
+                else:
+                    idx = dtype.find('_contig_capacity')
+                    if idx != -1:
+                        dtype = dtype[:idx]
+
+                self._struct_dtypes_by_row[i] = dtype
+                self._elem_paths_by_row[i] = f'{elem_path}[{i-num_rows}]'
+
             num_rows += elem_num_rows
 
         # The number of columns can be calculated as:
@@ -307,7 +321,6 @@ class SchedulingLinesWidget(wx.Panel):
         # Left-justify the detailed packet column
         if self.show_detailed_queue_packets:
             col = self.num_ticks_before + self.num_ticks_after + 2
-            labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
 
             def GetMaxFieldVarLengths(strings):
                 result = {}
@@ -335,10 +348,29 @@ class SchedulingLinesWidget(wx.Panel):
 
                 return ' '.join(parts)
 
-            max_varlens_by_field = GetMaxFieldVarLengths(labels)
+            labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
+            labels_by_dtype = {}
+            for row, dtype in self._struct_dtypes_by_row.items():
+                if dtype not in labels_by_dtype:
+                    labels_by_dtype[dtype] = []
+                labels_by_dtype[dtype].append(labels[row])
+
             for row, label in enumerate(labels):
-                aligned = AlignLabel(label, max_varlens_by_field)
-                self.grid.SetCellValue(row, col, aligned)
+                if 'DID' in label:
+                    parts = label.split()
+                    new_label_parts = []
+                    for p in parts:
+                        if p.find('DID(') != 0:
+                            new_label_parts.append(p)
+                    label = ' '.join(new_label_parts)
+
+                if row in self._struct_dtypes_by_row:
+                    row_dtype = self._struct_dtypes_by_row[row]
+                    row_align_labels = labels_by_dtype[row_dtype]
+                    max_varlens_by_field = GetMaxFieldVarLengths(row_align_labels)
+                    label = AlignLabel(label, max_varlens_by_field)
+
+                self.grid.SetCellValue(row, col, label)
 
         self.grid.AutoSize()
         self.Layout()
@@ -453,7 +485,11 @@ class SchedulingLinesWidget(wx.Panel):
 
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
-        tooltip = self.grid.GetCellToolTip(row, col)
+
+        if col == 0 and row in self._elem_paths_by_row:
+            tooltip = self._elem_paths_by_row[row]
+        else:
+            tooltip = self.grid.GetCellToolTip(row, col)
 
         if tooltip:
             self.grid.SetToolTip(tooltip)
@@ -461,20 +497,8 @@ class SchedulingLinesWidget(wx.Panel):
             self.grid.UnsetToolTip()
 
     def __EditWidget(self, evt):
-        dlg = SchedulingLinesCustomizationDlg(
-            self, self.caption_mgr, self.num_ticks_before, self.num_ticks_after,
-            self.show_detailed_queue_packets, self.enable_tooltips,
-        )
-        result = dlg.ShowModal()
-        dlg.Destroy()
-
-        if result == wx.ID_OK:
-            self.ApplyViewSettings({'regexes': dlg.GetElementPathCaptionRegexes(as_list=True),
-                                    'num_ticks_before': dlg.GetNumTicksBefore(),
-                                    'num_ticks_after': dlg.GetNumTicksAfter(),
-                                    'show_detailed_queue_packets': dlg.ShowDetailedQueuePackets(),
-                                    'enable_tooltips': dlg.EnableTooltips(),
-                                    'tracked_annos': copy.deepcopy(self.tracked_annos)})
+        widget_container = self.GetParent()
+        widget_container.LaunchSchedulingLinesViewer()
 
 class CaptionManager:
     def __init__(self, simhier):
@@ -529,7 +553,7 @@ class CaptionManager:
                 #                                               core index
                 return re.sub(regex, replacements, elem_path) + '[{}]'.format(bin_idx)
 
-        return GetHeadsUpCamelCaseQueueName(elem_path) + '[{}]'.format(bin_idx)
+        return f'{elem_path}[{bin_idx}]'
     
     def GetCaptionPrefix(self, elem_path):
         for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
@@ -584,21 +608,6 @@ class CaptionManager:
                 elem_paths.append(elem_path)
 
         return elem_paths
-
-def GetHeadsUpCamelCaseQueueName(elem_path):
-    parts = elem_path.split('.')
-    queue_name = parts[-1]
-    parts = queue_name.split('_')
-
-    for i,part in enumerate(parts):
-        if len(part) == 1:
-            part = part.upper()
-        else:
-            part = part[0].upper() + part[1:]
-
-        parts[i] = part
-
-    return ''.join(parts)
 
 class Rasterizer:
     def __init__(self, frame, grid, widget, elem_path, bin_idx, row, detailed_pkt_col):
@@ -659,6 +668,13 @@ class Rasterizer:
                 break
 
         if self.detailed_pkt_col != -1 and time_val == self.frame.widget_renderer.tick:
+            def Strip(stringized_anno, string, replace):
+                while string in stringized_anno:
+                    stringized_anno = stringized_anno.replace(string, replace)
+                return stringized_anno
+
+            stringized_anno = Strip(stringized_anno, '((', '(')
+            stringized_anno = Strip(stringized_anno, '))', ')')
             self.grid.SetCellValue(self.row, self.detailed_pkt_col, stringized_anno)
             self.grid.SetCellAlignment(self.row, self.detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
             self.grid.SetCellBackgroundColour(self.row, self.detailed_pkt_col, auto_color)
