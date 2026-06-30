@@ -15,12 +15,8 @@ class SchedulingLinesWidget(wx.Panel):
         self.enable_tooltips = False
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
-
         self.grid = None
-        self.info = None
-        self.gear_btn = None
         self.rasterizers = {}
-        self.grid = None
 
         cursor = frame.db.cursor()
         cmd = 'SELECT CID,MaxSize FROM QueueMaxSizes'
@@ -32,8 +28,6 @@ class SchedulingLinesWidget(wx.Panel):
 
         if elem_paths:
             self.SetElements(elem_paths)
-        else:
-            self.__ShowUsageInfo()
 
     def GetWidgetCreationString(self):
         return 'Scheduling Lines'
@@ -68,12 +62,6 @@ class SchedulingLinesWidget(wx.Panel):
     def AddElement(self, elem_path):
         self.__AddElement(elem_path)
         self.__Refresh()
-
-        if not self.gear_btn:
-            self.gear_btn = self.frame.CreateSettingsButton(self)
-            self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-            self.gear_btn.SetToolTip('Edit widget settings')
-
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
 
     def SetElements(self, elem_paths):
@@ -99,16 +87,10 @@ class SchedulingLinesWidget(wx.Panel):
             self.__AddElement(elem_path)
 
         self.__Refresh()
-
-        if not self.gear_btn:
-            self.gear_btn = self.frame.CreateSettingsButton(self)
-            self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-            self.gear_btn.SetToolTip('Edit widget settings')
-
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
 
     def UpdateWidgetData(self, regenerate_grid=False):
-        if not self.grid and not self.info and not self.gear_btn:
+        if not self.grid:
             return
 
         self.__Refresh(regenerate_grid)
@@ -190,9 +172,6 @@ class SchedulingLinesWidget(wx.Panel):
 
     def __Refresh(self, new_grid=True):
         if len(self.caption_mgr.GetAllMatchingElemPaths()) > 0:
-            if self.info:
-                self.info.Hide()
-
             # Preserve the scrollbar position across the grid regeneration below.
             # The old grid is destroyed and a brand-new one is created, which
             # would otherwise reset the scroll position back to the top.
@@ -208,57 +187,10 @@ class SchedulingLinesWidget(wx.Panel):
                 #wx.CallAfter(self.grid.Scroll, saved_view_start[0], saved_view_start[1])
                 self.grid.Scroll(saved_view_start[0], saved_view_start[1])
 
-            if not self.gear_btn:
-                self.gear_btn = self.frame.CreateSettingsButton(self)
-                self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-                self.gear_btn.SetToolTip('Edit widget settings')
-
-    def __ShowUsageInfo(self):
-        if self.gear_btn:
-            self.gear_btn.Destroy()
-            self.gear_btn = None
-
-        if self.info:
-            self.info.Destroy()
-            self.info = None
-
-        if self.grid:
-            self.grid.Destroy()
-            self.grid = None
-
-        if self.GetSizer():
-            self.GetSizer().Clear()
-
-        self.SetBackgroundColour('light gray')
-
-        self.info = wx.StaticText(self, label='Drag queues from the Queues tree to create scheduling lines.')#, size=(600,18))
-        self.info.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-
-        vsizer = wx.BoxSizer(wx.VERTICAL)
-        vsizer.AddStretchSpacer()
-        vsizer.Add(self.info, 1, wx.ALL | wx.CENTER | wx.EXPAND, 5)
-        vsizer.AddStretchSpacer()
-
-        hsizer = wx.BoxSizer(wx.HORIZONTAL)
-        hsizer.AddStretchSpacer()
-        hsizer.Add(vsizer, 0, wx.CENTER | wx.EXPAND)
-        hsizer.AddStretchSpacer()
-
-        self.SetSizer(hsizer)
-        self.Layout()
-
     def __RegenerateSchedulingLinesGrid(self, new_grid):
         if self.grid:
             self.grid.Destroy()
             self.grid = None
-
-        if self.info:
-            self.info.Destroy()
-            self.info = None
-
-        if self.gear_btn:
-            self.gear_btn.Destroy()
-            self.gear_btn = None
 
         sizer = self.GetSizer()
         if sizer:
@@ -305,9 +237,8 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
-        self.gear_btn = self.frame.CreateSettingsButton(self)
-        self.gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-        self.gear_btn.SetToolTip('Edit widget settings')
+        gear_btn, clear_btn, split_lr, split_tb, maximize_btn = self.frame.CreateWidgetStandardButtons(
+            self, self.__EditWidget, 'Edit widget settings')
 
         current_tick = self.frame.widget_renderer.tick
         col_labels = []
@@ -331,7 +262,15 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.SetColLabelTextOrientation(wx.VERTICAL)
         self.grid.HideRowLabels()
 
-        sizer.Add(self.grid, 0, wx.EXPAND, 5)
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT | wx.LEFT, 5)
+        btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
+        sizer.Add(btn_sizer, 0, wx.BOTTOM, 5)
+
+        sizer.Add(self.grid, 0, wx.EXPAND)
         self.SetSizer(sizer)
 
         self.grid.ClearGrid()
@@ -370,29 +309,36 @@ class SchedulingLinesWidget(wx.Panel):
             col = self.num_ticks_before + self.num_ticks_after + 2
             labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
 
-            def AlignColumns(strings):
-                # Split each row into columns
-                rows = [s.split() for s in strings]
+            def GetMaxFieldVarLengths(strings):
+                result = {}
 
-                # Find max width for each column
-                widths = [
-                    max(len(row[i]) for row in rows)
-                    for i in range(len(rows[0]))
-                ]
-
-                # Pad each column except the last, preserve trailing spaces
-                result = []
-                for row in rows:
-                    aligned = ''.join(
-                        col.ljust(width + 1)   # +1 ensures at least one separating space
-                        for col, width in zip(row, widths)
-                    )
-                    result.append(aligned)
+                for row in strings:
+                    for field, value in re.findall(r'(\w+)\((.*?)\)', row):
+                        result[field] = max(
+                            result.get(field, 0),
+                            len(value)
+                        )
 
                 return result
 
-            for row, label in enumerate(AlignColumns(labels)):
-                self.grid.SetCellValue(row, col, label)
+            def AlignLabel(label, max_varlens_by_field):
+                parts = []
+
+                for field, value in re.findall(r'(\w+)\((.*?)\)', label):
+                    target = max_varlens_by_field[field]
+
+                    part = f'{field}({value})'
+
+                    # Pad based on value width difference
+                    pad = target - len(value)
+                    parts.append(part + (' ' * pad))
+
+                return ' '.join(parts)
+
+            max_varlens_by_field = GetMaxFieldVarLengths(labels)
+            for row, label in enumerate(labels):
+                aligned = AlignLabel(label, max_varlens_by_field)
+                self.grid.SetCellValue(row, col, aligned)
 
         self.grid.AutoSize()
         self.Layout()
@@ -438,7 +384,7 @@ class SchedulingLinesWidget(wx.Panel):
                 if self.grid.IsColShown(i):
                     num_visible_columns += 1
 
-            detailed_pkt_col = num_visible_columns - 1#TODO XXX
+            detailed_pkt_col = num_visible_columns - 1
         else:
             detailed_pkt_col = -1
 
@@ -714,6 +660,7 @@ class Rasterizer:
 
         if self.detailed_pkt_col != -1 and time_val == self.frame.widget_renderer.tick:
             self.grid.SetCellValue(self.row, self.detailed_pkt_col, stringized_anno)
+            self.grid.SetCellAlignment(self.row, self.detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
             self.grid.SetCellBackgroundColour(self.row, self.detailed_pkt_col, auto_color)
             self.grid.SetCellToolTip(self.row, self.detailed_pkt_col, stringized_tooltip)
             if show_border:

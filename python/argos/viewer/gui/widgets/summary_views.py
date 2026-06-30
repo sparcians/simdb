@@ -8,14 +8,11 @@ class SummaryViews(wx.Panel):
     def __init__(self, parent, frame):
         super().__init__(parent)
         self.frame = frame
-        self.gear_btn = None
-        self.placeholder_label = None
         self.summary_scroller = None
         self.summary = None
         self._summary_grid_dirty = True
         self._elem_paths_by_cid = {}
         self._only_show_selected = False
-        self.__ShowEmptyPlaceholder()
 
     @property
     def elem_paths(self):
@@ -75,10 +72,26 @@ class SummaryViews(wx.Panel):
         self._summary_grid_dirty = True
         self.__Refresh()
 
+    def EditWidget(self, evt, title="Edit Data Selections"):
+        dlg = WidgetDataSelectionsDlg(
+            self, self.frame, self.elem_paths, self._only_show_selected, title=title
+        )
+        result = dlg.ShowModal()
+        if result == wx.ID_OK:
+            elem_paths = dlg.GetSelectedElemPaths()
+            only_show_selected = dlg.GetOnlyShowSelected()
+        dlg.Destroy()
+        if result == wx.ID_OK:
+            self.ApplyViewSettings({
+                'elem_paths': elem_paths,
+                'only_show_selected': only_show_selected,
+            })
+            return True
+        else:
+            return False
+
     def __Refresh(self):
         if len(self.elem_paths):
-            self.__DestroyEmptyPlaceholder()
-
             self.SetBackgroundColour('white')
             self.__RegenerateSummary()
         else:
@@ -91,16 +104,6 @@ class SummaryViews(wx.Panel):
                 self.summary = None
 
             self._summary_grid_dirty = True
-            self.__ShowEmptyPlaceholder()
-
-    def __DestroyEmptyPlaceholder(self):
-        if self.gear_btn:
-            self.gear_btn.Destroy()
-            self.gear_btn = None
-
-        if self.placeholder_label:
-            self.placeholder_label.Destroy()
-            self.placeholder_label = None
 
     def __RegenerateSummary(self):
         assert len(self.elem_paths)
@@ -134,55 +137,25 @@ class SummaryViews(wx.Panel):
         self.summary.UpdateWidgetData()
         self.Layout()
 
-    def __ShowEmptyPlaceholder(self):
-        self.__DestroyEmptyPlaceholder()
-
-        if self.GetSizer():
-            self.GetSizer().Clear()
-
-        self.SetBackgroundColour('light gray')
-
-        self.gear_btn = self.frame.CreateSettingsButton(self)
-        self.gear_btn.Bind(wx.EVT_BUTTON, self.EditWidget)
-        self.placeholder_label = wx.StaticText(self, label='Make selections')
-
-        hsizer = wx.BoxSizer(wx.HORIZONTAL)
-        hsizer.AddSpacer(5)
-        hsizer.Add(self.gear_btn, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        hsizer.Add(self.placeholder_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-
-        vsizer = wx.BoxSizer(wx.VERTICAL)
-        vsizer.AddSpacer(5)
-        vsizer.Add(hsizer, 0, wx.EXPAND)
-
-        self.SetSizer(vsizer)
-        self.Layout()
-
-    def EditWidget(self, evt, title="Edit Data Selections"):
-        dlg = WidgetDataSelectionsDlg(
-            self, self.frame, self.elem_paths, self._only_show_selected, title=title
-        )
-        result = dlg.ShowModal()
-        if result == wx.ID_OK:
-            elem_paths = dlg.GetSelectedElemPaths()
-            only_show_selected = dlg.GetOnlyShowSelected()
-        dlg.Destroy()
-        if result == wx.ID_OK:
-            self.ApplyViewSettings({
-                'elem_paths': elem_paths,
-                'only_show_selected': only_show_selected,
-            })
-            return True
-        else:
-            return False
-
 class SummaryGrid(wx.Panel):
     def __init__(self, parent, frame, elem_paths, summary_views):
         wx.Panel.__init__(self, parent)
         self.frame = frame
         self.summary_views = summary_views
         self.value_handlers = {}
-        self.gear_btn = None
+
+        gear_btn, clear_btn, split_lr, split_tb, maximize_btn = frame.CreateWidgetStandardButtons(
+            self, summary_views.EditWidget, 'Edit data selections')
+
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(btn_sizer, 0, wx.BOTTOM, 5)
 
         # Group all element leaf paths by their parents
         collectable_grps = OrderedDict()
@@ -202,16 +175,9 @@ class SummaryGrid(wx.Panel):
         #     bar
         #   top.cpu.core0.retire
         #     baz
-        sizer = wx.GridBagSizer(vgap=5, hgap=5)
+        grid_sizer = wx.GridBagSizer(vgap=5, hgap=5)
         mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         mono10_bold = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
-
-        self.gear_btn = frame.CreateSettingsButton(self)
-        self.gear_btn.Bind(wx.EVT_BUTTON, self.summary_views.EditWidget)
-        self.gear_btn.SetToolTip('Edit data selections')
-
-        row = 0
-        sizer.Add(self.gear_btn, pos=(row,0))
 
         max_label_len = 0
         for parent, leaves in collectable_grps.items():
@@ -219,11 +185,11 @@ class SummaryGrid(wx.Panel):
             for leaf in leaves:
                 max_label_len = max(max_label_len, len(leaf))
 
-        row += 1
+        row = 0
         for parent, leaves in collectable_grps.items():
             parent_label = wx.StaticText(self, label=parent)
             parent_label.SetFont(mono10_bold)
-            sizer.Add(parent_label, pos=(row,0))
+            grid_sizer.Add(parent_label, pos=(row,0))
             row += 1
 
             for leaf in leaves:
@@ -236,7 +202,7 @@ class SummaryGrid(wx.Panel):
                 label += leaf
                 leaf_label = wx.StaticText(self, label=label)
                 leaf_label.SetFont(mono10)
-                sizer.Add(leaf_label, pos=(row,0))
+                grid_sizer.Add(leaf_label, pos=(row,0))
 
                 leaf_cid = frame.simhier.GetCollectionID(full_path)
                 if leaf_cid in frame.simhier.GetContainerIDs():
@@ -252,11 +218,12 @@ class SummaryGrid(wx.Panel):
                         summary_handler = SummaryGrid.SimpleSummary(self, frame)
 
                 summary_handler.SetFont(mono10)
-                sizer.Add(summary_handler, pos=(row,4))
-                sizer.AddGrowableRow(row)
+                grid_sizer.Add(summary_handler, pos=(row,4))
+                grid_sizer.AddGrowableRow(row)
                 self.value_handlers[full_path] = summary_handler
                 row += 1
 
+        sizer.Add(grid_sizer)
         self.SetSizer(sizer)
         self.Layout()
 
@@ -307,6 +274,8 @@ class SummaryGrid(wx.Panel):
             label = []
             if value is not None:
                 for field_name, field_value in value:
+                    if field_name == 'DID':
+                        continue
                     field_value = str(field_value)
                     field_value = re.sub(r'\s+', ' ', field_value)
                     label.append(f'{field_name}({field_value})')

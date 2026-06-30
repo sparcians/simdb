@@ -5,20 +5,15 @@ from viewer.gui.view_settings import DirtyReasons
 class QueueUtilizWidget(wx.Panel):
     def __init__(self, parent, frame):
         super().__init__(parent, size=(800, 500))
+        self.SetBackgroundColour('white')
         self.frame = frame
 
         # Get all container sim paths from the simhier
         self.container_elem_paths = self.frame.simhier.GetContainerElemPaths()
         self.container_elem_paths.sort()
 
-        # Add a gear button (size 16x16) to the left of the time series plot.
-        # Clicking the button will open a dialog to change the plot settings.
-        # Note that we do not add the button to the sizer since we want to
-        # force it to be in the top-left corner of the widget canvas. We do
-        # this with the 'pos' argument to the wx.BitmapButton constructor.
-        gear_btn = frame.CreateSettingsButton(self)
-        gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-        gear_btn.SetToolTip('Edit data selections')
+        gear_btn, clear_btn, split_lr, split_tb, maximize_btn = frame.CreateWidgetStandardButtons(
+            self, self.__EditWidget, 'Edit data selections')
 
         # The layout of this widget is like a barchart:
         #
@@ -30,15 +25,24 @@ class QueueUtilizWidget(wx.Panel):
         #
         # Where the X's above are shown as a colored heatmap based on the
         # utilization percentage of each queue.
-        self.panel = wx.Panel(self)
+        self.panel = wx.ScrolledWindow(self, style=wx.VSCROLL | wx.HSCROLL)
+        self.panel.SetScrollRate(10, 10)
         self._elem_path_text_boxes = []
         self._utiliz_bars = []
         self.__LayoutComponents()
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self.panel, 1, 20, wx.TOP | wx.LEFT)
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+        btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
+        sizer.Add(btn_sizer, 0, wx.BOTTOM | wx.LEFT | wx.TOP, 5)
+        sizer.Add(self.panel, 1, wx.EXPAND | wx.LEFT, 5)
         self.SetSizer(sizer)
 
+        self.panel.FitInside()
         self.Layout()
 
     def GetWidgetCreationString(self):

@@ -1,4 +1,4 @@
-import wx, wx.adv
+import wx, wx.adv, wx.aui
 from viewer.gui.widgets.splitter_window import DirtySplitterWindow
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.queue_utiliz import QueueUtilizWidget
@@ -14,7 +14,6 @@ class CanvasGrid(wx.Panel):
 
         if rows == 1 and cols == 1:
             self.container = WidgetContainer(self)
-            self.Bind(wx.EVT_CONTEXT_MENU, self.__OnContextMenu)
         else:
             self.container = DirtySplitterWindow(self.frame, self, style=wx.SP_LIVE_UPDATE)
             self.__BuildGrid(self.container, rows, cols)
@@ -35,7 +34,7 @@ class CanvasGrid(wx.Panel):
             frame = frame.GetParent()
 
         return frame
-    
+
     def DestroyAllWidgets(self):
         self.__DestroyAllWidgets(self.container)
 
@@ -63,6 +62,12 @@ class CanvasGrid(wx.Panel):
     
     def ApplyViewSettings(self, settings):
         self.__RecursivelyApplyViewSettings(settings, self)
+
+    def AddQuickLinks(self, links, splitters_only=False):
+        links.append(("Split left/right", self.__OnSplitVertically))
+        links.append(("Split top/bottom", self.__OnSplitHorizontally))
+        if not splitters_only:
+            links.append(("Maximize", self.__Explode))
 
     def __RecursivelyApplyViewSettings(self, settings, window):
         if settings['window_type'] == 'widget_container':
@@ -149,32 +154,6 @@ class CanvasGrid(wx.Panel):
         elif cols == 1:
             splitter.SplitHorizontally(CanvasGrid(splitter, rows // 2, cols), CanvasGrid(splitter, rows - rows // 2, cols))
 
-    def __OnContextMenu(self, event):
-        # Get the position where the user right-clicked
-        pos = event.GetPosition()
-        pos = self.ScreenToClient(pos)
-
-        menu = wx.Menu()
-
-        split_vertically = menu.Append(-1, "Split left/right")
-        split_horizontally = menu.Append(-1, "Split top/bottom")
-
-        if isinstance(self.GetParent(), wx.SplitterWindow):
-            menu.AppendSeparator()
-            explode = menu.Append(-1, "Explode")
-            self.Bind(wx.EVT_MENU, self.__Explode, explode)
-        elif isinstance(self.container, WidgetContainer):
-            widget = self.container.GetWidget()
-            if widget:
-                menu.AppendSeparator()
-                clear = menu.Append(-1, "Clear widget")
-                self.Bind(wx.EVT_MENU, lambda event: self.__DestroyAllWidgets(self.container), clear)
-
-        self.Bind(wx.EVT_MENU, self.__OnSplitVertically, split_vertically)
-        self.Bind(wx.EVT_MENU, self.__OnSplitHorizontally, split_horizontally)
-
-        self.PopupMenu(menu, pos)
-
     def __GetWidgetState(self):
         if not isinstance(self.container, WidgetContainer):
             return None, None
@@ -195,10 +174,6 @@ class CanvasGrid(wx.Panel):
             widget.ApplyViewSettings(widget_settings)
 
         widget_container.SetWidget(widget)
-
-    def AddQuickLinks(self, links):
-        links.append(("Split left/right", self.__OnSplitVertically))
-        links.append(("Split top/bottom", self.__OnSplitHorizontally))
 
     def __OnSplitVertically(self, event=None):
         widget_creation_str, widget_settings = self.__GetWidgetState()
@@ -285,8 +260,6 @@ class WidgetContainer(wx.Panel):
         self._widget = None
         self._quick_links = WidgetQuickLinks(self)
 
-        self.SetDropTarget(WidgetContainerDropTarget(self, self.frame.widget_creator))
-
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self._quick_links, 1, wx.EXPAND | wx.LEFT | wx.TOP, 5)
         self.SetSizer(sizer)
@@ -298,25 +271,6 @@ class WidgetContainer(wx.Panel):
             frame = frame.GetParent()
 
         return frame
-
-    def __HideQuickLinks(self):
-        if not self._quick_links.IsShown():
-            return
-
-        sizer = self.GetSizer()
-        for item in sizer.GetChildren():
-            if item.GetWindow() == self._quick_links:
-                sizer.Detach(self._quick_links)
-                break
-        self._quick_links.Hide()
-
-    def __ShowQuickLinks(self):
-        sizer = self.GetSizer()
-        self._quick_links.Show()
-        for item in sizer.GetChildren():
-            if item.GetWindow() == self._quick_links:
-                return
-        sizer.Add(self._quick_links, 1, wx.EXPAND | wx.LEFT | wx.TOP, 5)
 
     def SetWidget(self, widget):
         sizer = self.GetSizer()
@@ -407,7 +361,26 @@ class WidgetContainer(wx.Panel):
             widget.Destroy()
 
     def AddQuickLinks(self, links):
-        self.GetParent().AddQuickLinks(links)
+        self.GetParent().AddQuickLinks(links, True)
+
+    def __HideQuickLinks(self):
+        if not self._quick_links.IsShown():
+            return
+
+        sizer = self.GetSizer()
+        for item in sizer.GetChildren():
+            if item.GetWindow() == self._quick_links:
+                sizer.Detach(self._quick_links)
+                break
+        self._quick_links.Hide()
+
+    def __ShowQuickLinks(self):
+        sizer = self.GetSizer()
+        self._quick_links.Show()
+        for item in sizer.GetChildren():
+            if item.GetWindow() == self._quick_links:
+                return
+        sizer.Add(self._quick_links, 1, wx.EXPAND | wx.LEFT | wx.TOP, 5)
 
     def __RefreshWidget(self):
         self.UpdateWidgets()
@@ -439,48 +412,11 @@ class WidgetQuickLinks(wx.Panel):
             ("Scheduling Lines", widget_container.LaunchSchedulingLinesViewer),
             ("Watchlist", widget_container.LaunchWatchlistBuilder)
         ]
-        AddLinks("Create widget:", links)
+        AddLinks("Widgets:", links)
 
         # Links to split canvas
         links = []
         widget_container.AddQuickLinks(links)
-        AddLinks("Split canvas:", links)
+        AddLinks("Canvas:", links)
 
         self.Layout()
-
-class WidgetContainerDropTarget(wx.TextDropTarget):
-    def __init__(self, widget_container, widget_creator):
-        super(WidgetContainerDropTarget, self).__init__()
-        self.widget_container = widget_container
-        self.widget_creator = widget_creator
-
-    def OnDropText(self, x, y, text):
-        widget = self.widget_container.GetWidget()
-        if widget:
-            current_widget_is_tool = widget.GetWidgetCreationString().find('$') == -1
-            incoming_widget_is_tool = text.find('$') == -1
-
-            if current_widget_is_tool and incoming_widget_is_tool:
-                return self.__DropWidget(text)
-            elif current_widget_is_tool and not incoming_widget_is_tool:
-                elem_path = text.split('$')[1]
-                err_msg = widget.GetErrorIfDroppedNodeIncompatible(elem_path)
-                if err_msg:
-                    msg, title = err_msg
-                    wx.MessageBox(msg, title, wx.OK | wx.ICON_ERROR)
-                    return False
-
-                widget.AddElement(elem_path)
-                return True
-            else:
-                return self.__DropWidget(text)
-        else:
-            return self.__DropWidget(text)
-
-    def __DropWidget(self, text):
-        widget = self.widget_creator.CreateWidget(text, self.widget_container)
-        if not widget:
-            return False
-        
-        self.widget_container.SetWidget(widget)
-        return True

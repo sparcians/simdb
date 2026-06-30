@@ -5,18 +5,24 @@ from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
         super(IterableStruct, self).__init__(parent)
+        self.SetBackgroundColour('white')
         self.frame = frame
         self.elem_path = elem_path
         self.deserializer = frame.data_retriever.GetDeserializer(elem_path)
         all_field_names = self.deserializer.GetAllFieldNames()
-
         self.capacity = frame.simhier.GetCapacityByElemPath(elem_path)
+        num_rows = self.capacity
+        num_cols = len(all_field_names)
+        if 'DID' in all_field_names:
+            num_cols -= 1
+        assert len(all_field_names) > 0
+
         self.grid = wx.grid.Grid(self)
-        self.grid.CreateGrid(self.capacity, len(all_field_names), wx.grid.Grid.GridSelectNone)
+        self.grid.CreateGrid(num_rows, num_cols, wx.grid.Grid.GridSelectNone)
         self.grid.EnableEditing(False)
+        self.grid.SetLabelBackgroundColour('white')
         self.__SyncGridViewSettings()
 
-        # Create 10-point monospace font for the grid cells
         mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         self.grid.SetDefaultCellFont(mono10)
         self.grid.SetLabelFont(mono10)
@@ -30,23 +36,23 @@ class IterableStruct(wx.Panel):
         font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         location_elem.SetFont(font)
 
-        # Add a gear button (size 16x16) to the left of the time series plot.
-        # Clicking the button will open a dialog to change the plot settings.
-        # Note that we do not add the button to the sizer since we want to
-        # force it to be in the top-left corner of the widget canvas. We do
-        # this with the 'pos' argument to the wx.BitmapButton constructor.
-        gear_btn = frame.CreateSettingsButton(self)
-        gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-        gear_btn.SetToolTip('Edit widget settings')
+        gear_btn, clear_btn, split_lr, split_tb, maximize_btn = frame.CreateWidgetStandardButtons(
+            self, self.__EditWidget, 'Edit widget settings')
 
         row1 = wx.BoxSizer(wx.HORIZONTAL)
-        row1.AddSpacer(30)
-        row1.Add(self.utiliz_elem, 0, wx.ALL, 5)
-        row1.Add(location_elem, 1, wx.EXPAND | wx.ALL, 5)
+        row1.Add(gear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(maximize_btn, 0, wx.TOP | wx.RIGHT, 5)
+        row1.AddSpacer(5)
+        row1.Add(self.utiliz_elem, 0, wx.TOP, 7)
+        row1.AddSpacer(5)
+        row1.Add(location_elem, 0, wx.EXPAND | wx.TOP, 7)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(row1, 0, wx.EXPAND | wx.ALL, 10)
-        sizer.Add(self.grid, 1, wx.EXPAND | wx.ALL, 10)
+        sizer.Add(row1, 0, wx.ALL, 5)
+        sizer.Add(self.grid, 0, wx.EXPAND | wx.LEFT | wx.TOP, 5)
         self.SetSizer(sizer)
         self.Layout()
 
@@ -66,9 +72,7 @@ class IterableStruct(wx.Panel):
         tick = widget_renderer.tick
         queue_data = self.frame.data_retriever.Unpack(self.elem_path, tick)
 
-        auto_colorize_col = self.frame.data_retriever.GetAutoColorizeColumn(self.elem_path)
-        auto_colorize_col_idx = self.visible_field_names.index(auto_colorize_col) if auto_colorize_col in self.visible_field_names else None
-
+        auto_colorize_col_name = 'DID' if 'DID' in self.visible_field_names else self.visible_field_names[0]
         self.__ClearGrid()
 
         if len(queue_data['DataVals']) and isinstance(queue_data['DataVals'][0], Iterable):
@@ -76,19 +80,23 @@ class IterableStruct(wx.Panel):
                 if row_data is None:
                     continue
 
-                for j, field_name in enumerate(self.visible_field_names):
-                    self.grid.SetCellValue(idx, j, str(row_data[j][1]))
-                    if auto_colorize_col_idx is not None:
-                        auto_colorize_col_name = self.visible_field_names[auto_colorize_col_idx]
-                        color_keyval = None
-                        for key, keyval in row_data:
-                            if key == auto_colorize_col_name:
-                                color_keyval = keyval
-                                break
+                write_col = 0
+                for read_col, field_name in enumerate(self.visible_field_names):
+                    if field_name == 'DID':
+                        continue
 
-                        assert color_keyval is not None
-                        color = widget_renderer.GetAutoColor(color_keyval)
-                        self.grid.SetCellBackgroundColour(idx, j, color)
+                    self.grid.SetCellValue(idx, write_col, str(row_data[read_col][1]))
+
+                    color_keyval = None
+                    for key, keyval in row_data:
+                        if key == auto_colorize_col_name:
+                            color_keyval = keyval
+                            break
+
+                    assert color_keyval is not None
+                    color = widget_renderer.GetAutoColor(color_keyval)
+                    self.grid.SetCellBackgroundColour(idx, write_col, color)
+                    write_col += 1
 
             num_rows_shown = len(queue_data['DataVals'][0])
         else:
@@ -123,16 +131,11 @@ class IterableStruct(wx.Panel):
             self.grid.SetColLabelValue(i, '')
 
         # Only show the visible field names
-        for i, field_name in enumerate(self.visible_field_names):
-            self.grid.SetColLabelValue(i, field_name)
-
-        # Make sure we are showing the visible columns
-        for i in range(len(self.visible_field_names)):
-            self.grid.ShowCol(i)
-
-        # Hide any columns that are not visible
-        for i in range(len(self.visible_field_names), self.grid.GetNumberCols()):
-            self.grid.HideCol(i)
+        i = 0
+        for field_name in self.visible_field_names:
+            if field_name != 'DID':
+                self.grid.SetColLabelValue(i, field_name)
+                i += 1
 
         self.grid.AutoSizeColumns()
         self.Layout()

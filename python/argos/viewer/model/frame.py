@@ -1,12 +1,15 @@
 import wx, sqlite3, os
+from functools import partial
 from viewer.gui.widgets.playback_bar import PlaybackBar
 from viewer.gui.inspector import DataInspector
 from viewer.gui.widgets.widget_renderer import WidgetRenderer
 from viewer.gui.widgets.widget_creator import WidgetCreator
+from viewer.gui.canvas_grid import CanvasGrid, WidgetContainer
 from viewer.model.data_retriever import DataRetriever
 from viewer.model.dtype_inspector import DataTypeInspector
 from viewer.model.simhier import SimHierarchy
 from viewer.gui.widgets.splitter_window import DirtySplitterWindow
+from viewer.gui.view_settings import DirtyReasons
 
 class ArgosFrame(wx.Frame):
     def __init__(self, db_path, view_settings):
@@ -58,8 +61,45 @@ class ArgosFrame(wx.Frame):
         bitmap = bitmap.ConvertToImage().Rescale(w,h).ConvertToBitmap()
         return bitmap
 
-    def CreateSettingsButton(self, parent, size=(36,22), pos=(5,10)):
-        return wx.Button(parent, label="...", size=size, pos=pos)
+    def CreateWidgetStandardButtons(self, widget, settings_callback, settings_tooltip):
+        std_size = (36,22)
+
+        settings_btn = wx.Button(widget, label=">>", size=std_size)
+        settings_btn.Bind(wx.EVT_BUTTON, settings_callback)
+        settings_btn.SetToolTip(settings_tooltip)
+
+        def ClearWidget(evt, widget):
+            if isinstance(widget, WidgetContainer):
+                widget.DestroyAllWidgets()
+                self.view_settings.SetDirty(reason=DirtyReasons.WidgetRemoved)
+            else:
+                ClearWidget(evt, widget.GetParent())
+
+        clear_btn = wx.Button(widget, label="X", size=std_size)
+        clear_btn.Bind(wx.EVT_BUTTON, partial(ClearWidget, widget=widget))
+        clear_btn.SetToolTip("Clear widget")
+
+        canvas_grid = widget.GetParent()
+        while canvas_grid is not None and not isinstance(canvas_grid, CanvasGrid):
+            canvas_grid = canvas_grid.GetParent()
+
+        assert canvas_grid is not None
+        splitters = []
+        canvas_grid.AddQuickLinks(splitters)
+
+        split_lr = wx.Button(widget, label="|", size=std_size)
+        split_lr.Bind(wx.EVT_BUTTON, splitters[0][1])
+        split_lr.SetToolTip("Split left/right")
+
+        split_tb = wx.Button(widget, label="-", size=std_size)
+        split_tb.Bind(wx.EVT_BUTTON, splitters[1][1])
+        split_tb.SetToolTip("Split top/bottom")
+
+        maximize_btn = wx.Button(widget, label="@", size=std_size)
+        maximize_btn.Bind(wx.EVT_BUTTON, splitters[2][1])
+        maximize_btn.SetToolTip("Clear all widgets except this one")
+
+        return settings_btn, clear_btn, split_lr, split_tb, maximize_btn
 
     def __OnNewView(self, event):
         self.view_settings.CreateNewView()
