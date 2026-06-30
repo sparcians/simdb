@@ -76,7 +76,7 @@ class ViewSettings:
     def CreateNewView(self):
         if self._dirty:
             if self.view_file:
-                result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(self.view_file))
+                result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
                 if result == wx.ID_CANCEL:
                     return
 
@@ -85,7 +85,7 @@ class ViewSettings:
 
                 self.__ResetDefaultViewSettings()
             else:
-                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?")
+                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?", True)
                 if result == wx.ID_CANCEL:
                     return
 
@@ -165,7 +165,7 @@ class ViewSettings:
             # Ask the user if they want to save the view to a new file
             dlg = SaveViewFileDlg(prompt="Save current Argos view to a new file?", reasons=self._dirty_reasons)
         elif self.view_file is not None and prompt_if_dirty:
-            dlg = SaveViewFileDlg(prompt="Save changes to '{}'?".format(self.view_file), reasons=self._dirty_reasons)
+            dlg = SaveViewFileDlg(prompt="Save changes to '{}'?".format(os.path.basename(self.view_file)), reasons=self._dirty_reasons)
         else:
             dlg = None
             result = wx.ID_YES
@@ -193,9 +193,6 @@ class ViewSettings:
             # Do not close Argos if the user cancels the save dialog
             if not view_file:
                 return False
-            
-        if result == wx.ID_NO:
-            return True
 
         self.__WriteViewSettings(view_file)
         self.view_file = view_file
@@ -215,7 +212,7 @@ class ViewSettings:
         # A named AVF is in use. Offer to save changes back to it, then drop any
         # last_known_view so it does not shadow the named view on the next launch.
         if self._dirty:
-            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(self.view_file))
+            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
             if result == wx.ID_CANCEL:
                 return False
 
@@ -300,8 +297,8 @@ class ViewSettings:
             os.remove(settings_file)
             self.__ResetDefaultViewSettings()
 
-    def __AskToSaveChangesToCurrentView(self, prompt):
-        dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons)
+    def __AskToSaveChangesToCurrentView(self, prompt, include_skip_btn=False):
+        dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons, include_skip_btn=include_skip_btn)
         result = dlg.ShowModal()
         dlg.Destroy()
         return result
