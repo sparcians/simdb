@@ -154,8 +154,11 @@ class IterableStruct(wx.Panel):
 
         if result == wx.ID_OK:
             selected = dlg.GetSelectedElemPaths()
-            assert len(selected) == 1
-            selected = selected[0]
+            if len(selected) == 0:
+                wx.MessageBox('No data selected', 'Error', wx.OK | wx.ICON_ERROR)
+                selected = None
+            else:
+                selected = selected[0]
         else:
             selected = None
         dlg.Destroy()

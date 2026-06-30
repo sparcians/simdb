@@ -299,6 +299,9 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.__UpdateButtonStates()
 
     def __UpdateButtonStates(self, *args):
+        if self._single_selection:
+            return
+
         list_ctrl_count = self.selections_list.GetItemCount()
         selected_rows = self.__GetListCtrlSelectedRows()
         if list_ctrl_count <= 1 or len(selected_rows) > 1 or len(selected_rows) == 0:
