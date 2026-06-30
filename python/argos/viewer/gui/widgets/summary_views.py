@@ -12,7 +12,6 @@ class SummaryViews(wx.Panel):
         self.summary = None
         self._summary_grid_dirty = True
         self._elem_paths_by_cid = {}
-        self._only_show_selected = False
 
     @property
     def elem_paths(self):
@@ -37,17 +36,14 @@ class SummaryViews(wx.Panel):
     def GetCurrentViewSettings(self):
         settings = {}
         settings['elem_paths'] = self.elem_paths
-        settings['only_show_selected'] = self._only_show_selected
         return settings
 
     def GetCurrentUserSettings(self):
         return {}
 
     def ApplyViewSettings(self, settings):
-        only_show_selected = settings.get('only_show_selected', False)
         dirty = (
             self.elem_paths != settings['elem_paths']
-            or self._only_show_selected != only_show_selected
             or self._summary_grid_dirty
         )
         if not dirty:
@@ -57,7 +53,6 @@ class SummaryViews(wx.Panel):
             self.frame.simhier.GetCollectionID(path):path
             for path in settings['elem_paths']
         }
-        self._only_show_selected = only_show_selected
 
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SummaryViewsWidgetChanged)
         self._summary_grid_dirty = True
@@ -74,17 +69,15 @@ class SummaryViews(wx.Panel):
 
     def EditWidget(self, evt, title="Edit Data Selections"):
         dlg = WidgetDataSelectionsDlg(
-            self, self.frame, self.elem_paths, self._only_show_selected, title=title
+            self, self.frame, self.elem_paths, title=title
         )
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
-            only_show_selected = dlg.GetOnlyShowSelected()
         dlg.Destroy()
         if result == wx.ID_OK:
             self.ApplyViewSettings({
                 'elem_paths': elem_paths,
-                'only_show_selected': only_show_selected,
             })
             return True
         else:

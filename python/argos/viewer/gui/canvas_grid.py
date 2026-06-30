@@ -6,6 +6,7 @@ from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
 from viewer.gui.widgets.summary_views import SummaryViews
 from viewer.gui.widgets.iterable_struct import IterableStruct
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
+from viewer.gui.dialogs.widget_data_selections import SchedulingLinesEditDlg
 from functools import partial
 
 class CanvasGrid(wx.Panel):
@@ -338,16 +339,24 @@ class WidgetContainer(wx.Panel):
     def LaunchSchedulingLinesViewer(self):
         if isinstance(self._widget, SchedulingLinesWidget):
             elem_paths = self._widget.caption_mgr.GetAllMatchingElemPaths()
+            num_ticks_before = self._widget.num_ticks_before
+            num_ticks_after = self._widget.num_ticks_after
         else:
             elem_paths = []
+            num_ticks_before = SchedulingLinesWidget.DEFAULT_TICKS_BEFORE
+            num_ticks_after = SchedulingLinesWidget.DEFAULT_TICKS_AFTER
 
-        dlg = WidgetDataSelectionsDlg(self, self.frame, elem_paths, queues_only=True)
+        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after)
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
+            num_ticks_before = dlg.num_ticks_before
+            num_ticks_after = dlg.num_ticks_after
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after)
                 self.SetWidget(widget)
+            else:
+                wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)
 
         dlg.Destroy()
 

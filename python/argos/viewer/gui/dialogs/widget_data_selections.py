@@ -471,3 +471,57 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             for i in range(1, len(parts) + 1):
                 visible_paths.add('.'.join(parts[:i]))
         return visible_paths
+
+class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
+    def __init__(
+        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, title="Edit Data Selections",
+    ):
+
+        WidgetDataSelectionsDlg.__init__(self, parent, frame, elem_paths, queues_only=True)
+
+        sizer = self.GetSizer()
+        count = sizer.GetItemCount()
+        btn_sizer = sizer.GetItem(count - 1).GetSizer()
+        sizer.Detach(btn_sizer)
+
+        assert num_ticks_before >= 1 and num_ticks_before <= 25
+        info_ticks_before = wx.StaticText(self, label='Num ticks before current tick:')
+        self._label_ticks_before = wx.StaticText(self, label=f'({num_ticks_before})')
+        self._slider_ticks_before = wx.Slider(self, value=num_ticks_before, minValue=1, maxValue=25)
+        self._slider_ticks_before.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
+
+        assert num_ticks_after >= 1 and num_ticks_after <= 25
+        info_ticks_after = wx.StaticText(self, label='Num ticks after current tick:')
+        self._label_ticks_after = wx.StaticText(self, label=f'({num_ticks_after})')
+        self._slider_ticks_after = wx.Slider(self, value=num_ticks_after, minValue=1, maxValue=25)
+        self._slider_ticks_after.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
+
+        gb_sizer = wx.GridBagSizer(vgap=10, hgap=12)
+        gb_sizer.Add(info_ticks_before, pos=(0,0))
+        gb_sizer.Add(self._slider_ticks_before, pos=(0,1), flag=wx.EXPAND)
+        gb_sizer.Add(self._label_ticks_before, pos=(0,2))
+
+        gb_sizer.Add(info_ticks_after, pos=(1,0))
+        gb_sizer.Add(self._slider_ticks_after, pos=(1,1), flag=wx.EXPAND)
+        gb_sizer.Add(self._label_ticks_after, pos=(1,2))
+
+        gb_sizer.AddGrowableCol(1)
+        sizer.Add(gb_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
+        sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+
+    @property
+    def num_ticks_before(self):
+        return self._slider_ticks_before.GetValue()
+
+    @property
+    def num_ticks_after(self):
+        return self._slider_ticks_after.GetValue()
+
+    def __SyncWithSliderTicks(self, evt):
+        value = self._slider_ticks_before.GetValue()
+        self._label_ticks_before.SetLabel(f'({value})')
+
+        value = self._slider_ticks_after.GetValue()
+        self._label_ticks_after.SetLabel(f'({value})')
+
+        evt.Skip()

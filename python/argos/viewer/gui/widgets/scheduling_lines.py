@@ -5,11 +5,14 @@ from viewer.gui.widgets.grid import Grid
 from functools import partial
 
 class SchedulingLinesWidget(wx.Panel):
-    def __init__(self, parent, frame, elem_paths=None):
+    DEFAULT_TICKS_BEFORE = 10
+    DEFAULT_TICKS_AFTER = 10
+
+    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER):
         super().__init__(parent)
         self.frame = frame
-        self.num_ticks_before = 5
-        self.num_ticks_after = 25
+        self.num_ticks_before = num_ticks_before
+        self.num_ticks_after = num_ticks_after
         self.show_detailed_queue_packets = True
         self.enable_tooltips = False
         self.caption_mgr = CaptionManager(frame.simhier)
