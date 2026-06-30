@@ -3,14 +3,13 @@ from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from viewer.gui.view_settings import DirtyReasons
 
 class QueueUtilizWidget(wx.Panel):
-    def __init__(self, parent, frame):
-        super().__init__(parent, size=(800, 500))
+    def __init__(self, parent, frame, elem_paths=None):
+        super().__init__(parent)
         self.SetBackgroundColour('white')
         self.frame = frame
 
         # Get all container sim paths from the simhier
-        self.container_elem_paths = self.frame.simhier.GetContainerElemPaths()
-        self.container_elem_paths.sort()
+        self.container_elem_paths = elem_paths if elem_paths else self.frame.simhier.GetContainerElemPaths()
 
         gear_btn, clear_btn, split_lr, split_tb, maximize_btn = frame.CreateWidgetStandardButtons(
             self, self.__EditWidget, 'Edit data selections')
@@ -43,6 +42,7 @@ class QueueUtilizWidget(wx.Panel):
         self.SetSizer(sizer)
 
         self.panel.FitInside()
+        self.UpdateWidgetData()
         self.Layout()
 
     def GetWidgetCreationString(self):
@@ -68,16 +68,15 @@ class QueueUtilizWidget(wx.Panel):
         return {}
 
     def ApplyViewSettings(self, settings):
-        paths1 = set(self.container_elem_paths)
-        paths2 = set(settings['displayed_elem_paths'])
-        if paths1 == paths2:
+        if self.container_elem_paths == settings['displayed_elem_paths']:
             return
         
         self.container_elem_paths = copy.deepcopy(settings['displayed_elem_paths'])
-        self.container_elem_paths.sort()
         self.__LayoutComponents()
         self.UpdateWidgetData()
         self.frame.view_settings.SetDirty(reason=DirtyReasons.QueueUtilizDispQueueChanged)
+
+        wx.CallAfter(self.UpdateWidgetData)
 
     def __OnSimElemInitDrag(self, event):
         text_elem = event.GetEventObject()
@@ -119,7 +118,7 @@ class QueueUtilizWidget(wx.Panel):
             self._utiliz_bars = []
         else:
             sizer = wx.FlexGridSizer(2, 0, 10)
-            sizer.AddGrowableCol(1)
+            #sizer.AddGrowableCol(1)
             assert len(self._elem_path_text_boxes) == 0
             assert len(self._utiliz_bars) == 0
 
@@ -127,8 +126,8 @@ class QueueUtilizWidget(wx.Panel):
         self._utiliz_bars = [UtilizBar(self.panel, self.frame) for _ in range(len(self.container_elem_paths))]
 
         for elem_path, utiliz_bar in zip(self._elem_path_text_boxes, self._utiliz_bars):
-            sizer.Add(elem_path, 1, wx.EXPAND)
-            sizer.Add(utiliz_bar, 1, wx.EXPAND)
+            sizer.Add(elem_path)
+            sizer.Add(utiliz_bar)
 
         for text_elem in self._elem_path_text_boxes:
             text_elem.Bind(wx.EVT_LEFT_DOWN, self.__OnSimElemInitDrag)
@@ -145,7 +144,7 @@ class QueueUtilizWidget(wx.Panel):
 
 class UtilizBar(wx.Panel):
     def __init__(self, parent, frame):
-        super().__init__(parent, size=(300, 10))
+        super().__init__(parent, size=(200, 20))
         self.frame = frame
         self.static_text = wx.StaticText(self, label='0%')
         font = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
@@ -159,12 +158,13 @@ class UtilizBar(wx.Panel):
         self.static_text.SetLabel('{}%'.format(round(utiliz_pct * 100)))
         color = self.frame.widget_renderer.utiliz_handler.ConvertUtilizPctToColor(utiliz_pct)
         self.SetBackgroundColour(color)
-        self.static_text.SetBackgroundColour(color)
-        
-        height = self.GetSize().GetHeight()
-        width = round(utiliz_pct * 500)
+
+        height = 20
+        width = round(utiliz_pct * 200)
         if width == 0:
             assert color == (255, 255, 255)
-            width = 500
+            width = 200
 
         self.SetSize((width, height))
+        self.SetMinSize((width, height))
+        self.SetMaxSize((width, height))
