@@ -341,19 +341,22 @@ class WidgetContainer(wx.Panel):
             elem_paths = self._widget.caption_mgr.GetAllMatchingElemPaths()
             num_ticks_before = self._widget.num_ticks_before
             num_ticks_after = self._widget.num_ticks_after
+            show_details = self._widget.show_detailed_queue_packets
         else:
             elem_paths = []
             num_ticks_before = SchedulingLinesWidget.DEFAULT_TICKS_BEFORE
             num_ticks_after = SchedulingLinesWidget.DEFAULT_TICKS_AFTER
+            show_details = True
 
-        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after)
+        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details)
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
             num_ticks_before = dlg.num_ticks_before
             num_ticks_after = dlg.num_ticks_after
+            show_details = dlg.show_details
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details)
                 self.SetWidget(widget)
             else:
                 wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)

@@ -474,7 +474,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
 class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     def __init__(
-        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, title="Edit Data Selections",
+        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, title="Edit Data Selections",
     ):
 
         WidgetDataSelectionsDlg.__init__(self, parent, frame, elem_paths, queues_only=True)
@@ -507,6 +507,11 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
 
         gb_sizer.AddGrowableCol(1)
         sizer.Add(gb_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
+
+        self._show_details_chkbox = wx.CheckBox(self, label='Show detailed queue packets')
+        self._show_details_chkbox.SetValue(show_details)
+        sizer.Add(self._show_details_chkbox)
+
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
 
     @property
@@ -516,6 +521,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     @property
     def num_ticks_after(self):
         return self._slider_ticks_after.GetValue()
+
+    @property
+    def show_details(self):
+        return self._show_details_chkbox.IsChecked()
 
     def __SyncWithSliderTicks(self, evt):
         value = self._slider_ticks_before.GetValue()

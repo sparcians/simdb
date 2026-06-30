@@ -8,12 +8,12 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_TICKS_BEFORE = 10
     DEFAULT_TICKS_AFTER = 10
 
-    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER):
+    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=True):
         super().__init__(parent)
         self.frame = frame
         self.num_ticks_before = num_ticks_before
         self.num_ticks_after = num_ticks_after
-        self.show_detailed_queue_packets = True
+        self.show_detailed_queue_packets = show_details
         self.enable_tooltips = False
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
