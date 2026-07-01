@@ -1,0 +1,69 @@
+= Part IX: Reference & Appendices
+
+Quick-reference material for day-to-day lookups.
+
+[appendix]
+== Utilities Reference
+
+Catalog the general-purpose helpers in `include/simdb/utils/`.
+
+*Contents to cover*
+
+* `Compress` (zlib compress/decompress).
+* `ConcurrentQueue`, `CircularBuffer`.
+* `RunningMean`, `TickTock` (metrics/timing).
+* `ThreadSafeLogger`.
+* `ValidValue`, `TinyStrings`, `Demangle`, `Random`, `FloatCompare`,
+  `StreamFormatters`, `TypeTraits`, `ConditionalLock` / `DeferredLock`.
+
+*Sources*
+
+* `include/simdb/utils/*`.
+
+[appendix]
+== API Quick Reference & Glossary
+
+One-page cheat sheets.
+
+*Contents to cover*
+
+* SQLite API summary (schema, insert, query, transaction macros/methods).
+* Pipeline API summary (stage/port/queue, flusher, snooper, async accessor).
+* Glossary: stage, port, queue, DB stage, flusher, snooper, heartbeat,
+  collectable, CID, tick.
+
+*Sources*
+
+* `include/simdb/sqlite/*`, `include/simdb/pipeline/*`.
+
+[appendix]
+== FAQ & Troubleshooting
+
+Answers to predictable early questions.
+
+*Contents to cover*
+
+* "Locked database / contention" -- what SimDB already handles for you.
+* "Why is my pipeline sleeping?" -- PROCEED/SLEEP and cadence.
+* "Why don't I see my rows yet?" -- flushing and batched transactions.
+* Build/`-Werror` issues (unused params/members/includes in Release).
+
+*Sources*
+
+* `README.md`, `include/simdb/pipeline/README.md`.
+* `.cursor/rules/cpp-task-completion.mdc`.
+
+[appendix]
+== Migration Guide
+
+Move an existing project onto SimDB.
+
+*Contents to cover*
+
+* From file-based output ("write everything to files") to one SQLite database.
+* From raw SQLite / a thin wrapper to the SimDB SQLite interface.
+* From a hand-rolled TBB/threads pipeline to SimDB stages.
+
+*Sources*
+
+* `README.md` -- "A Clean Break for Complex Codebases".

@@ -1,0 +1,121 @@
+= Part VIII: Patterns, Best Practices & Cookbook
+
+Distilled advice and copy-adaptable recipes for building real SimDB
+applications well.
+
+== Designing Schema and Pipeline Together
+
+Treat storage and dataflow as one design.
+
+*Objectives*
+
+* Co-design tables and stages so data lands efficiently.
+* Decide what to persist vs. derive on read.
+
+*Key topics*
+
+* Mapping payload types to columns/blobs.
+* Where compression belongs in the pipeline.
+* Normalization vs. blob-of-record tradeoffs.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md`, `README.md` (end-to-end snippet).
+
+== Choosing Stage Boundaries & Data Types
+
+Pick the right granularity.
+
+*Objectives*
+
+* Split work into stages that keep threads busy without oversharing.
+* Choose move-friendly payload types.
+
+*Key topics*
+
+* One responsibility per stage; avoid tiny stages.
+* Move-only payloads; buffering and partial-flush handling.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- stage design notes.
+
+== Performance Tuning
+
+Get throughput and scale.
+
+*Objectives*
+
+* Tune batching, compression, thread counts, and heartbeat cadence.
+* Measure before and after changes.
+
+*Key topics*
+
+* Batch transaction sizing; the single DB thread as the funnel.
+* Compression cost vs. I/O savings.
+* Polling cadence and latency; dedicated vs. shared threads.
+* Timing with `TickTock` / `RunningMean`.
+
+*Sources & reusable snippets*
+
+* `include/simdb/utils/TickTock.hpp`, `RunningMean.hpp`.
+* `README.md` -- "High Performance".
+
+== Determinism & Debugging Concurrent Pipelines
+
+Make concurrent behavior reproducible enough to debug.
+
+*Objectives*
+
+* Use pipeline disabling and flushing to get deterministic states.
+* Diagnose common concurrency symptoms.
+
+*Key topics*
+
+* `ScopedRunnableDisabler` for deterministic inspection.
+* Logging with `ThreadSafeLogger`.
+* "Why is my pipeline sleeping / not draining?" checklist.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Disabling Pipelines".
+* `include/simdb/utils/ThreadSafeLogger.hpp`.
+
+== Recipes
+
+Ready-to-adapt application skeletons.
+
+*Objectives*
+
+* Provide starting points for common SimDB applications.
+
+*Key topics*
+
+* A scalable simulation statistics engine.
+* A live-dashboard / GUI backend (with snoopers for in-flight reads).
+* A simulation state replayer backend.
+* Aggregate analysis across hundreds/thousands of simulations.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "What You Can Build with SimDB".
+* `examples/*` -- closest matching example per recipe.
+
+== Testing SimDB Apps
+
+Verify correctness of schema, pipelines, and apps.
+
+*Objectives*
+
+* Write regression tests for SimDB apps.
+* Verify persisted data independent of the app.
+
+*Key topics*
+
+* Test structure with `SimDBTester.hpp`.
+* Flush-then-query verification.
+* External verification scripts.
+
+*Sources & reusable snippets*
+
+* `test/SimDBTester.hpp`, `test/sqlite/*`, `test/argos/compare.py`.

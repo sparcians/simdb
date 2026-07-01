@@ -1,0 +1,153 @@
+= Part III: The SQLite Interface
+
+SimDB's SQLite layer is useful on its own, with no pipelines involved. This part
+is a complete tour of the data layer: schema, inserts, queries, transactions,
+blobs, and inspection.
+
+== Defining a Schema
+
+Describe your tables in C++.
+
+*Objectives*
+
+* Build a `Schema` with tables, typed columns, and constraints.
+* Use defaults, indexes, and uniqueness where appropriate.
+
+*Key topics*
+
+* `SqlDataType` (int/uint widths, `string_t`, `blob_t`, ...).
+* `addTable` / `addColumn`; `setColumnDefaultValue`.
+* Indexes (`createIndexOn`), `ensureUnique`, primary-key control
+  (`unsetPrimaryKey`).
+* Appending schema incrementally over the run.
+
+*Sources & reusable snippets*
+
+* `include/simdb/schema/SchemaDef.hpp`, `include/simdb/schema/Blob.hpp`.
+* `README.md` -- "Database Creation".
+* `include/simdb/apps/argos/ArgosCollector.hpp` -- rich real-world
+  `defineSchema` example.
+
+== The DatabaseManager
+
+Own the connection and the schema.
+
+*Objectives*
+
+* Create/open a database and apply one or more schemas.
+* Understand the manager's role as the single owner of the connection.
+
+*Key topics*
+
+* Constructing a `DatabaseManager` on a file path.
+* `appendSchema` (callable more than once).
+* Connection lifecycle.
+
+*Sources & reusable snippets*
+
+* `include/simdb/sqlite/DatabaseManager.hpp`,
+  `include/simdb/sqlite/Connection.hpp`.
+* `README.md` -- "Database Creation".
+
+== Inserting Data
+
+Two ways to write rows, and when to use each.
+
+*Objectives*
+
+* Insert with the one-shot `INSERT` API.
+* Prepare and reuse statements for high-volume inserts.
+
+*Key topics*
+
+* `SQL_TABLE` / `SQL_COLUMNS` / `SQL_VALUES` macros.
+* `prepareINSERT`, `setColumnValue`, `createRecord`.
+* Why prepared statements matter for throughput.
+
+*Sources & reusable snippets*
+
+* `include/simdb/sqlite/PreparedINSERT.hpp`.
+* `README.md` -- "Record INSERT".
+* `test/sqlite/Insert/main.cpp`.
+
+== Querying Data
+
+Read rows back with typed constraints.
+
+*Objectives*
+
+* Build queries with constraints and iterate result sets.
+* Select scalar columns and blobs.
+
+*Key topics*
+
+* `createQuery`, `addConstraintFor*`, `Constraints` operators.
+* `getResultSet` / `getNextRecord`; `count`.
+* Iterators over results.
+
+*Sources & reusable snippets*
+
+* `include/simdb/sqlite/Query.hpp`, `include/simdb/sqlite/Constraints.hpp`,
+  `include/simdb/sqlite/Iterator.hpp`.
+* `README.md` -- "Record SELECT".
+* `test/sqlite/Query/main.cpp`, `test/sqlite/UInt64/`.
+
+== Transactions
+
+Group work safely and let SimDB handle contention.
+
+*Objectives*
+
+* Wrap multiple operations in a single transaction.
+* Understand the retry-on-fail behavior on locked tables.
+
+*Key topics*
+
+* `safeTransaction` and its retry semantics.
+* When batching improves performance.
+* Relationship to the implicit transactions used by database stages.
+
+*Sources & reusable snippets*
+
+* `include/simdb/sqlite/Transaction.hpp`.
+* `README.md` -- "Explicit BEGIN / COMMIT TRANSACTION".
+
+== Blobs, Compression & Serialization
+
+Store large structured payloads efficiently.
+
+*Objectives*
+
+* Store and retrieve `blob_t` columns.
+* Compress/decompress payloads with the SimDB utilities.
+
+*Key topics*
+
+* `Blob` and `ValueContainer` handling.
+* `simdb::compressData` / `decompressData` (zlib).
+* Serialization patterns for vectors/structs.
+
+*Sources & reusable snippets*
+
+* `include/simdb/schema/Blob.hpp`, `include/simdb/sqlite/ValueContainer.hpp`,
+  `include/simdb/utils/Compress.hpp`.
+* `README.md` -- "Record SELECT" (decompress on read).
+
+== Inspecting & Dumping Databases
+
+Look inside a database without a GUI.
+
+*Objectives*
+
+* Dump schema/content for debugging and verification.
+* Use tooling to sanity-check collected data.
+
+*Key topics*
+
+* `Dump.hpp` capabilities.
+* Verifying record counts and contents in tests.
+
+*Sources & reusable snippets*
+
+* `include/simdb/sqlite/Dump.hpp`.
+* `test/argos/compare.py` -- example verification tooling.

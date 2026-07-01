@@ -1,0 +1,82 @@
+= Part V: The App Framework
+
+Pipelines and schemas are composed inside _apps_. This part shows how SimDB apps
+are defined, registered, enabled, and run -- including many apps sharing one
+database.
+
+== What Is a SimDB App?
+
+The unit of composition in SimDB.
+
+*Objectives*
+
+* Subclass `simdb::App` and implement its lifecycle hooks.
+* Understand the "one database, many apps" paradigm.
+
+*Key topics*
+
+* `defineSchema`, `postInit`, `createPipeline`, `preTeardown`/`postTeardown`.
+* Instance numbering for multi-instance apps.
+* Example app archetypes (logger, profiler, collector, converter, GUI backend).
+
+*Sources & reusable snippets*
+
+* `include/simdb/apps/App.hpp` (lifecycle + archetypes in the header comment).
+
+== The AppManager
+
+Register, enable, and instantiate apps.
+
+*Objectives*
+
+* Register app types and enable them from config/CLI.
+* Let the manager drive consistent init/run/teardown.
+
+*Key topics*
+
+* `AppRegistration` / `AppRegistrationBase`, `AppManagers`.
+* Enabling apps based on simulation configuration.
+* The `PROFILE_APP_PHASE` timing helper.
+
+*Sources & reusable snippets*
+
+* `include/simdb/apps/AppManager.hpp`.
+
+== Running Multiple Apps Concurrently
+
+Scale out with a shared threading model.
+
+*Objectives*
+
+* Run several apps (or instances) against one database at once.
+* Understand implicit thread sharing and dedicated-thread requests.
+
+*Key topics*
+
+* Shared worker threads across apps; single shared DB thread.
+* Requesting a dedicated thread (except the DB thread).
+* Coordinating teardown across apps.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "Shared threading model for scalability".
+* `examples/ConcurrentApps/`.
+
+== App Factories & Non-Default Constructors
+
+Build apps that need constructor arguments.
+
+*Objectives*
+
+* Provide a nested `AppFactory` for non-default construction.
+* Understand how the manager detects and uses it.
+
+*Key topics*
+
+* `has_nested_factory` detection.
+* Passing configuration into app construction.
+
+*Sources & reusable snippets*
+
+* `include/simdb/apps/AppManager.hpp` (`AppFactory` detection).
+* `examples/AppFactory/`.

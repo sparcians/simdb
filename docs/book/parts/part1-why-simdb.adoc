@@ -1,0 +1,108 @@
+= Part I: Why SimDB
+
+This part answers the question a brand-new user asks first: _"What is SimDB, and
+why would I choose it over the tools I already know?"_ No code yet -- just the
+problem, the landscape, and the mental model you will carry through the rest of
+the book.
+
+== Introduction
+
+Set the stage: what SimDB is, who it is for, and what this book promises.
+
+*Objectives*
+
+* Define SimDB in one sentence: a header-only C++17 module unifying concurrent
+  pipelines with SQLite.
+* State the thesis: *SQLite + Concurrency + Flexibility, safe and fast*.
+* Establish the audience: domain experts (hardware/perf engineers, researchers),
+  not career software engineers.
+* Explain the "easy to use, hard to misuse" design imperative.
+
+*Key topics*
+
+* The three pillars (unified pipelines + SQLite, high performance, a clean break
+  for complex codebases).
+* What you can build (stats engines, live-dashboard backends, state replayers,
+  batch analysis across many simulations).
+* How to read this book (the layered path from SQLite to pipelines to Argos).
+
+*Sources & reusable snippets*
+
+* `README.md` -- "Why choose SimDB?", "What You Can Build", "Ideal For".
+* `notes.txt` -- audience and design-imperative framing.
+
+== The Simulation Data Problem
+
+Motivate SimDB by naming the pain it removes.
+
+*Objectives*
+
+* Describe where simulation data comes from and how much of it there is.
+* Show why concurrency + persistence is genuinely hard to get right by hand.
+* Name the anti-patterns SimDB replaces.
+
+*Key topics*
+
+* Data sources: statistics, traces, checkpoints, events, UI updates.
+* Anti-patterns: "write everything to files", ad hoc binary formats, tangled
+  data paths, unbounded coupling between simulator and output.
+* The hidden costs of naive SQLite use: tiny transactions, implicit file locks,
+  schema-level contention.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "A Clean Break for Complex Codebases",
+  "What Makes the Implementation Unique".
+
+== The Landscape
+
+Position SimDB honestly against the tools a reader may already reach for.
+
+*Objectives*
+
+* Compare SimDB with dataflow/parallel libraries and with C++ SQLite wrappers.
+* Make the differentiator concrete: no competitor unifies a safe concurrent
+  pipeline with first-class SQLite.
+* Give clear guidance on when *not* to use SimDB.
+
+*Key topics*
+
+* Dataflow / parallel libraries: Intel TBB (flow graph, concurrent containers),
+  RaftLib (stream kernels), Folly (MPMCQueue, futures), HPX, CAF (actors) --
+  strong concurrency, *no persistence story*.
+* C++ SQLite wrappers: SQLiteCpp, SOCI, sqlite_orm, sqlpp11 -- SQL access,
+  *no concurrency model*; locking/contention left to the user.
+* SimDB's gap-fill: single DB thread, batched implicit transactions,
+  retry-on-fail, approachable API.
+* Decision guide: when a plain library or an external service (e.g. Kafka,
+  a client/server RDBMS) is the better fit.
+
+*Sources & reusable snippets*
+
+* `notes.txt` -- competitor notes (TBB, Folly, RaftLib) and the SQLite +
+  Concurrency + Flexibility differentiator.
+
+== Core Concepts & Mental Model
+
+Give the reader the vocabulary and diagram they will reuse everywhere.
+
+*Objectives*
+
+* Introduce the "one DB to rule them all" principle.
+* Explain the single dedicated database thread and why there is only ever one.
+* Lay out the object model: apps -> pipelines -> stages -> ports -> queues.
+* Clarify move-only vs. copy semantics for pipeline data.
+
+*Key topics*
+
+* The consolidation model: one queryable SQLite database per simulator.
+* Implicit, batched transactions and the retry-on-fail guarantee.
+* The shared threading model (threads shared across apps for scaling).
+* A single mental-model diagram reused in later parts.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "What Makes the Implementation Unique".
+* `include/simdb/pipeline/README.md` -- stage/port/queue vocabulary.
+* `include/simdb/apps/App.hpp` -- the app paradigm ("single output database,
+  1-to-many apps").

@@ -1,0 +1,113 @@
+= Part IV: Concurrent Pipelines
+
+Here SimDB's second pillar appears: safe, high-throughput concurrent pipelines
+that feed SQLite without contention. This part builds a working pipeline from
+first principles.
+
+== Pipeline Fundamentals
+
+Understand what a stage is and how it runs.
+
+*Objectives*
+
+* Explain the per-stage thread and the greedy run loop.
+* Use `PipelineAction::PROCEED` vs. `SLEEP` correctly.
+* Understand the `force` flag during flushes.
+
+*Key topics*
+
+* Stages run on their own thread, processing greedily until they sleep
+  (100ms default) and wake again.
+* `run_(bool force)` contract and the flush semantics of `force`.
+* `Stage` vs. `DatabaseStage` (own thread vs. shared DB thread).
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Stages".
+* `include/simdb/pipeline/Stage.hpp`, `Runnable.hpp`, `PollingThread.hpp`.
+
+== Ports & ConcurrentQueue
+
+Connect stages with typed queues.
+
+*Objectives*
+
+* Add typed input/output ports to a stage.
+* Understand the queue that sits between stages.
+
+*Key topics*
+
+* `addInPort_` / `addOutPort_` with pointer-reference queue assignment.
+* `simdb::ConcurrentQueue` (`try_pop`, `emplace`, `push`).
+* Multi-input, multi-output, zero-input, zero-output combinations; muxing.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Ports", "Code Snippet: Non-Database
+  Stage".
+* `include/simdb/utils/ConcurrentQueue.hpp`, `include/simdb/pipeline/Queue.hpp`,
+  `QueueRepo.hpp`.
+* `examples/MultiPortStages/`.
+
+== Building a Pipeline
+
+Assemble stages into a running pipeline.
+
+*Objectives*
+
+* Create a pipeline, add named stages, and bind ports.
+* Capture the pipeline head and send data in.
+
+*Key topics*
+
+* `createPipeline`, `addStage`, `noMoreStages`.
+* `bind`, `noMoreBindings`, `getInPortQueue`.
+* Sending work with move (`emplace`) vs. copy (`push`).
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Gluing It All Together".
+* `README.md` -- "Code Snippets: Pipeline Creation".
+* `include/simdb/pipeline/Pipeline.hpp`, `PipelineManager.hpp`.
+* `examples/SimplePipeline/`.
+
+== Database Stages
+
+Write to SQLite safely from the pipeline.
+
+*Objectives*
+
+* Subclass `DatabaseStage<App>` and use prepared inserters.
+* Understand the single DB thread and implicit batch transactions.
+
+*Key topics*
+
+* `getTableInserter_`, `getDatabaseManager_`.
+* Every `DatabaseStage::run_` runs inside a batched
+  BEGIN/COMMIT TRANSACTION block, shared across all DB stages and apps.
+* Optional outputs from DB stages (e.g. cache-evict patterns).
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Code Snippet: Database Stage".
+* `include/simdb/pipeline/DatabaseThread.hpp`, `DatabaseAccessor.hpp`.
+
+== Move Semantics & Performance
+
+Make the pipeline fast by default.
+
+*Objectives*
+
+* Prefer move-only data flow; know when copying is acceptable.
+* Reason about batching, thread counts, and stage granularity.
+
+*Key topics*
+
+* Move-only payloads through queues.
+* Batch transaction sizing and its throughput impact.
+* Avoiding false sharing / oversized payloads.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "High Performance", move-only semantics note.
+* `include/simdb/utils/TypeTraits.hpp`.

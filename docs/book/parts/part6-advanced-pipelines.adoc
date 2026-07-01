@@ -1,0 +1,106 @@
+= Part VI: Advanced Pipeline Techniques
+
+Once the basics work, these techniques handle synchronization, low-latency
+retrieval of in-flight data, determinism, and cross-thread database access.
+
+== Flushers
+
+Create synchronization points in a running pipeline.
+
+*Objectives*
+
+* Build a flusher and flush stages in a defined order.
+* Rely on the single-transaction guarantee across DB stages.
+
+*Key topics*
+
+* `createFlusher` (explicit order vs. `addStage` order).
+* Using a flush before a query/count to guarantee data is persisted.
+* Whole-flush single BEGIN/COMMIT when DB stages are involved.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Flushers".
+* `include/simdb/pipeline/Flusher.hpp`.
+* `examples/SimplePipeline/`, `examples/DatabaseWatchdog/`.
+
+== Snoopers
+
+Find data that is still in-flight between stages.
+
+*Objectives*
+
+* Add `snoop()` methods to stages and a pipeline snooper.
+* Trade pipeline speed against snoop latency deliberately.
+
+*Key topics*
+
+* `PipelineSnooper<KeyType, SnoopedType>`, `snoopAllStages`.
+* Per-stage `snoop()` and `ConcurrentQueue::snoop`.
+* "Chasing" data down the pipeline and how disabling avoids it.
+* Fallback to a flush + database query when not snooped.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Snoopers".
+* `include/simdb/pipeline/PipelineSnooper.hpp`.
+* `examples/PipelineSnoopers/`.
+
+== Disabling Pipelines
+
+Pause everything for determinism or performance.
+
+*Objectives*
+
+* Use the RAII disabler to freeze all runnables in a scope.
+* Know when disabling helps (debugging, snoop accuracy, throughput).
+
+*Key topics*
+
+* `scopedDisableAll` / `ScopedRunnableDisabler`.
+* Determinism for debugging concurrent issues.
+* Interaction with snoopers.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Disabling Pipelines".
+* `include/simdb/pipeline/Runnable.hpp`.
+
+== Async Database Access from Non-DB Threads
+
+Reach the database from a non-DB stage, fast.
+
+*Objectives*
+
+* Post a callback to the single DB thread and await its result.
+* Understand the immediate-commit behavior and timeouts.
+
+*Key topics*
+
+* `getAsyncDatabaseAccessor_`, `eval(callback[, timeout])`.
+* `std::future`/`std::promise` semantics and exception propagation.
+* Posting from the app's main thread via the `PipelineManager`.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/README.md` -- "Async Database Access".
+* `include/simdb/pipeline/AsyncDatabaseAccessor.hpp`.
+* `examples/DatabaseWatchdog/`.
+
+== Thread Merging & Scheduling
+
+Tune how stages map onto threads.
+
+*Objectives*
+
+* Understand how stages can be merged onto shared threads.
+* Reason about polling cadence and scheduling.
+
+*Key topics*
+
+* `ThreadMerger` and stage-to-thread assignment.
+* `PollingThread` cadence (default 100ms) and its effect on latency.
+
+*Sources & reusable snippets*
+
+* `include/simdb/pipeline/ThreadMerger.hpp`, `PollingThread.hpp`.

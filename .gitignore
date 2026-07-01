@@ -14,3 +14,4 @@ build/
 **/*.avf
 **/*.db
 .cursor/
+docs/book/book.html

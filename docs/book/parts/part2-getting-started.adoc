@@ -1,0 +1,88 @@
+= Part II: Getting Started
+
+Move from concepts to a running program. By the end of this part the reader has
+SimDB installed, building in their project, and has written a first database.
+
+== Installing SimDB
+
+Get the dependencies in place on a fresh machine.
+
+*Objectives*
+
+* Install SimDB's system or conda dependencies.
+* Understand what "header-only" means for consumption.
+
+*Key topics*
+
+* System packages (Ubuntu/Debian): `cmake`, `libsqlite3-dev`, `zlib1g-dev`,
+  `clang-format-19`, `build-essential`.
+* Conda environments (existing and new) for SimDB.
+* Installing headers system-wide vs. into a conda prefix.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "Requirements", "Installing SimDB", "Conda Installation".
+
+== Building & CMake Integration
+
+Wire SimDB into a real build.
+
+*Objectives*
+
+* Add SimDB headers and its dependencies (SQLite, zlib) to a CMake project.
+* Choose Debug vs. Release and understand the `-Werror` implications.
+
+*Key topics*
+
+* Header-only include paths and linking SQLite/zlib.
+* `CMAKE_BUILD_TYPE`, Release vs. Debug builds.
+* Project layout conventions for SimDB consumers.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "Regression Tests" build commands.
+* `CMakeLists.txt`, `examples/CMakeLists.txt` -- integration references.
+
+== Your First Program
+
+A complete, minimal end-to-end program in ~20 lines.
+
+*Objectives*
+
+* Create a schema, open a database, insert rows, and read them back.
+* Show that SimDB is useful even without any pipeline.
+
+*Key topics*
+
+* Define a `Schema` with one table.
+* Open a `DatabaseManager`.
+* Insert with the `INSERT` convenience API.
+* Query the rows back.
+
+*Sources & reusable snippets*
+
+* `README.md` -- "Code Snippets: SQLite Interface" (schema, insert, query).
+* `test/sqlite/Schema/main.cpp`, `test/sqlite/Insert/main.cpp`,
+  `test/sqlite/Query/main.cpp`.
+
+== Running the Examples & Regression Tests
+
+Point the reader at the shipped, runnable learning material.
+
+*Objectives*
+
+* Build and run the example programs and the regression suite.
+* Learn the recommended working directory for artifact-producing runs.
+
+*Key topics*
+
+* The example progression (SimplePipeline -> MultiPortStages -> ConcurrentApps
+  -> DatabaseWatchdog -> PipelineSnoopers -> AppFactory).
+* `make simdb_regress` for Debug/Release.
+* Running collectors from a build-tree/temp directory to avoid stray artifacts.
+
+*Sources & reusable snippets*
+
+* `examples/README.md` -- example catalog.
+* `README.md` -- "Regression Tests".
+* `.cursor/rules/argos-collector-testing.mdc` -- working-directory guidance.

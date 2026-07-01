@@ -1,0 +1,125 @@
+= Part VII: Case Study -- Argos
+
+Argos is SimDB's flagship application: a simulation data _collector_ plus a
+Python _viewer_. It exercises nearly every SimDB feature and is the best way to
+see the pieces working together end-to-end.
+
+== What Argos Is
+
+Frame the system before diving into components.
+
+*Objectives*
+
+* Describe Argos as a collect-then-visualize system built on SimDB.
+* Map Argos components onto the SimDB concepts from Parts IV--VI.
+
+*Key topics*
+
+* The collector (`simdb::argos::ArgosCollector`, a `simdb::App`) writes a single
+  SQLite database.
+* The Python viewer reads that database and replays state over simulated time.
+* The data contract between them: collectable tree, clocks, timestamps, encoded
+  blobs.
+
+*Sources & reusable snippets*
+
+* `include/simdb/apps/argos/ArgosCollector.hpp`.
+* `python/argos/viewer/README.md`.
+
+== The Argos Collector
+
+How instrumentation becomes rows and blobs.
+
+*Objectives*
+
+* Register collectables and clocks; collect as the simulation advances.
+* Understand checkpointing and delta encoding of collected state.
+
+*Key topics*
+
+* Schema tables: `CollectionGlobals`, `Clocks`, `CollectableTreeNodes`,
+  `DataTypeSchemas`/`DataTypeNodes`, `Timestamps`.
+* The heartbeat (`DEFAULT_HEARTBEAT`) as the full-vs-delta rebase cadence: how
+  long deltas accumulate before a new full snapshot is written. It is a
+  performance knob (sim speed vs. database size and UI responsiveness), not a
+  gate on when data is collected.
+* `Checkpointer` / `CheckpointDeltas` / `CheckpointEncodings`, `StreamBuffer`,
+  `EnumInspector`, `Timestamps`.
+* The `PipelineStagerInterface` and how collection feeds the pipeline.
+
+*Sources & reusable snippets*
+
+* `include/simdb/apps/argos/ArgosCollector.hpp`, `Checkpointer.hpp`,
+  `CheckpointDeltas.hpp`, `CheckpointEncodings.hpp`, `CollectedData.hpp`,
+  `PipelineDataTypes.hpp`, `Timestamps.hpp`, `EnumInspector.hpp`.
+
+== On-Disk Data Model & Encodings
+
+The schema and byte layout the viewer relies on.
+
+*Objectives*
+
+* Read the Argos schema as a contract between collector and viewer.
+* Understand contiguous vs. sparse container encodings and heartbeat lookback.
+
+*Key topics*
+
+* Collectable tree nodes, CIDs, and `ShowInUI` filtering.
+* Clocks/timestamps and multi-clock databases.
+* Container capacity types (`_contig_capacity`, `_sparse_capacity`).
+* Full checkpoints + deltas; reconstructing a tick via lookback.
+
+*Sources & reusable snippets*
+
+* `include/simdb/apps/argos/ArgosCollector.hpp` (`defineSchema`).
+* `python/argos/viewer/model/simhier.py`, `data_retriever.py`,
+  `blob_iterator.py`, `data_deserializers.py`.
+
+== The Argos Viewer
+
+Explore and replay collected data in the GUI. This chapter is intentionally
+high-level and UI-focused (rather than implementation-focused).
+
+*Objectives*
+
+* Launch the viewer against a database and navigate simulated time.
+* Understand the panels, widgets, and view files from a user's perspective.
+
+*Key topics*
+
+* Launching against a database, optionally with a saved view file.
+* The navigable object hierarchy, the tabbed data inspector, and the splittable
+  canvas for arranging widgets.
+* Widgets: queue tables, queue utilization, scheduling lines, summary views;
+  configurable columns and auto-colorization.
+* The playback bar for scrubbing/stepping through simulated time.
+* View files (`*.avf`) to save, restore, and share layouts.
+
+*Sources & reusable snippets*
+
+* `python/argos/viewer/README.md` -- the user-facing viewer overview.
+
+== End-to-End
+
+Tie collector and viewer together in one workflow.
+
+*Objectives*
+
+* Instrument a toy simulator, collect a run, and open it in the viewer.
+* Verify collected data programmatically.
+
+*Key topics*
+
+* Minimal instrumentation: register collectables and collect as the simulation
+  advances. The heartbeat does not gate collection -- it only sets how long the
+  collector accumulates small delta checkpoints before rebasing with a full
+  snapshot (a performance tradeoff: sim speed vs. database size and UI
+  responsiveness).
+* Running the collector from a build-tree/temp directory (avoid stray artifacts).
+* Verifying output with a query or the comparison script.
+
+*Sources & reusable snippets*
+
+* `examples/ArgosCollector/` and its `README.md`.
+* `test/argos/` (`main.cpp`, `BlobReplayer.hpp`, `compare.py`).
+* `.cursor/rules/argos-collector-testing.mdc` -- working-directory guidance.
