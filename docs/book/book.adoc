@@ -5,7 +5,7 @@
 :sectnums:
 :sectnumlevels: 1
 :icons: font
-:source-highlighter: rouge
+:source-highlighter: highlight.js
 :experimental:
 :imagesdir: images
 
@@ -24,18 +24,16 @@ misuse*. This book follows that same principle.
 
 We build understanding in layers:
 
-* *Part I* explains _why_ SimDB exists and how it differs from the alternatives.
+* *<<part-i,Part I>>* explains _why_ SimDB exists and how it differs from the alternatives.
 * *Parts II--III* get you productive with the standalone SQLite interface.
-* *Parts IV--VI* introduce the concurrent pipeline and app frameworks.
-* *Part VII* is an end-to-end case study of Argos, SimDB's flagship
+* *Parts <<part-iv,Part IV>>--<<part-vi,Part VI>>* introduce the concurrent pipeline and app frameworks.
+* *<<part-vii,Part VII>>* is an end-to-end case study of Argos, SimDB's flagship
   collection-and-visualization application.
 * *Parts VIII--IX* collect patterns, recipes, and reference material.
 
 [NOTE]
 ====
-This is a first-draft outline. Each chapter below is scaffolded with its
-learning objectives, key topics, and the existing sources/snippets to draw from.
-Prose and worked examples are filled in during later iterations.
+Parts I--IX are drafted in prose with cross-reference links throughout.
 ====
 
 // Part I

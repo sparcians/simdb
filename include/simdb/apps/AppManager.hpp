@@ -500,6 +500,12 @@ private:
     {
         PROFILE_APP_PHASE
 
+        // TODO cnyce: We are currently creating the apps first, then creating the schemas.
+        // There is no reason to do this in that order, and we should create the schemas
+        // first. The doc (book) was written assuming schemas come first; leave the doc
+        // that way and change the C++ code to match. Call out that you can freely write
+        // to your tables in defineSchema right in your App's constructor. Then ensure
+        // that the createEnabledApps call is inside a safeTransaction.
         db_mgr_->safeTransaction([&]() {
             for (const auto& [app_name, app] : apps_)
             {
@@ -512,6 +518,12 @@ private:
                 auto instance_num = static_cast<size_t>(std::stoull(tmp_substr));
                 AppFactoryBase* factory = getAppFactory_(user_app_name, instance_num);
 
+                // TODO cnyce: We should consider automatically prepending "<app name>$"
+                // before every table in the app schema. With a growing number of apps,
+                // and SimDB living in open source, this will eventually trip someone
+                // up from e.g. using a generic table like "SimMetadata" which collides.
+                // You will have to document that the app name might have restrictions
+                // that will match whatever restrictions SQLite puts on table names.
                 Schema app_schema;
                 factory->defineSchema(app_schema);
                 db_mgr_->appendSchema(app_schema);
@@ -599,6 +611,12 @@ private:
             {
                 app->postTeardown();
             }
+
+            // TODO cnyce: We should associate the DatabaseManager and
+            // the TinyStrings so that it gets flushed automatically.
+            // This will let us document that postSimLoopTeardown()
+            // is the only thing you have to call in the event of
+            // an exception/abort/terminate during simulation.
         });
     }
 

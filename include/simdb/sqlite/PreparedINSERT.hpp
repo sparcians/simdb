@@ -210,6 +210,8 @@ public:
         return id;
     }
 
+    /// TODO cnyce: createRecordWithColValues using move semantics
+
 private:
     SQLitePreparedStatement prepared_stmt_;
     sqlite3_stmt* stmt_ = nullptr;

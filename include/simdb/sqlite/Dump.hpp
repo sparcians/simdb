@@ -98,6 +98,7 @@ inline void dumpTable(const std::string& table_name, const std::vector<std::stri
 
 inline void dumpTable(DatabaseManager* db_mgr, const std::string& table_name)
 {
+    // TODO cnyce: Can we call sqlite3 directly and simply parse the dumped output on stdout?
     struct SelectedValueUnion
     {
         std::optional<int32_t> i;

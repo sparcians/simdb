@@ -10,28 +10,32 @@
 /// configuration (e.g. command line options, config file, etc).
 ///
 ///   - Create your own data/metadata schema tables just for your app
-///   - Use SimDB utilities to build async compression/DB pipelines
+///   - Use SimDB utilities to build async compression/transform/DB pipelines
 ///
 /// Example applications:
 ///
 ///   - Logger that records simulation events
 ///   - Profiler that tracks performance metrics
-///   - Pipeline collector
-///   - SQLite-to-HDF5 converter
+///   - CPU pipeline instrumentation/collection with front-end viewer (Argos)
 ///   - Backend for a live data visualization GUI / web interface
+///   - Backend for post-sim analysis using simulation state replayers
 ///
 /// Since SimDB is designed to be simulator-agnostic, apps also provide
 /// a variety of hooks that allow you to run code at different stages of
 /// the simulation lifecycle and to ensure that all apps in your simulator
 /// are initialized and run in a consistent manner.
 ///
-///   - appendSchema:  first hook after command line args / config files are
-///   parsed
-///   - postInit:      called before the simulation starts, after command line
-///   parsing
-///   - postSim:       called after the simulation loop ends
-///   - teardown:      called after the simulation ends, for resource cleanup
-///   tasks
+///   - defineSchema:   (static) declare the app's schema tables. Called via the
+///                     app's AppFactory before any app instance is created.
+///   - postInit:       after command-line / config parsing, before the
+///                     simulation starts.
+///   - createPipeline: create and configure the app's pipeline(s).
+///   - preTeardown:    just before simulation teardown; push any pending data
+///                     to your app's pipeline
+///   - postTeardown:   after simulation; post-sim metadata DB writes occur here;
+///                     all running apps' postTeardown methods are executed in a
+///                     single safeTransaction automatically (don't worry about
+///                     using safeTransaction explicitly)
 ///
 /// The general paradigm is that your simulator has a single output database,
 /// with 1-to-many apps that are all writing to it with their own custom schemas
