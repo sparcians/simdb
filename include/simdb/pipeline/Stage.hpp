@@ -167,9 +167,6 @@ private:
 ///   -> provide a general-purpose utility which can handle arbitrary filesystem flushes on the
 ///      dedicated DB thread
 
-/// TODO cnyce: CompressionStage
-///   -> perform zlib compression with automatic tuning of the compression ratio variable at runtime
-
 /// TODO cnyce: ThreadPool stage 1st class citizen
 
 } // namespace simdb::pipeline
