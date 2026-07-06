@@ -5,8 +5,7 @@
 #include "simdb/pipeline/DatabaseThread.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
 #include "simdb/pipeline/PipelineSnooper.hpp"
-#include "simdb/pipeline/PollingThread.hpp"
-#include "simdb/pipeline/ThreadMerger.hpp"
+#include "simdb/pipeline/PollingThreadPool.hpp"
 
 #include <iostream>
 
@@ -19,9 +18,9 @@ namespace simdb::pipeline {
 /*!
  * \class PipelineManager
  *
- * \brief Manages all Pipeline instances and their PollingThreads for an
- *        AppManager (or unit test). Creates pipelines, merges threads
- *        (minimizeThreads), opens threads, and provides async DB access.
+ * \brief Manages all Pipeline instances, a PollingThreadPool for non-database
+ *        stages, and a dedicated DatabaseThread for database stages. Creates
+ *        pipelines, opens threads, and provides async DB access.
  */
 class PipelineManager
 {
@@ -79,83 +78,37 @@ public:
         return std::make_unique<PipelineSnooper<KeyType, SnoopedType>>(this);
     }
 
-    /// \brief Merge all apps' pipeline threads into a minimal set; call at most once.
-    /// \throws DBException if called more than once.
-    void minimizeThreads()
-    {
-        if (thread_merger_)
-        {
-            throw DBException("You can only call minimizeThreads() method once.");
-        }
-
-        thread_merger_ = std::make_unique<ThreadMerger>(pipelines_);
-        thread_merger_->mergeAllAppThreads();
-    }
-
-    /// \brief Mark one app's pipeline threads for merging (call before openPipelines()).
-    void minimizeThreads(const App* app)
-    {
-        if (!thread_merger_)
-        {
-            throw DBException("Cannot merge a single app's pipeline threads");
-        }
-        thread_merger_->addAppForMerging(app);
-    }
-
-    /// \brief Mark multiple apps' pipeline threads for merging (variadic).
-    template <typename... Apps> void minimizeThreads(const App* app, Apps&&... rest)
-    {
-        if (!thread_merger_)
-        {
-            thread_merger_ = std::make_unique<ThreadMerger>(pipelines_);
-        }
-        thread_merger_->addAppForMerging(app);
-        minimizeThreads(std::forward<Apps>(rest)...);
-    }
-
-    /// \brief Create and open all polling threads (after stages are added and optionally minimizeThreads).
+    /// \brief Register stages with the thread pool and open all polling threads.
     void openPipelines()
     {
         checkOpen_();
 
-        if (!thread_merger_)
+        size_t global_order = 0;
+        for (auto& pipeline : pipelines_)
         {
-            thread_merger_ = std::make_unique<ThreadMerger>(pipelines_);
+            pipeline->assignStageThreads(thread_pool_, database_thread_, global_order);
         }
-        thread_merger_->performMerge(polling_threads_);
 
-        // Now that all threads are created, give the async DB accessor to all
-        // non-DB stages in all pipelines.
-        for (auto& thread : polling_threads_)
+        if (database_thread_)
         {
-            if (auto db_thread = dynamic_cast<DatabaseThread*>(thread.get()))
-            {
-                async_db_accessor_ = db_thread->getAsyncDatabaseAccessor();
-                break;
-            }
+            async_db_accessor_ = database_thread_->getAsyncDatabaseAccessor();
         }
 
         if (async_db_accessor_)
         {
-            for (auto& thread : polling_threads_)
+            for (auto runnable : thread_pool_.getRegisteredRunnables())
             {
-                if (!dynamic_cast<DatabaseThread*>(thread.get()))
+                if (auto stage = dynamic_cast<Stage*>(runnable))
                 {
-                    for (auto runnable : thread->getRunnables())
-                    {
-                        if (auto stage = dynamic_cast<Stage*>(runnable))
-                        {
-                            stage->setAsyncDatabaseAccessor_(async_db_accessor_);
-                        }
-                    }
+                    stage->setAsyncDatabaseAccessor_(async_db_accessor_);
                 }
             }
         }
 
-        // Now open all threads for simulation
-        for (auto& thread : polling_threads_)
+        thread_pool_.open();
+        if (database_thread_)
         {
-            thread->open();
+            database_thread_->open();
         }
         threads_opened_ = true;
     }
@@ -189,22 +142,17 @@ public:
         return disabler;
     }
 
-    /// \brief Close all threads, flush runnables, and print performance reports.
+    /// \brief Close all threads, flush runnables, and print the pool performance report.
     void postSimLoopTeardown()
     {
         checkOpen_();
 
-        auto close_thread = [&](PollingThread* thread) {
-            thread->close();
-            thread->printPerfReport();
-            std::cout << "\n\n";
-        };
+        const auto managed_threads = thread_pool_.getAllManagedThreads(database_thread_.get());
 
-        auto it = polling_threads_.begin();
-        while (it != polling_threads_.end())
+        thread_pool_.close();
+        if (database_thread_)
         {
-            close_thread(it->get());
-            ++it;
+            database_thread_->close();
         }
 
         bool continue_while;
@@ -212,13 +160,13 @@ public:
         {
             continue_while = false;
 
-            it = polling_threads_.begin();
-            while (it != polling_threads_.end())
+            for (auto* thread : managed_threads)
             {
-                continue_while |= (*it)->flushRunnables();
-                ++it;
+                continue_while |= thread->flushRunnables();
             }
         } while (continue_while);
+
+        thread_pool_.printPerfReport();
 
         closed_ = true;
     }
@@ -230,8 +178,11 @@ private:
     /// Instantiated pipelines.
     std::vector<std::unique_ptr<Pipeline>> pipelines_;
 
-    /// Instantiated threads.
-    std::vector<std::unique_ptr<PollingThread>> polling_threads_;
+    /// Pool of worker threads for non-database stages.
+    PollingThreadPool thread_pool_;
+
+    /// Dedicated database thread (never part of the pool).
+    std::unique_ptr<DatabaseThread> database_thread_;
 
     /// Threads that we give to the ScopedRunnableDisabler.
     std::vector<PollingThread*> disabler_threads_;
@@ -250,10 +201,6 @@ private:
     /// Cached AsyncDatabaseAccessor for async DB queries.
     AsyncDatabaseAccessor* async_db_accessor_ = nullptr;
 
-    /// Used to perform minimizeThread() to share threads
-    /// between concurrently running apps.
-    std::unique_ptr<ThreadMerger> thread_merger_;
-
     void getDisablerThreads_()
     {
         if (!disabler_threads_.empty())
@@ -261,10 +208,7 @@ private:
             return;
         }
 
-        for (auto& thread : polling_threads_)
-        {
-            disabler_threads_.push_back(thread.get());
-        }
+        disabler_threads_ = thread_pool_.getAllManagedThreads(database_thread_.get());
 
         // Ensure unique
         auto it = std::unique(disabler_threads_.begin(), disabler_threads_.end());
@@ -281,10 +225,14 @@ private:
             return;
         }
 
-        for (auto& thread : polling_threads_)
+        for (auto runnable : thread_pool_.getRegisteredRunnables())
         {
-            const auto& runnables = thread->getRunnables();
-            disabler_runnables_.insert(disabler_runnables_.end(), runnables.begin(), runnables.end());
+            disabler_runnables_.push_back(runnable);
+        }
+        if (database_thread_)
+        {
+            const auto& db_runnables = database_thread_->getRunnables();
+            disabler_runnables_.insert(disabler_runnables_.end(), db_runnables.begin(), db_runnables.end());
         }
 
         // Ensure unique

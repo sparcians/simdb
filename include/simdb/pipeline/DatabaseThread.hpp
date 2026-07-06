@@ -39,6 +39,20 @@ public:
     /// \brief Return the AsyncDatabaseAccessor for submitting work to this thread.
     AsyncDatabaseAccessor* getAsyncDatabaseAccessor() { return &db_accessor_; }
 
+    /// \brief Start the database polling thread and dormant async task thread.
+    void open() override
+    {
+        PollingThread::open();
+        dormant_thread_.open();
+    }
+
+    /// \brief Stop and join the database polling thread and dormant async task thread.
+    void close() noexcept override
+    {
+        PollingThread::close();
+        dormant_thread_.close();
+    }
+
 private:
     /// Overridden from AsyncDatabaseAccessHandler
     void eval(AsyncDatabaseTaskPtr&& task, double timeout_seconds = 0) override final
@@ -86,20 +100,6 @@ private:
         });
 
         return did_work;
-    }
-
-    /// Overridden from PollingThread
-    void open() override
-    {
-        PollingThread::open();
-        dormant_thread_.open();
-    }
-
-    /// Overridden from PollingThread
-    void close() noexcept override
-    {
-        PollingThread::close();
-        dormant_thread_.close();
     }
 
     /// Overridden from PollingThread

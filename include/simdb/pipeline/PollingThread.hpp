@@ -4,26 +4,46 @@
 
 #include "simdb/Exceptions.hpp"
 #include "simdb/pipeline/Runnable.hpp"
-#include "simdb/utils/StreamFormatters.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <future>
-#include <iomanip>
-#include <iostream>
 #include <mutex>
+#include <set>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace simdb::pipeline {
+
+class PollingThreadPool;
+
+/// \brief Point-in-time metrics exported by a PollingThread for pool load balancing.
+struct PollingThreadMetrics
+{
+    size_t num_runnables = 0;
+    uint64_t num_poll_cycles_with_work = 0;
+    double total_sleep_seconds = 0.0;
+    double elapsed_seconds = 0.0;
+    bool is_running = false;
+    bool is_paused = false;
+};
+
+/// \brief Per-Runnable PROCEED/SLEEP poll counts since the last pool rebalance reset.
+struct RunnablePollMetrics
+{
+    uint64_t proceed_count = 0;
+    uint64_t sleep_count = 0;
+};
 
 /*!
  * \class PollingThread
  *
  * \brief Thread that repeatedly polls its Runnables for work; when none do
  *        work, it sleeps for a fixed interval before polling again. Supports
- *        pause/resume and performance reporting. Base for DatabaseThread.
+ *        pause/resume. Base for DatabaseThread.
  */
 class PollingThread
 {
@@ -57,6 +77,106 @@ public:
     /// \brief Return the number of Runnables on this thread.
     size_t getNumRunnables() const { return runnables_.size(); }
 
+    /// \brief Export metrics for PollingThreadPool load balancing.
+    PollingThreadMetrics getMetrics() const noexcept
+    {
+        PollingThreadMetrics metrics;
+        metrics.num_runnables = runnables_.size();
+        metrics.num_poll_cycles_with_work = num_times_run_;
+        metrics.total_sleep_seconds = total_sleep_seconds_;
+        metrics.is_running = is_running_;
+        metrics.is_paused = paused_;
+        if (is_running_)
+        {
+            auto now = std::chrono::high_resolution_clock::now();
+            metrics.elapsed_seconds = std::chrono::duration<double>(now - start_).count();
+        }
+        return metrics;
+    }
+
+    /// \brief Return PROCEED/SLEEP poll counts for \p runnable since the last rebalance reset.
+    RunnablePollMetrics getRunnablePollMetrics(Runnable* runnable) const
+    {
+        const auto it = runnable_poll_metrics_.find(runnable);
+        if (it == runnable_poll_metrics_.end())
+        {
+            return {};
+        }
+        return it->second;
+    }
+
+    /// \brief Sum of PROCEED poll counts across all runnables on this thread.
+    uint64_t getTotalProceedPolls() const
+    {
+        uint64_t total = 0;
+        for (const auto& [_, metrics] : runnable_poll_metrics_)
+        {
+            total += metrics.proceed_count;
+        }
+        return total;
+    }
+
+    /// \brief Sum of SLEEP poll counts across all runnables on this thread.
+    uint64_t getTotalSleepPolls() const
+    {
+        uint64_t total = 0;
+        for (const auto& [_, metrics] : runnable_poll_metrics_)
+        {
+            total += metrics.sleep_count;
+        }
+        return total;
+    }
+
+    /// \brief Clear per-runnable poll counters (called by PollingThreadPool after each rebalance).
+    void resetPollMetrics() { runnable_poll_metrics_.clear(); }
+
+    /// \brief Add a Runnable while this thread is paused (used during pool migration).
+    /// \pre paused() == true
+    /// \throws DBException if the thread is not paused.
+    void addRunnableWhilePaused(Runnable* runnable)
+    {
+        if (!paused_)
+        {
+            throw DBException("addRunnableWhilePaused() requires a paused PollingThread");
+        }
+        runnables_.emplace_back(runnable);
+    }
+
+    /// \brief Remove a Runnable while this thread is paused (used during pool migration).
+    /// \pre paused() == true
+    /// \return true if \p runnable was found and removed.
+    /// \throws DBException if the thread is not paused.
+    bool removeRunnableWhilePaused(Runnable* runnable)
+    {
+        if (!paused_)
+        {
+            throw DBException("removeRunnableWhilePaused() requires a paused PollingThread");
+        }
+        auto it = std::find(runnables_.begin(), runnables_.end(), runnable);
+        if (it == runnables_.end())
+        {
+            return false;
+        }
+        runnables_.erase(it);
+        runnable_poll_metrics_.erase(runnable);
+        return true;
+    }
+
+    /// \brief Open the polling loop even with zero Runnables (pool workers may start empty).
+    /// \note Used by PollingThreadPool when growing the pool before runnables are stolen in.
+    void openAllowEmpty()
+    {
+        if (thread_)
+        {
+            return;
+        }
+        stop_requested_ = false;
+        paused_ = false;
+        is_running_ = true;
+        start_ = std::chrono::high_resolution_clock::now();
+        thread_ = std::make_unique<std::thread>(&PollingThread::loop_, this);
+    }
+
     /// \brief Reorder this thread's Runnables to match the order in \p runnables (only those
     /// that belong to this thread).
     void ensureRelativeOrder(const std::vector<Runnable*>& runnables)
@@ -77,17 +197,32 @@ public:
     virtual bool flushRunnables()
     {
         bool did_work = false;
-        for (auto runnable : runnables_)
+        while (true)
         {
-            if (!runnable->enabled())
+            bool processed = false;
+            for (auto runner : runnables_)
             {
-                continue;
-            }
+                if (!runner->enabled())
+                {
+                    continue;
+                }
 
-            if (runnable->processAll(true) == PipelineAction::PROCEED)
-            {
-                did_work = true;
+                const auto action = runner->processOne(true);
+                auto& poll_metrics = runnable_poll_metrics_[runner];
+                if (action == PipelineAction::PROCEED)
+                {
+                    processed = true;
+                    ++poll_metrics.proceed_count;
+                } else
+                {
+                    ++poll_metrics.sleep_count;
+                }
             }
+            if (!processed)
+            {
+                break;
+            }
+            did_work = true;
         }
         return did_work;
     }
@@ -176,40 +311,6 @@ public:
         pause_cv_.notify_all();
     }
 
-    /// \brief Print a performance report (sleep vs work %) for this thread.
-    void printPerfReport() const noexcept
-    {
-        if (runnables_.empty())
-        {
-            return;
-        }
-
-        if (is_running_)
-        {
-            return;
-        }
-
-        auto now = std::chrono::high_resolution_clock::now();
-        const std::chrono::duration<double> dur = now - start_;
-        const auto total_elap_seconds = dur.count();
-        const auto pct_time_sleeping = (total_sleep_seconds_ / total_elap_seconds) * 100;
-        const auto pct_time_working = 100 - pct_time_sleeping;
-
-        std::cout << "Thread containing:\n";
-        for (const auto runnable : runnables_)
-        {
-            runnable->print(std::cout, 4);
-        }
-
-        [[maybe_unused]] ios_format_saver fmt_saver(std::cout);
-        std::cout << "\n";
-        std::cout << "    Performance report:\n";
-        std::cout << "        Num times run:      " << num_times_run_ << "\n";
-        std::cout << "        Pct time sleeping:  " << std::fixed << std::setprecision(1) << pct_time_sleeping << "%\n";
-        std::cout << "        Pct time working:   " << std::fixed << std::setprecision(1) << pct_time_working << "%\n";
-        std::cout << "\n";
-    }
-
 private:
     void loop_()
     {
@@ -271,9 +372,15 @@ private:
                     continue;
                 }
 
-                if (runner->processOne(force) == PipelineAction::PROCEED)
+                const auto action = runner->processOne(force);
+                auto& poll_metrics = runnable_poll_metrics_[runner];
+                if (action == PipelineAction::PROCEED)
                 {
                     processed = true;
+                    ++poll_metrics.proceed_count;
+                } else
+                {
+                    ++poll_metrics.sleep_count;
                 }
             }
             if (!processed)
@@ -302,6 +409,9 @@ private:
     std::chrono::high_resolution_clock::time_point start_;
     uint64_t num_times_run_ = 0;
     double total_sleep_seconds_ = 0;
+    std::unordered_map<Runnable*, RunnablePollMetrics> runnable_poll_metrics_;
+
+    friend class PollingThreadPool;
 };
 
 /// Defined here so we can avoid circular includes
