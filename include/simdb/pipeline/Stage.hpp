@@ -161,12 +161,4 @@ private:
     std::unique_ptr<DatabaseAccessor> db_accessor_;
 };
 
-/// TODO cnyce:
-///   -> if simulators are doing their own filesystem stuff in the main thread (e.g. file loggers)
-///      then concurrent filesystem access is going to ruin SimDB performance
-///   -> provide a general-purpose utility which can handle arbitrary filesystem flushes on the
-///      dedicated DB thread
-
-/// TODO cnyce: ThreadPool stage 1st class citizen
-
 } // namespace simdb::pipeline
