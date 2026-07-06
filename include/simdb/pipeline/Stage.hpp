@@ -170,6 +170,6 @@ private:
 /// TODO cnyce: CompressionStage
 ///   -> perform zlib compression with automatic tuning of the compression ratio variable at runtime
 
-/// TODO cnyce: ThreadPool stage 1st class citizen 
+/// TODO cnyce: ThreadPool stage 1st class citizen
 
 } // namespace simdb::pipeline
