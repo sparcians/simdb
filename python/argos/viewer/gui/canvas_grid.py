@@ -348,6 +348,7 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = self._widget.hide_empty_rows
             show_full_paths = self._widget.show_full_paths
             enable_tooltips = self._widget.enable_tooltips
+            show_did = self._widget.show_did
         else:
             elem_paths = []
             num_ticks_before = SchedulingLinesWidget.DEFAULT_TICKS_BEFORE
@@ -356,8 +357,9 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = SchedulingLinesWidget.DEFAULT_HIDE_EMPTY_ROWS
             show_full_paths = SchedulingLinesWidget.DEFAULT_SHOW_FULL_PATHS
             enable_tooltips = SchedulingLinesWidget.DEFAULT_ENABLE_TOOLTIPS
+            show_did = SchedulingLinesWidget.DEFAULT_SHOW_DID
 
-        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips)
+        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did)
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
@@ -367,8 +369,9 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = dlg.hide_empty_rows
             show_full_paths = dlg.show_full_paths
             enable_tooltips = dlg.enable_tooltips
+            show_did = dlg.show_did
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did)
                 self.SetWidget(widget)
             else:
                 wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)
@@ -420,7 +423,8 @@ class WidgetQuickLinks(wx.Panel):
             for label, callback in links:
                 row = wx.BoxSizer(wx.HORIZONTAL)
                 bullet = wx.StaticText(self, label="\u2022")
-                link = wx.adv.HyperlinkCtrl(self, label=label)
+                link = wx.adv.HyperlinkCtrl(
+                    self, label=label, style=wx.adv.HL_DEFAULT_STYLE & ~wx.adv.HL_CONTEXTMENU)
                 link.Bind(wx.adv.EVT_HYPERLINK, lambda evt, cb=callback: cb())
                 row.Add(bullet, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8)
                 row.Add(link)

@@ -78,22 +78,6 @@ class QueueUtilizWidget(wx.Panel):
 
         wx.CallAfter(self.UpdateWidgetData)
 
-    def __OnSimElemInitDrag(self, event):
-        text_elem = event.GetEventObject()
-
-        if text_elem in self._elem_path_text_boxes:
-            if text_elem.HasCapture():
-                text_elem.ReleaseMouse()
-            else:
-                text_elem.CaptureMouse()
-                data = wx.TextDataObject('IterableStruct$' + text_elem.GetLabel())
-                drag_source = wx.DropSource(text_elem)
-                drag_source.SetData(data)
-                drag_source.DoDragDrop(wx.Drag_DefaultMove)
-                text_elem.ReleaseMouse()
-
-            event.Skip()
-
     def __EditWidget(self, event):
         dlg = WidgetDataSelectionsDlg(
             self, self.frame, self.container_elem_paths, queues_only=True,
@@ -128,9 +112,6 @@ class QueueUtilizWidget(wx.Panel):
         for elem_path, utiliz_bar in zip(self._elem_path_text_boxes, self._utiliz_bars):
             sizer.Add(elem_path)
             sizer.Add(utiliz_bar)
-
-        for text_elem in self._elem_path_text_boxes:
-            text_elem.Bind(wx.EVT_LEFT_DOWN, self.__OnSimElemInitDrag)
 
         font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         for elem in self._elem_path_text_boxes:

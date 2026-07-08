@@ -11,8 +11,9 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_HIDE_EMPTY_ROWS = True
     DEFAULT_SHOW_FULL_PATHS = False
     DEFAULT_ENABLE_TOOLTIPS = False
+    DEFAULT_SHOW_DID = False
 
-    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, show_full_paths=DEFAULT_SHOW_FULL_PATHS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS):
+    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, show_full_paths=DEFAULT_SHOW_FULL_PATHS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
         super().__init__(parent)
         self.frame = frame
         self.num_ticks_before = num_ticks_before
@@ -21,6 +22,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.hide_empty_rows = hide_empty_rows
         self.show_full_paths = show_full_paths
         self.enable_tooltips = enable_tooltips
+        self.show_did = show_did
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
         self.grid = None
@@ -36,6 +38,34 @@ class SchedulingLinesWidget(wx.Panel):
 
         if elem_paths:
             self.SetElements(elem_paths)
+
+    @staticmethod
+    def GetRootDataTypeName(frame, elem_path):
+        collection_id = frame.simhier.GetCollectionID(elem_path)
+        dtype = frame.dtype_inspector.GetDataTypeForCollectionID(collection_id)
+        if not dtype:
+            return None
+
+        idx = dtype.find('_sparse_capacity')
+        if idx != -1:
+            return dtype[:idx]
+
+        idx = dtype.find('_contig_capacity')
+        if idx != -1:
+            return dtype[:idx]
+
+        return dtype
+
+    @classmethod
+    def ElemPathHasDidField(cls, frame, elem_path):
+        dtype = cls.GetRootDataTypeName(frame, elem_path)
+        if not dtype:
+            return False
+        return frame.dtype_inspector.GetEffectiveColorKey(dtype) == 'DID'
+
+    @classmethod
+    def AnyElemPathHasDidField(cls, frame, elem_paths):
+        return any(cls.ElemPathHasDidField(frame, elem_path) for elem_path in elem_paths)
 
     def GetWidgetCreationString(self):
         return 'Scheduling Lines'
@@ -112,6 +142,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['hide_empty_rows'] = self.hide_empty_rows
         settings['show_full_paths'] = self.show_full_paths
         settings['enable_tooltips'] = self.enable_tooltips
+        settings['show_did'] = self.show_did
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
     
@@ -124,8 +155,9 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_ticks_after != settings['num_ticks_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
                 self.hide_empty_rows != settings['hide_empty_rows'] or \
-                self.show_full_paths != settings.get('show_full_paths', False) or \
-                self.enable_tooltips != settings.get('enable_tooltips', False) or \
+                self.show_full_paths != settings['show_full_paths'] or \
+                self.enable_tooltips != settings['enable_tooltips'] or \
+                self.show_did != settings['show_did'] or \
                 self.tracked_annos != settings['tracked_annos']
 
         if not dirty:
@@ -136,8 +168,9 @@ class SchedulingLinesWidget(wx.Panel):
         self.num_ticks_after = settings['num_ticks_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
         self.hide_empty_rows = settings['hide_empty_rows']
-        self.show_full_paths = settings.get('show_full_paths', False)
-        self.enable_tooltips = settings.get('enable_tooltips', False)
+        self.show_full_paths = settings['show_full_paths']
+        self.enable_tooltips = settings['enable_tooltips']
+        self.show_did = settings['show_did']
         self.tracked_annos = settings['tracked_annos']
 
         self.__Refresh()
@@ -282,6 +315,15 @@ class SchedulingLinesWidget(wx.Panel):
             else:
                 self.grid.SetColLabelValue(col, '')
 
+        if self.show_detailed_queue_packets:
+            detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 2
+            self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
+            if int(current_tick) in time_vals:
+                self.grid.SetColLabelValue(detailed_pkt_col, str(current_tick))
+                col_labels.append(str(current_tick))
+            else:
+                self.grid.SetColLabelValue(detailed_pkt_col, '')
+
         # Use a DC to get the length of the longest col label
         dc = wx.ScreenDC()
         dc.SetFont(self.grid.GetLabelFont())
@@ -311,10 +353,6 @@ class SchedulingLinesWidget(wx.Panel):
             self.grid.SetCellBorder(row, self.num_ticks_before + 1, 1, wx.LEFT)
 
         self.__SetElementCaptions(0)
-        if self.show_detailed_queue_packets:
-            # Clear the column labels for the detailed queue packets section
-            for i in range(self.num_ticks_before + self.num_ticks_after + 1, self.grid.GetNumberCols()):
-                self.grid.SetColLabelValue(i, '')
 
     def __RasterizeAllCells(self):
         for elem_path, vals in self._ranges.items():
@@ -367,7 +405,7 @@ class SchedulingLinesWidget(wx.Panel):
                 labels_by_dtype[dtype].append(labels[row])
 
             for row, label in enumerate(labels):
-                if 'DID' in label:
+                if not self.show_did and 'DID' in label:
                     parts = label.split()
                     new_label_parts = []
                     for p in parts:
@@ -533,13 +571,16 @@ class SchedulingLinesWidget(wx.Panel):
         return self.caption_mgr.GetCaption(elem_path, segment['bin'], elem_paths, self.show_full_paths)
 
     def __GetCaptionColumnTooltip(self, elem_path, segment, caption):
-        if not self.enable_tooltips:
-            return None
-
         full_tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
         if caption.rstrip() == full_tooltip:
             return None
-        return full_tooltip
+
+        if not self.show_full_paths:
+            return full_tooltip
+
+        if self.enable_tooltips:
+            return full_tooltip
+        return None
 
     def __SegmentElemPathTooltip(self, elem_path, segment):
         if segment['kind'] == 'no_data':
@@ -553,13 +594,13 @@ class SchedulingLinesWidget(wx.Panel):
         return '{}[{}]'.format(elem_path, segment['bin'])
     
     def __OnGridMouseMotion(self, evt):
-        if not self.enable_tooltips:
-            self.grid.UnsetToolTip()
-            return
-
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
-        tooltip = self.grid.GetCellToolTip(row, col)
+
+        if col == 0 or self.enable_tooltips:
+            tooltip = self.grid.GetCellToolTip(row, col)
+        else:
+            tooltip = None
 
         if tooltip:
             self.grid.SetToolTip(tooltip)
@@ -738,11 +779,13 @@ class Rasterizer:
         auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key)
 
         anno = []
-        for k,v in annos:
-            anno.append('{}({})'.format(k,v))
+        for k, v in annos:
+            if k == 'DID' and not self.widget.show_did:
+                continue
+            anno.append('{}({})'.format(k, v))
 
-        stringized_anno = ' '.join(anno)
         stringized_tooltip = '\n'.join(anno)
+        stringized_anno = ' '.join(anno)
 
         tracked_annos = self.widget.tracked_annos
         show_border = auto_colorize_column in tracked_annos and tracked_annos[auto_colorize_column] == auto_colorize_key

@@ -1,5 +1,6 @@
 import wx
 from functools import partial
+from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
 
 class WidgetDataSelectionsDlg(wx.Dialog):
     def __init__(
@@ -477,7 +478,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
 class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     def __init__(
-        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, title="Edit Data Selections",
+        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did, title="Edit Data Selections",
     ):
 
         WidgetDataSelectionsDlg.__init__(self, parent, frame, elem_paths, queues_only=True)
@@ -527,6 +528,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
         self._enable_tooltips_chkbox.SetValue(enable_tooltips)
         sizer.Add(self._enable_tooltips_chkbox, 0, wx.TOP, 5)
 
+        self._show_did_chkbox = wx.CheckBox(self, label='Show DID')
+        self._show_did_chkbox.SetValue(show_did)
+        sizer.Add(self._show_did_chkbox, 0, wx.TOP, 5)
+
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
 
     @property
@@ -552,6 +557,13 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     @property
     def enable_tooltips(self):
         return self._enable_tooltips_chkbox.IsChecked()
+
+    @property
+    def show_did(self):
+        return self._show_did_chkbox.IsChecked()
+
+    def __UpdateButtonStates(self, *args):
+        WidgetDataSelectionsDlg.__UpdateButtonStates(self, *args)
 
     def __SyncWithSliderTicks(self, evt):
         value = self._slider_ticks_before.GetValue()
