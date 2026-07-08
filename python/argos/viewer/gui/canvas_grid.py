@@ -346,14 +346,18 @@ class WidgetContainer(wx.Panel):
             num_ticks_after = self._widget.num_ticks_after
             show_details = self._widget.show_detailed_queue_packets
             hide_empty_rows = self._widget.hide_empty_rows
+            show_full_paths = self._widget.show_full_paths
+            enable_tooltips = self._widget.enable_tooltips
         else:
             elem_paths = []
             num_ticks_before = SchedulingLinesWidget.DEFAULT_TICKS_BEFORE
             num_ticks_after = SchedulingLinesWidget.DEFAULT_TICKS_AFTER
-            show_details = True
-            hide_empty_rows = True
+            show_details = SchedulingLinesWidget.DEFAULT_SHOW_DETAILS
+            hide_empty_rows = SchedulingLinesWidget.DEFAULT_HIDE_EMPTY_ROWS
+            show_full_paths = SchedulingLinesWidget.DEFAULT_SHOW_FULL_PATHS
+            enable_tooltips = SchedulingLinesWidget.DEFAULT_ENABLE_TOOLTIPS
 
-        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows)
+        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips)
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
@@ -361,8 +365,10 @@ class WidgetContainer(wx.Panel):
             num_ticks_after = dlg.num_ticks_after
             show_details = dlg.show_details
             hide_empty_rows = dlg.hide_empty_rows
+            show_full_paths = dlg.show_full_paths
+            enable_tooltips = dlg.enable_tooltips
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips)
                 self.SetWidget(widget)
             else:
                 wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)

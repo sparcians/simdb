@@ -7,15 +7,20 @@ from functools import partial
 class SchedulingLinesWidget(wx.Panel):
     DEFAULT_TICKS_BEFORE = 10
     DEFAULT_TICKS_AFTER = 10
+    DEFAULT_SHOW_DETAILS = True
+    DEFAULT_HIDE_EMPTY_ROWS = True
+    DEFAULT_SHOW_FULL_PATHS = False
+    DEFAULT_ENABLE_TOOLTIPS = False
 
-    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=True, hide_empty_rows=True):
+    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, show_full_paths=DEFAULT_SHOW_FULL_PATHS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS):
         super().__init__(parent)
         self.frame = frame
         self.num_ticks_before = num_ticks_before
         self.num_ticks_after = num_ticks_after
         self.show_detailed_queue_packets = show_details
         self.hide_empty_rows = hide_empty_rows
-        self.enable_tooltips = False
+        self.show_full_paths = show_full_paths
+        self.enable_tooltips = enable_tooltips
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
         self.grid = None
@@ -53,7 +58,7 @@ class SchedulingLinesWidget(wx.Panel):
             for row in range(self.grid.GetNumberRows()):
                 existing_captions.add(self.grid.GetCellValue(row, 0).rstrip())
 
-            todo_captions = self.__GetCaptionsForElement(elem_path)
+            todo_captions = self.__GetCaptionsForElement(elem_path, self.__GetCaptionElemPathsIncluding(elem_path))
             for caption in todo_captions:
                 if caption in existing_captions:
                     msg = 'Adding this to the Scheduling Lines widget would result in a duplicate caption(s). '
@@ -105,6 +110,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['num_ticks_after'] = self.num_ticks_after
         settings['show_detailed_queue_packets'] = self.show_detailed_queue_packets
         settings['hide_empty_rows'] = self.hide_empty_rows
+        settings['show_full_paths'] = self.show_full_paths
         settings['enable_tooltips'] = self.enable_tooltips
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
@@ -118,6 +124,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_ticks_after != settings['num_ticks_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
                 self.hide_empty_rows != settings['hide_empty_rows'] or \
+                self.show_full_paths != settings.get('show_full_paths', False) or \
                 self.enable_tooltips != settings.get('enable_tooltips', False) or \
                 self.tracked_annos != settings['tracked_annos']
 
@@ -129,6 +136,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.num_ticks_after = settings['num_ticks_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
         self.hide_empty_rows = settings['hide_empty_rows']
+        self.show_full_paths = settings.get('show_full_paths', False)
         self.enable_tooltips = settings.get('enable_tooltips', False)
         self.tracked_annos = settings['tracked_annos']
 
@@ -185,6 +193,7 @@ class SchedulingLinesWidget(wx.Panel):
             start_time = self.frame.widget_renderer.tick - self.num_ticks_before
             end_time = self.frame.widget_renderer.tick + self.num_ticks_after
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
+            self._caption_elem_paths = elem_paths
             self._ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
             self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, elem_paths)
             self._layouts_by_elem_path = {}
@@ -214,7 +223,6 @@ class SchedulingLinesWidget(wx.Panel):
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         self._struct_dtypes_by_row = {}
-        self._elem_paths_by_row = {}
         num_rows = 0
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
             collection_id = self.frame.simhier.GetCollectionID(elem_path)
@@ -232,7 +240,6 @@ class SchedulingLinesWidget(wx.Panel):
             for i, segment in enumerate(layout):
                 row = num_rows + i
                 self._struct_dtypes_by_row[row] = dtype
-                self._elem_paths_by_row[row] = self.__SegmentElemPathTooltip(elem_path, segment)
 
             num_rows += len(layout)
 
@@ -401,10 +408,13 @@ class SchedulingLinesWidget(wx.Panel):
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
             for segment in self._layouts_by_elem_path[elem_path]:
                 caption = self.__FormatSegmentCaption(elem_path, segment)
-                tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
+                tooltip = self.__GetCaptionColumnTooltip(elem_path, segment, caption)
 
                 captions.append(caption)
-                self.grid.SetCellToolTip(row, col, tooltip)
+                if tooltip:
+                    self.grid.SetCellToolTip(row, col, tooltip)
+                else:
+                    self.grid.UnsetCellToolTip(row, col)
                 row += 1
 
         max_num_chars = max([len(caption) for caption in captions])
@@ -438,9 +448,15 @@ class SchedulingLinesWidget(wx.Panel):
 
         return len(layout)
 
-    def __GetCaptionsForElement(self, elem_path):
+    def __GetCaptionElemPathsIncluding(self, elem_path):
+        elem_paths = list(self.caption_mgr.GetAllMatchingElemPaths())
+        if elem_path not in elem_paths:
+            elem_paths.append(elem_path)
+        return elem_paths
+
+    def __GetCaptionsForElement(self, elem_path, elem_paths=None):
         segments = self.__BuildStaticRowLayout(elem_path)
-        return [self.__FormatSegmentCaption(elem_path, segment) for segment in segments]
+        return [self.__FormatSegmentCaption(elem_path, segment, elem_paths) for segment in segments]
 
     def __GetBinsWithDataByElemPath(self, ranges, elem_paths):
         bins_with_data_by_elem_path = {}
@@ -500,17 +516,30 @@ class SchedulingLinesWidget(wx.Panel):
             segments.append({'kind': 'range', 'lo': 0, 'hi': run_hi})
         return segments
 
-    def __FormatSegmentCaption(self, elem_path, segment):
+    def __FormatSegmentCaption(self, elem_path, segment, elem_paths=None):
+        if elem_paths is None:
+            elem_paths = self._caption_elem_paths
+
         if segment['kind'] == 'no_data':
-            return '{}(no data)'.format(self.caption_mgr.GetCaptionPrefix(elem_path))
+            return '{}(no data)'.format(
+                self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths))
         if segment['kind'] == 'range':
-            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
+            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths)
             lo = segment['lo']
             hi = segment['hi']
             if lo == hi:
                 return '{}[{}]'.format(caption_prefix, lo)
             return '{}[{}-{}]'.format(caption_prefix, lo, hi)
-        return self.caption_mgr.GetCaption(elem_path, segment['bin'])
+        return self.caption_mgr.GetCaption(elem_path, segment['bin'], elem_paths, self.show_full_paths)
+
+    def __GetCaptionColumnTooltip(self, elem_path, segment, caption):
+        if not self.enable_tooltips:
+            return None
+
+        full_tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
+        if caption.rstrip() == full_tooltip:
+            return None
+        return full_tooltip
 
     def __SegmentElemPathTooltip(self, elem_path, segment):
         if segment['kind'] == 'no_data':
@@ -530,11 +559,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
-
-        if col == 0 and row in self._elem_paths_by_row:
-            tooltip = self._elem_paths_by_row[row]
-        else:
-            tooltip = self.grid.GetCellToolTip(row, col)
+        tooltip = self.grid.GetCellToolTip(row, col)
 
         if tooltip:
             self.grid.SetToolTip(tooltip)
@@ -546,9 +571,28 @@ class SchedulingLinesWidget(wx.Panel):
         widget_container.LaunchSchedulingLinesViewer()
 
 class CaptionManager:
+    MINIMUM_CAPTION_PATH_PARTS = 2
+
     def __init__(self, simhier):
         self.simhier = simhier
         self.ClearSelections()
+
+    @classmethod
+    def GetMinimumUniqueSuffix(cls, elem_path, elem_paths, min_parts=MINIMUM_CAPTION_PATH_PARTS):
+        parts = elem_path.split('.')
+        all_parts = [path.split('.') for path in elem_paths]
+
+        for suffix_len in range(1, len(parts) + 1):
+            my_suffix = parts[-suffix_len:]
+            matches = sum(
+                1 for other_parts in all_parts
+                if len(other_parts) >= suffix_len and other_parts[-suffix_len:] == my_suffix
+            )
+            if matches == 1:
+                display_len = max(min_parts, suffix_len)
+                return '.'.join(parts[-display_len:])
+
+        return elem_path
 
     def ClearSelections(self):
         self.regex_replacements_by_elem_path_regex = OrderedDict()
@@ -571,7 +615,10 @@ class CaptionManager:
 
         return d
 
-    def GetCaption(self, elem_path, bin_idx):
+    def GetCaption(self, elem_path, bin_idx, elem_paths=None, show_full_paths=False):
+        if elem_paths is None:
+            elem_paths = self.GetAllMatchingElemPaths()
+
         for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
             if regex == elem_path:
                 # No regex was supplied in the settings dialog. The full path was given e.g.
@@ -582,7 +629,7 @@ class CaptionManager:
                 #
                 # We will just return the last part of the path as the caption using
                 # heads-up camel case e.g. "NumInstsRetired[3]"
-                return self.GetCaptionPrefix(elem_path) + '[{}]'.format(bin_idx)
+                return self.GetCaptionPrefix(elem_path, elem_paths, show_full_paths) + '[{}]'.format(bin_idx)
 
             if re.compile(regex).match(elem_path):
                 # This matched an elem path e.g.
@@ -598,11 +645,19 @@ class CaptionManager:
                 #                                               core index
                 return re.sub(regex, replacements, elem_path) + '[{}]'.format(bin_idx)
 
-        return f'{elem_path}[{bin_idx}]'
+        prefix = elem_path if show_full_paths else self.GetMinimumUniqueSuffix(elem_path, elem_paths)
+        return f'{prefix}[{bin_idx}]'
     
-    def GetCaptionPrefix(self, elem_path):
+    def GetCaptionPrefix(self, elem_path, elem_paths=None, show_full_paths=False):
+        if elem_paths is None:
+            elem_paths = self.GetAllMatchingElemPaths()
+
         for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
             if regex == elem_path:
+                if replacements == elem_path:
+                    if show_full_paths:
+                        return elem_path
+                    return self.GetMinimumUniqueSuffix(elem_path, elem_paths)
                 return replacements
 
             if re.compile(regex).match(elem_path):
@@ -705,7 +760,8 @@ class Rasterizer:
             if col_label == int(time_val):
                 self.grid.SetCellValue(self.row, col, auto_label)
                 self.grid.SetCellBackgroundColour(self.row, col, auto_color)
-                self.grid.SetCellToolTip(self.row, col, stringized_tooltip)
+                if self.widget.enable_tooltips:
+                    self.grid.SetCellToolTip(self.row, col, stringized_tooltip)
 
                 border_width = 1 if show_border else self.grid.GetCellBorderWidth(self.row, col)
                 border_side = wx.ALL if show_border else self.grid.GetCellBorderSide(self.row, col)
@@ -723,6 +779,7 @@ class Rasterizer:
             self.grid.SetCellValue(self.row, self.detailed_pkt_col, stringized_anno)
             self.grid.SetCellAlignment(self.row, self.detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
             self.grid.SetCellBackgroundColour(self.row, self.detailed_pkt_col, auto_color)
-            self.grid.SetCellToolTip(self.row, self.detailed_pkt_col, stringized_tooltip)
+            if self.widget.enable_tooltips:
+                self.grid.SetCellToolTip(self.row, self.detailed_pkt_col, stringized_tooltip)
             if show_border:
                 self.grid.SetCellBorder(self.row, self.detailed_pkt_col, 1, wx.ALL)
