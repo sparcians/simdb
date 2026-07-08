@@ -477,7 +477,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
 class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     def __init__(
-        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, title="Edit Data Selections",
+        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, title="Edit Data Selections",
     ):
 
         WidgetDataSelectionsDlg.__init__(self, parent, frame, elem_paths, queues_only=True)
@@ -515,6 +515,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
         self._show_details_chkbox.SetValue(show_details)
         sizer.Add(self._show_details_chkbox)
 
+        self._hide_empty_rows_chkbox = wx.CheckBox(self, label='Hide empty rows')
+        self._hide_empty_rows_chkbox.SetValue(hide_empty_rows)
+        sizer.Add(self._hide_empty_rows_chkbox, 0, wx.TOP, 5)
+
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
 
     @property
@@ -528,6 +532,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     @property
     def show_details(self):
         return self._show_details_chkbox.IsChecked()
+
+    @property
+    def hide_empty_rows(self):
+        return self._hide_empty_rows_chkbox.IsChecked()
 
     def __SyncWithSliderTicks(self, evt):
         value = self._slider_ticks_before.GetValue()

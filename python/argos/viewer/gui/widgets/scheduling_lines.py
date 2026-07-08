@@ -8,12 +8,13 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_TICKS_BEFORE = 10
     DEFAULT_TICKS_AFTER = 10
 
-    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=True):
+    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=True, hide_empty_rows=True):
         super().__init__(parent)
         self.frame = frame
         self.num_ticks_before = num_ticks_before
         self.num_ticks_after = num_ticks_after
         self.show_detailed_queue_packets = show_details
+        self.hide_empty_rows = hide_empty_rows
         self.enable_tooltips = False
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
@@ -103,6 +104,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['num_ticks_before'] = self.num_ticks_before
         settings['num_ticks_after'] = self.num_ticks_after
         settings['show_detailed_queue_packets'] = self.show_detailed_queue_packets
+        settings['hide_empty_rows'] = self.hide_empty_rows
         settings['enable_tooltips'] = self.enable_tooltips
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
@@ -115,6 +117,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_ticks_before != settings['num_ticks_before'] or \
                 self.num_ticks_after != settings['num_ticks_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
+                self.hide_empty_rows != settings['hide_empty_rows'] or \
                 self.enable_tooltips != settings.get('enable_tooltips', False) or \
                 self.tracked_annos != settings['tracked_annos']
 
@@ -125,6 +128,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.num_ticks_before = settings['num_ticks_before']
         self.num_ticks_after = settings['num_ticks_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
+        self.hide_empty_rows = settings['hide_empty_rows']
         self.enable_tooltips = settings.get('enable_tooltips', False)
         self.tracked_annos = settings['tracked_annos']
 
@@ -178,6 +182,16 @@ class SchedulingLinesWidget(wx.Panel):
             # would otherwise reset the scroll position back to the top.
             saved_view_start = self.grid.GetViewStart() if self.grid else None
 
+            start_time = self.frame.widget_renderer.tick - self.num_ticks_before
+            end_time = self.frame.widget_renderer.tick + self.num_ticks_after
+            elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
+            self._ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
+            self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, elem_paths)
+            self._layouts_by_elem_path = {}
+            for elem_path in elem_paths:
+                bins_with_data = self._bins_with_data_by_elem_path[elem_path]
+                self._layouts_by_elem_path[elem_path] = self.__BuildRowLayout(elem_path, bins_with_data)
+
             self.SetBackgroundColour('white')
             self.__RegenerateSchedulingLinesGrid(new_grid)
             self.__RasterizeAllCells()
@@ -199,36 +213,28 @@ class SchedulingLinesWidget(wx.Panel):
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # The number of rows can be calculated as:
-        #  1. Go through each element path we are tracking (each is a queue)
-        #     a. For each element path, get the number of bins in each queue (A)
-        #     b. For each element path, note the maximum number of elements seen in the simulation (B)
-        #     c. If A>B, then the number of rows is B+1. Otherwise, the number of rows is A. (C)
-        #  >>> The required number of rows is the sum of all (C) values in the (1) loop.
-
         self._struct_dtypes_by_row = {}
         self._elem_paths_by_row = {}
         num_rows = 0
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
             collection_id = self.frame.simhier.GetCollectionID(elem_path)
-            num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id) # (A)
-            max_size = self.queue_max_sizes_by_collection_id[collection_id]        # (B)
-            elem_num_rows = max_size + 1 if max_size < num_bins else num_bins      # (C)
+            layout = self._layouts_by_elem_path[elem_path]
 
-            for i in range(num_rows, num_rows + elem_num_rows):
-                dtype = self.frame.dtype_inspector.GetDataTypeForCollectionID(collection_id)
-                idx = dtype.find('_sparse_capacity')
+            dtype = self.frame.dtype_inspector.GetDataTypeForCollectionID(collection_id)
+            idx = dtype.find('_sparse_capacity')
+            if idx != -1:
+                dtype = dtype[:idx]
+            else:
+                idx = dtype.find('_contig_capacity')
                 if idx != -1:
                     dtype = dtype[:idx]
-                else:
-                    idx = dtype.find('_contig_capacity')
-                    if idx != -1:
-                        dtype = dtype[:idx]
 
-                self._struct_dtypes_by_row[i] = dtype
-                self._elem_paths_by_row[i] = f'{elem_path}[{i-num_rows}]'
+            for i, segment in enumerate(layout):
+                row = num_rows + i
+                self._struct_dtypes_by_row[row] = dtype
+                self._elem_paths_by_row[row] = self.__SegmentElemPathTooltip(elem_path, segment)
 
-            num_rows += elem_num_rows
+            num_rows += len(layout)
 
         # The number of columns can be calculated as:
         #  1. Start with the sum of self.num_ticks_before and self.num_ticks_after (A)
@@ -304,12 +310,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.grid.SetColLabelValue(i, '')
 
     def __RasterizeAllCells(self):
-        start_time = self.frame.widget_renderer.tick - self.num_ticks_before
-        end_time = self.frame.widget_renderer.tick + self.num_ticks_after
-        elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
-
-        ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
-        for elem_path, vals in ranges.items():
+        for elem_path, vals in self._ranges.items():
             time_vals = vals['TimeVals']
             data_vals = vals['DataVals']
 
@@ -398,14 +399,9 @@ class SchedulingLinesWidget(wx.Panel):
         row = 0
         captions = []
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
-            elem_captions = self.__GetCaptionsForElement(elem_path)
-            for caption in elem_captions:
-                match = re.match(r'(.+)\[(\d+)(?:-(\d+))?\]', caption)
-                assert match
-                bracket = match.group(2)
-                if match.group(3) is not None:
-                    bracket += '-' + match.group(3)
-                tooltip = elem_path + '[' + bracket + ']'
+            for segment in self._layouts_by_elem_path[elem_path]:
+                caption = self.__FormatSegmentCaption(elem_path, segment)
+                tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
 
                 captions.append(caption)
                 self.grid.SetCellToolTip(row, col, tooltip)
@@ -428,58 +424,104 @@ class SchedulingLinesWidget(wx.Panel):
             row_offset += self.__SetCaptionsForElement(elem_path, row_offset, col, max_num_chars, detailed_pkt_col)
 
     def __SetCaptionsForElement(self, elem_path, row_offset, col, max_num_chars, detailed_pkt_col):
-        collection_id = self.frame.simhier.GetCollectionID(elem_path)
-        num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
-        max_size = self.queue_max_sizes_by_collection_id[collection_id]
+        layout = self._layouts_by_elem_path[elem_path]
 
-        if max_size < num_bins:
-            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
-            caption = '{}[{}-{}]'.format(caption_prefix, max_size-1, num_bins-1)
-            caption += ' '*(max_num_chars - len(caption))
-            self.grid.SetCellValue(row_offset, col, caption)
+        for i, segment in enumerate(layout):
+            caption = self.__FormatSegmentCaption(elem_path, segment)
+            caption += ' ' * (max_num_chars - len(caption))
+            self.grid.SetCellValue(row_offset + i, col, caption)
 
-            for i in range(1, max_size):
-                bin_idx = max_size - i - 1
-                caption = self.caption_mgr.GetCaption(elem_path, bin_idx)
-                caption += ' '*(max_num_chars - len(caption))
-                self.grid.SetCellValue(row_offset + i, col, caption)
-                self.rasterizers[(elem_path, bin_idx)] = Rasterizer(self.frame, self.grid, self, elem_path, bin_idx, row_offset + i, detailed_pkt_col)
+            if segment['kind'] == 'bin':
+                bin_idx = segment['bin']
+                self.rasterizers[(elem_path, bin_idx)] = Rasterizer(
+                    self.frame, self.grid, self, elem_path, bin_idx, row_offset + i, detailed_pkt_col)
 
-            return max_size + 1
-        else:
-            for i in range(num_bins):
-                bin_idx = num_bins - i - 1
-                caption = self.caption_mgr.GetCaption(elem_path, bin_idx)
-                caption += ' '*(max_num_chars - len(caption))
-                self.grid.SetCellValue(row_offset + i, col, caption)
-                self.rasterizers[(elem_path, bin_idx)] = Rasterizer(self.frame, self.grid, self, elem_path, bin_idx, row_offset + i, detailed_pkt_col)
-
-            return num_bins
+        return len(layout)
 
     def __GetCaptionsForElement(self, elem_path):
+        segments = self.__BuildStaticRowLayout(elem_path)
+        return [self.__FormatSegmentCaption(elem_path, segment) for segment in segments]
+
+    def __GetBinsWithDataByElemPath(self, ranges, elem_paths):
+        bins_with_data_by_elem_path = {}
+        for elem_path in elem_paths:
+            bins_with_data = set()
+            vals = ranges.get(elem_path, {'DataVals': []})
+            for data_dicts in vals['DataVals']:
+                if data_dicts is None:
+                    continue
+                for bin_idx, annos in enumerate(data_dicts):
+                    if annos is not None:
+                        bins_with_data.add(bin_idx)
+            bins_with_data_by_elem_path[elem_path] = bins_with_data
+        return bins_with_data_by_elem_path
+
+    def __BuildRowLayout(self, elem_path, bins_with_data):
+        if self.hide_empty_rows:
+            return self.__BuildDynamicRowLayout(elem_path, bins_with_data)
+        return self.__BuildStaticRowLayout(elem_path)
+
+    def __BuildStaticRowLayout(self, elem_path):
         collection_id = self.frame.simhier.GetCollectionID(elem_path)
         num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
         max_size = self.queue_max_sizes_by_collection_id[collection_id]
 
-        captions = []
-        if max_size < num_bins:
-            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
-            if max_size == 0:
-                captions.append('{}(no data)'.format(caption_prefix))
-            else:
-                captions.append('{}[{}-{}]'.format(caption_prefix, max_size-1, num_bins-1))
+        if max_size == 0:
+            return [{'kind': 'no_data'}]
 
+        segments = []
+        if max_size < num_bins:
+            segments.append({'kind': 'range', 'lo': max_size - 1, 'hi': num_bins - 1})
             for i in range(1, max_size):
                 bin_idx = max_size - i - 1
-                caption = self.caption_mgr.GetCaption(elem_path, bin_idx)
-                captions.append(caption)
+                segments.append({'kind': 'bin', 'bin': bin_idx})
         else:
             for i in range(num_bins):
                 bin_idx = num_bins - i - 1
-                caption = self.caption_mgr.GetCaption(elem_path, bin_idx)
-                captions.append(caption)
+                segments.append({'kind': 'bin', 'bin': bin_idx})
+        return segments
 
-        return captions
+    def __BuildDynamicRowLayout(self, elem_path, bins_with_data):
+        collection_id = self.frame.simhier.GetCollectionID(elem_path)
+        num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
+
+        segments = []
+        run_hi = None
+        for bin_idx in range(num_bins - 1, -1, -1):
+            if bin_idx in bins_with_data:
+                if run_hi is not None:
+                    segments.append({'kind': 'range', 'lo': bin_idx + 1, 'hi': run_hi})
+                    run_hi = None
+                segments.append({'kind': 'bin', 'bin': bin_idx})
+            elif run_hi is None:
+                run_hi = bin_idx
+
+        if run_hi is not None:
+            segments.append({'kind': 'range', 'lo': 0, 'hi': run_hi})
+        return segments
+
+    def __FormatSegmentCaption(self, elem_path, segment):
+        if segment['kind'] == 'no_data':
+            return '{}(no data)'.format(self.caption_mgr.GetCaptionPrefix(elem_path))
+        if segment['kind'] == 'range':
+            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
+            lo = segment['lo']
+            hi = segment['hi']
+            if lo == hi:
+                return '{}[{}]'.format(caption_prefix, lo)
+            return '{}[{}-{}]'.format(caption_prefix, lo, hi)
+        return self.caption_mgr.GetCaption(elem_path, segment['bin'])
+
+    def __SegmentElemPathTooltip(self, elem_path, segment):
+        if segment['kind'] == 'no_data':
+            return elem_path
+        if segment['kind'] == 'range':
+            lo = segment['lo']
+            hi = segment['hi']
+            if lo == hi:
+                return '{}[{}]'.format(elem_path, lo)
+            return '{}[{}-{}]'.format(elem_path, lo, hi)
+        return '{}[{}]'.format(elem_path, segment['bin'])
     
     def __OnGridMouseMotion(self, evt):
         if not self.enable_tooltips:
