@@ -1,16 +1,18 @@
 import wx
 from functools import partial
-from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
 
 class WidgetDataSelectionsDlg(wx.Dialog):
     def __init__(
-        self, parent, frame, elem_paths, queues_only=False, single_selection=False, title="Edit Data Selections",
+        self, parent, frame, elem_paths, queues_only=False, single_selection=False,
+        settings_chkboxes=None, title="Edit Data Selections",
     ):
         _, screen_h = wx.GetDisplaySize()
         super().__init__(parent, title=title, size=(600, int(screen_h * 0.75)))
 
         self.frame = frame
         self.simhier = frame.simhier
+        self._settings_chkboxes = settings_chkboxes or []
+        self._settings_chkboxes_by_label = {}
         if queues_only:
             self._all_leaf_paths = sorted(self.simhier.GetContainerElemPaths())
         else:
@@ -74,6 +76,8 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             list_sizer.Add(arrow_btns_sizer)
             sizer.Add(list_sizer)
 
+        self._BuildSettingsArea(sizer)
+
         sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizer(sizer)
 
@@ -89,6 +93,31 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         self.__BuildTree()
         self.__BuildSelectionsList()
         self.__UpdateButtonStates()
+
+    def _OnWidgetCheckbox(self, label, checked):
+        raise RuntimeError("Not implemented")
+
+    def GetSettingCheckbox(self, label):
+        return self._settings_chkboxes_by_label[label].IsChecked()
+
+    def _BuildSettingsArea(self, sizer):
+        if not self._settings_chkboxes:
+            return
+
+        for i, (label, checked) in enumerate(self._settings_chkboxes):
+            chkbox = wx.CheckBox(self, label=label)
+            chkbox.SetValue(checked)
+            if i == 0:
+                sizer.Add(chkbox)
+            else:
+                sizer.Add(chkbox, 0, wx.TOP, 5)
+            chkbox.Bind(wx.EVT_CHECKBOX, partial(self.__OnSettingsCheckbox, label=label))
+            self._settings_chkboxes_by_label[label] = chkbox
+
+    def __OnSettingsCheckbox(self, evt, label):
+        if self._settings_chkboxes:
+            self._OnWidgetCheckbox(label, evt.IsChecked())
+        evt.Skip()
 
     def GetSelectedElemPaths(self):
         if self._single_selection:
@@ -476,63 +505,102 @@ class WidgetDataSelectionsDlg(wx.Dialog):
                 visible_paths.add('.'.join(parts[:i]))
         return visible_paths
 
+class QueueUtilizEditDlg(WidgetDataSelectionsDlg):
+    SHOW_FULL_PATHS_LABEL = 'Show full paths'
+
+    def __init__(self, parent, frame, elem_paths, show_full_paths, title="Edit Data Selections"):
+        chkboxes = [(self.SHOW_FULL_PATHS_LABEL, show_full_paths)]
+        WidgetDataSelectionsDlg.__init__(
+            self, parent, frame, elem_paths, queues_only=True,
+            settings_chkboxes=chkboxes, title=title,
+        )
+
+    def _OnWidgetCheckbox(self, label, checked):
+        pass
+
+    @property
+    def show_full_paths(self):
+        return self.GetSettingCheckbox(self.SHOW_FULL_PATHS_LABEL)
+
+class SummaryViewsEditDlg(WidgetDataSelectionsDlg):
+    SHOW_FULL_PATHS_LABEL = 'Show full paths'
+    SHOW_DID_LABEL = 'Show DID'
+
+    def __init__(self, parent, frame, elem_paths, show_full_paths, show_did, title="Edit Data Selections"):
+        chkboxes = [
+            (self.SHOW_FULL_PATHS_LABEL, show_full_paths),
+            (self.SHOW_DID_LABEL, show_did),
+        ]
+        WidgetDataSelectionsDlg.__init__(
+            self, parent, frame, elem_paths,
+            settings_chkboxes=chkboxes, title=title,
+        )
+
+    def _OnWidgetCheckbox(self, label, checked):
+        pass
+
+    @property
+    def show_full_paths(self):
+        return self.GetSettingCheckbox(self.SHOW_FULL_PATHS_LABEL)
+
+    @property
+    def show_did(self):
+        return self.GetSettingCheckbox(self.SHOW_DID_LABEL)
+
 class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
+    SHOW_DETAILS_LABEL = 'Show detailed queue packets'
+    HIDE_EMPTY_ROWS_LABEL = 'Hide empty rows'
+    SHOW_FULL_PATHS_LABEL = 'Show full paths'
+    ENABLE_TOOLTIPS_LABEL = 'Enable tooltips'
+    SHOW_DID_LABEL = 'Show DID'
+
     def __init__(
         self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did, title="Edit Data Selections",
     ):
+        self._num_ticks_before = num_ticks_before
+        self._num_ticks_after = num_ticks_after
+        chkboxes = [
+            (self.SHOW_DETAILS_LABEL, show_details),
+            (self.HIDE_EMPTY_ROWS_LABEL, hide_empty_rows),
+            (self.SHOW_FULL_PATHS_LABEL, show_full_paths),
+            (self.ENABLE_TOOLTIPS_LABEL, enable_tooltips),
+            (self.SHOW_DID_LABEL, show_did),
+        ]
+        WidgetDataSelectionsDlg.__init__(
+            self, parent, frame, elem_paths, queues_only=True, settings_chkboxes=chkboxes,
+        )
 
-        WidgetDataSelectionsDlg.__init__(self, parent, frame, elem_paths, queues_only=True)
-
-        sizer = self.GetSizer()
-        count = sizer.GetItemCount()
-        btn_sizer = sizer.GetItem(count - 1).GetSizer()
-        sizer.Detach(btn_sizer)
-
-        assert num_ticks_before >= 1 and num_ticks_before <= 25
+    def _BuildSettingsArea(self, sizer):
+        assert self._num_ticks_before >= 1 and self._num_ticks_before <= 25
         info_ticks_before = wx.StaticText(self, label='Num ticks before current tick:')
-        self._label_ticks_before = wx.StaticText(self, label=f'({num_ticks_before})')
-        self._slider_ticks_before = wx.Slider(self, value=num_ticks_before, minValue=1, maxValue=25)
+        self._label_ticks_before = wx.StaticText(self, label=f'({self._num_ticks_before})')
+        self._slider_ticks_before = wx.Slider(
+            self, value=self._num_ticks_before, minValue=1, maxValue=25)
         self._slider_ticks_before.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
 
-        assert num_ticks_after >= 1 and num_ticks_after <= 25
+        assert self._num_ticks_after >= 1 and self._num_ticks_after <= 25
         info_ticks_after = wx.StaticText(self, label='Num ticks after current tick:')
-        self._label_ticks_after = wx.StaticText(self, label=f'({num_ticks_after})')
-        self._slider_ticks_after = wx.Slider(self, value=num_ticks_after, minValue=1, maxValue=25)
+        self._label_ticks_after = wx.StaticText(self, label=f'({self._num_ticks_after})')
+        self._slider_ticks_after = wx.Slider(
+            self, value=self._num_ticks_after, minValue=1, maxValue=25)
         self._slider_ticks_after.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
 
         gb_sizer = wx.GridBagSizer(vgap=10, hgap=12)
-        gb_sizer.Add(info_ticks_before, pos=(0,0))
-        gb_sizer.Add(self._slider_ticks_before, pos=(0,1), flag=wx.EXPAND)
-        gb_sizer.Add(self._label_ticks_before, pos=(0,2))
+        gb_sizer.Add(info_ticks_before, pos=(0, 0))
+        gb_sizer.Add(self._slider_ticks_before, pos=(0, 1), flag=wx.EXPAND)
+        gb_sizer.Add(self._label_ticks_before, pos=(0, 2))
 
-        gb_sizer.Add(info_ticks_after, pos=(1,0))
-        gb_sizer.Add(self._slider_ticks_after, pos=(1,1), flag=wx.EXPAND)
-        gb_sizer.Add(self._label_ticks_after, pos=(1,2))
+        gb_sizer.Add(info_ticks_after, pos=(1, 0))
+        gb_sizer.Add(self._slider_ticks_after, pos=(1, 1), flag=wx.EXPAND)
+        gb_sizer.Add(self._label_ticks_after, pos=(1, 2))
 
         gb_sizer.AddGrowableCol(1)
         sizer.Add(gb_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
 
-        self._show_details_chkbox = wx.CheckBox(self, label='Show detailed queue packets')
-        self._show_details_chkbox.SetValue(show_details)
-        sizer.Add(self._show_details_chkbox)
+        WidgetDataSelectionsDlg._BuildSettingsArea(self, sizer)
 
-        self._hide_empty_rows_chkbox = wx.CheckBox(self, label='Hide empty rows')
-        self._hide_empty_rows_chkbox.SetValue(hide_empty_rows)
-        sizer.Add(self._hide_empty_rows_chkbox, 0, wx.TOP, 5)
-
-        self._show_full_paths_chkbox = wx.CheckBox(self, label='Show full paths')
-        self._show_full_paths_chkbox.SetValue(show_full_paths)
-        sizer.Add(self._show_full_paths_chkbox, 0, wx.TOP, 5)
-
-        self._enable_tooltips_chkbox = wx.CheckBox(self, label='Enable tooltips')
-        self._enable_tooltips_chkbox.SetValue(enable_tooltips)
-        sizer.Add(self._enable_tooltips_chkbox, 0, wx.TOP, 5)
-
-        self._show_did_chkbox = wx.CheckBox(self, label='Show DID')
-        self._show_did_chkbox.SetValue(show_did)
-        sizer.Add(self._show_did_chkbox, 0, wx.TOP, 5)
-
-        sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+    def _OnWidgetCheckbox(self, label, checked):
+        pass
 
     @property
     def num_ticks_before(self):
@@ -544,23 +612,23 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
 
     @property
     def show_details(self):
-        return self._show_details_chkbox.IsChecked()
+        return self.GetSettingCheckbox(self.SHOW_DETAILS_LABEL)
 
     @property
     def hide_empty_rows(self):
-        return self._hide_empty_rows_chkbox.IsChecked()
+        return self.GetSettingCheckbox(self.HIDE_EMPTY_ROWS_LABEL)
 
     @property
     def show_full_paths(self):
-        return self._show_full_paths_chkbox.IsChecked()
+        return self.GetSettingCheckbox(self.SHOW_FULL_PATHS_LABEL)
 
     @property
     def enable_tooltips(self):
-        return self._enable_tooltips_chkbox.IsChecked()
+        return self.GetSettingCheckbox(self.ENABLE_TOOLTIPS_LABEL)
 
     @property
     def show_did(self):
-        return self._show_did_chkbox.IsChecked()
+        return self.GetSettingCheckbox(self.SHOW_DID_LABEL)
 
     def __UpdateButtonStates(self, *args):
         WidgetDataSelectionsDlg.__UpdateButtonStates(self, *args)

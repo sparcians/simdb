@@ -1,12 +1,16 @@
 import wx, copy
-from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
+from viewer.gui.dialogs.widget_data_selections import QueueUtilizEditDlg
 from viewer.gui.view_settings import DirtyReasons
+from viewer.gui.widgets.scheduling_lines import CaptionManager
 
 class QueueUtilizWidget(wx.Panel):
-    def __init__(self, parent, frame, elem_paths=None):
+    DEFAULT_SHOW_FULL_PATHS = False
+
+    def __init__(self, parent, frame, elem_paths=None, show_full_paths=DEFAULT_SHOW_FULL_PATHS):
         super().__init__(parent)
         self.SetBackgroundColour('white')
         self.frame = frame
+        self.show_full_paths = show_full_paths
 
         # Get all container sim paths from the simhier
         self.container_elem_paths = elem_paths if elem_paths else self.frame.simhier.GetContainerElemPaths()
@@ -62,16 +66,20 @@ class QueueUtilizWidget(wx.Panel):
     def GetCurrentViewSettings(self):
         settings = {}
         settings['displayed_elem_paths'] = self.container_elem_paths
+        settings['show_full_paths'] = self.show_full_paths
         return settings
     
     def GetCurrentUserSettings(self):
         return {}
 
     def ApplyViewSettings(self, settings):
-        if self.container_elem_paths == settings['displayed_elem_paths']:
+        show_full_paths = settings.get('show_full_paths', self.DEFAULT_SHOW_FULL_PATHS)
+        if self.container_elem_paths == settings['displayed_elem_paths'] and \
+                self.show_full_paths == show_full_paths:
             return
         
         self.container_elem_paths = copy.deepcopy(settings['displayed_elem_paths'])
+        self.show_full_paths = show_full_paths
         self.__LayoutComponents()
         self.UpdateWidgetData()
         self.frame.view_settings.SetDirty(reason=DirtyReasons.QueueUtilizDispQueueChanged)
@@ -79,13 +87,21 @@ class QueueUtilizWidget(wx.Panel):
         wx.CallAfter(self.UpdateWidgetData)
 
     def __EditWidget(self, event):
-        dlg = WidgetDataSelectionsDlg(
-            self, self.frame, self.container_elem_paths, queues_only=True,
+        dlg = QueueUtilizEditDlg(
+            self, self.frame, self.container_elem_paths, self.show_full_paths,
         )
         if dlg.ShowModal() == wx.ID_OK:
-            self.ApplyViewSettings({'displayed_elem_paths': dlg.GetSelectedElemPaths()})
+            self.ApplyViewSettings({
+                'displayed_elem_paths': dlg.GetSelectedElemPaths(),
+                'show_full_paths': dlg.show_full_paths,
+            })
 
         dlg.Destroy()
+
+    def __FormatElemPathLabel(self, elem_path):
+        if self.show_full_paths:
+            return elem_path
+        return CaptionManager.GetMinimumUniqueSuffix(elem_path, self.container_elem_paths)
 
     def __LayoutComponents(self):
         had_sizer = self.panel.GetSizer() is not None
@@ -106,7 +122,13 @@ class QueueUtilizWidget(wx.Panel):
             assert len(self._elem_path_text_boxes) == 0
             assert len(self._utiliz_bars) == 0
 
-        self._elem_path_text_boxes = [wx.StaticText(self.panel, label=elem_path) for elem_path in self.container_elem_paths]
+        self._elem_path_text_boxes = []
+        for elem_path in self.container_elem_paths:
+            label_text = self.__FormatElemPathLabel(elem_path)
+            label_ctrl = wx.StaticText(self.panel, label=label_text)
+            CaptionManager.ApplyPartialPathTooltip(
+                label_ctrl, elem_path, label_text, self.show_full_paths)
+            self._elem_path_text_boxes.append(label_ctrl)
         self._utiliz_bars = [UtilizBar(self.panel, self.frame) for _ in range(len(self.container_elem_paths))]
 
         for elem_path, utiliz_bar in zip(self._elem_path_text_boxes, self._utiliz_bars):

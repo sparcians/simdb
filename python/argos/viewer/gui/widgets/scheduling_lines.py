@@ -635,6 +635,13 @@ class CaptionManager:
 
         return elem_path
 
+    @classmethod
+    def ApplyPartialPathTooltip(cls, control, full_path, label_text, show_full_paths):
+        if not show_full_paths and label_text.rstrip() != full_path:
+            control.SetToolTip(full_path)
+        else:
+            control.UnsetToolTip()
+
     def ClearSelections(self):
         self.regex_replacements_by_elem_path_regex = OrderedDict()
 

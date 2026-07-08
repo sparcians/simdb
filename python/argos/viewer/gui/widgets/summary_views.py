@@ -2,12 +2,18 @@ import wx, re
 from collections import OrderedDict
 from viewer.model.data_deserializers import StructDeserializer
 from viewer.gui.view_settings import DirtyReasons
-from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
+from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
+from viewer.gui.widgets.scheduling_lines import CaptionManager
 
 class SummaryViews(wx.Panel):
-    def __init__(self, parent, frame):
+    DEFAULT_SHOW_FULL_PATHS = True
+    DEFAULT_SHOW_DID = False
+
+    def __init__(self, parent, frame, show_full_paths=DEFAULT_SHOW_FULL_PATHS, show_did=DEFAULT_SHOW_DID):
         super().__init__(parent)
         self.frame = frame
+        self.show_full_paths = show_full_paths
+        self.show_did = show_did
         self.summary_scroller = None
         self.summary = None
         self._summary_grid_dirty = True
@@ -36,26 +42,37 @@ class SummaryViews(wx.Panel):
     def GetCurrentViewSettings(self):
         settings = {}
         settings['elem_paths'] = self.elem_paths
+        settings['show_full_paths'] = self.show_full_paths
+        settings['show_did'] = self.show_did
         return settings
 
     def GetCurrentUserSettings(self):
         return {}
 
     def ApplyViewSettings(self, settings):
+        show_full_paths = settings.get('show_full_paths', self.DEFAULT_SHOW_FULL_PATHS)
+        show_did = settings.get('show_did', self.DEFAULT_SHOW_DID)
+        paths_changed = self.elem_paths != settings['elem_paths']
         dirty = (
-            self.elem_paths != settings['elem_paths']
+            paths_changed
+            or self.show_full_paths != show_full_paths
+            or self.show_did != show_did
             or self._summary_grid_dirty
         )
         if not dirty:
             return
 
+        if paths_changed or self.show_full_paths != show_full_paths:
+            self._summary_grid_dirty = True
+
         self._elem_paths_by_cid = {
             self.frame.simhier.GetCollectionID(path):path
             for path in settings['elem_paths']
         }
+        self.show_full_paths = show_full_paths
+        self.show_did = show_did
 
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SummaryViewsWidgetChanged)
-        self._summary_grid_dirty = True
         self.__Refresh()
 
     def AddElement(self, elem_path):
@@ -68,16 +85,20 @@ class SummaryViews(wx.Panel):
         self.__Refresh()
 
     def EditWidget(self, evt, title="Edit Data Selections"):
-        dlg = WidgetDataSelectionsDlg(
-            self, self.frame, self.elem_paths, title=title
+        dlg = SummaryViewsEditDlg(
+            self, self.frame, self.elem_paths, self.show_full_paths, self.show_did, title=title,
         )
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
+            show_full_paths = dlg.show_full_paths
+            show_did = dlg.show_did
         dlg.Destroy()
         if result == wx.ID_OK:
             self.ApplyViewSettings({
                 'elem_paths': elem_paths,
+                'show_full_paths': show_full_paths,
+                'show_did': show_did,
             })
             return True
         else:
@@ -173,15 +194,26 @@ class SummaryGrid(wx.Panel):
         mono10_bold = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
 
         max_label_len = 0
+        parent_paths = list(collectable_grps.keys())
         for parent, leaves in collectable_grps.items():
-            max_label_len = max(max_label_len, len(parent))
+            if summary_views.show_full_paths:
+                parent_label_text = parent
+            else:
+                parent_label_text = CaptionManager.GetMinimumUniqueSuffix(parent, parent_paths)
+            max_label_len = max(max_label_len, len(parent_label_text))
             for leaf in leaves:
                 max_label_len = max(max_label_len, len(leaf))
 
         row = 0
         for parent, leaves in collectable_grps.items():
-            parent_label = wx.StaticText(self, label=parent)
+            if summary_views.show_full_paths:
+                parent_label_text = parent
+            else:
+                parent_label_text = CaptionManager.GetMinimumUniqueSuffix(parent, parent_paths)
+            parent_label = wx.StaticText(self, label=parent_label_text)
             parent_label.SetFont(mono10_bold)
+            CaptionManager.ApplyPartialPathTooltip(
+                parent_label, parent, parent_label_text, summary_views.show_full_paths)
             grid_sizer.Add(parent_label, pos=(row,0))
             row += 1
 
@@ -195,6 +227,8 @@ class SummaryGrid(wx.Panel):
                 label += leaf
                 leaf_label = wx.StaticText(self, label=label)
                 leaf_label.SetFont(mono10)
+                CaptionManager.ApplyPartialPathTooltip(
+                    leaf_label, full_path, label, summary_views.show_full_paths)
                 grid_sizer.Add(leaf_label, pos=(row,0))
 
                 leaf_cid = frame.simhier.GetCollectionID(full_path)
@@ -206,7 +240,7 @@ class SummaryGrid(wx.Panel):
                     if dtype_name in ('char', 'unsigned char', 'short', 'unsigned short', 'int', 'unsigned int', 'long', 'unsigned long'):
                         summary_handler = SummaryGrid.IntegerSummary(self, frame)
                     elif isinstance(frame.dtype_inspector.GetDeserializer(dtype_name), StructDeserializer):
-                        summary_handler = SummaryGrid.StructSummary(self, frame)
+                        summary_handler = SummaryGrid.StructSummary(self, frame, summary_views)
                     else:
                         summary_handler = SummaryGrid.SimpleSummary(self, frame)
 
@@ -258,16 +292,17 @@ class SummaryGrid(wx.Panel):
             self.SetLabel(value)
 
     class StructSummary(wx.StaticText):
-        def __init__(self, parent, frame):
+        def __init__(self, parent, frame, summary_views):
             wx.StaticText.__init__(self, parent, label='TODO')
             self.frame = frame
+            self.summary_views = summary_views
             self.auto_color = True
 
         def UpdateValue(self, value):
             label = []
             if value is not None:
                 for field_name, field_value in value:
-                    if field_name == 'DID':
+                    if field_name == 'DID' and not self.summary_views.show_did:
                         continue
                     field_value = str(field_value)
                     field_value = re.sub(r'\s+', ' ', field_value)
@@ -277,6 +312,7 @@ class SummaryGrid(wx.Panel):
                 self.SetToolTip(label)
             else:
                 self.SetLabel('(no data)')
+                self.UnsetToolTip()
 
         def __HandleContextMenu(self, evt, auto_color):
             self.auto_color = auto_color
