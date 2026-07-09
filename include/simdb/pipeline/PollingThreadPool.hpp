@@ -144,10 +144,6 @@ public:
     /// \brief Return all worker threads (for pause/disable integration).
     std::vector<PollingThread*> getWorkerThreads() const;
 
-    /// \brief Return all threads the pool manager should treat as polling threads:
-    ///        worker threads plus an optional dedicated DatabaseThread.
-    std::vector<PollingThread*> getAllManagedThreads(DatabaseThread* database_thread = nullptr) const;
-
     /// \brief Return registered runnables in global definition order.
     std::vector<Runnable*> getRegisteredRunnables() const;
 
@@ -287,16 +283,6 @@ inline std::vector<PollingThread*> PollingThreadPool::getWorkerThreads() const
     return threads;
 }
 
-inline std::vector<PollingThread*> PollingThreadPool::getAllManagedThreads(DatabaseThread* database_thread) const
-{
-    auto threads = getWorkerThreads();
-    if (database_thread)
-    {
-        threads.push_back(database_thread);
-    }
-    return threads;
-}
-
 inline std::vector<Runnable*> PollingThreadPool::getRegisteredRunnables() const
 {
     std::vector<Runnable*> runnables;
@@ -393,7 +379,7 @@ inline void PollingThreadPool::rebalanceOnce_()
                 size_t count = 0;
                 for (const auto& snap : snapshots)
                 {
-                    const auto* snap_group = findWorkerGroupForThread_(snap.thread);
+                    const auto snap_group = findWorkerGroupForThread_(snap.thread);
                     if (snap_group && snap_group->interval_ms == group.interval_ms)
                     {
                         sum_busy += snap.recent_busy_ratio;
@@ -493,7 +479,7 @@ inline void PollingThreadPool::distributeInitialRunnables_()
     std::map<size_t, size_t> worker_idx_by_interval;
     for (auto& reg : registrations_)
     {
-        auto* group = findWorkerGroupForInterval_(reg.interval_ms);
+        auto group = findWorkerGroupForInterval_(reg.interval_ms);
         if (!group || group->workers.empty())
         {
             throw DBException("Internal error: no worker group for runnable interval");
@@ -571,7 +557,7 @@ inline std::vector<ThreadLoadSnapshot> PollingThreadPool::snapshotAllWorkers_() 
 inline PollingThread* PollingThreadPool::findStealDestination_(const ThreadLoadSnapshot& source,
                                                                const std::vector<ThreadLoadSnapshot>& snapshots) const
 {
-    const auto* source_group = findWorkerGroupForThread_(source.thread);
+    const auto source_group = findWorkerGroupForThread_(source.thread);
     if (!source_group)
     {
         return nullptr;
@@ -585,7 +571,7 @@ inline PollingThread* PollingThreadPool::findStealDestination_(const ThreadLoadS
         {
             continue;
         }
-        const auto* dest_group = findWorkerGroupForThread_(snap.thread);
+        const auto dest_group = findWorkerGroupForThread_(snap.thread);
         if (!dest_group || dest_group->interval_ms != source_group->interval_ms)
         {
             continue;
@@ -669,15 +655,15 @@ inline void PollingThreadPool::growPool_(size_t interval_ms)
     {
         return;
     }
-    auto* group = findWorkerGroupForInterval_(interval_ms);
+    auto group = findWorkerGroupForInterval_(interval_ms);
     if (!group)
     {
         return;
     }
     auto worker = createWorker_(interval_ms);
-    auto* worker_ptr = worker.get();
+    auto worker_ptr = worker.get();
     group->workers.emplace_back(std::move(worker));
-    worker_ptr->openAllowEmpty();
+    worker_ptr->open();
     ++num_grows_;
     updatePeakWorkerCount_();
 }
@@ -737,7 +723,7 @@ inline void PollingThreadPool::shrinkPool_(const std::vector<ThreadLoadSnapshot>
                 {
                     continue;
                 }
-                const auto* other_group = findWorkerGroupForThread_(other_snap.thread);
+                const auto other_group = findWorkerGroupForThread_(other_snap.thread);
                 if (!other_group || other_group->interval_ms != group->interval_ms)
                 {
                     continue;
@@ -934,7 +920,7 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
     {
         for (auto& worker : group.workers)
         {
-            auto* worker_ptr = worker.get();
+            auto worker_ptr = worker.get();
             const auto metrics = worker_ptr->getMetrics();
             if (metrics.is_running && !worker_ptr->paused())
             {
@@ -945,7 +931,7 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
     }
 
     const auto resume_workers = [&paused_workers]() {
-        for (auto* worker_ptr : paused_workers)
+        for (auto worker_ptr : paused_workers)
         {
             worker_ptr->resume();
         }

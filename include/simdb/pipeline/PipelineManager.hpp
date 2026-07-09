@@ -147,7 +147,11 @@ public:
     {
         checkOpen_();
 
-        const auto managed_threads = thread_pool_.getAllManagedThreads(database_thread_.get());
+        auto threads = thread_pool_.getWorkerThreads();
+        if (database_thread_)
+        {
+            threads.push_back(database_thread_.get());
+        }
 
         thread_pool_.close();
         if (database_thread_)
@@ -160,14 +164,13 @@ public:
         {
             continue_while = false;
 
-            for (auto* thread : managed_threads)
+            for (auto thread : threads)
             {
                 continue_while |= thread->flushRunnables();
             }
         } while (continue_while);
 
         thread_pool_.printPerfReport();
-
         closed_ = true;
     }
 
@@ -208,7 +211,11 @@ private:
             return;
         }
 
-        disabler_threads_ = thread_pool_.getAllManagedThreads(database_thread_.get());
+        disabler_threads_ = thread_pool_.getWorkerThreads();
+        if (database_thread_)
+        {
+            disabler_threads_.push_back(database_thread_.get());
+        }
 
         // Ensure unique
         auto it = std::unique(disabler_threads_.begin(), disabler_threads_.end());

@@ -162,21 +162,6 @@ public:
         return true;
     }
 
-    /// \brief Open the polling loop even with zero Runnables (pool workers may start empty).
-    /// \note Used by PollingThreadPool when growing the pool before runnables are stolen in.
-    void openAllowEmpty()
-    {
-        if (thread_)
-        {
-            return;
-        }
-        stop_requested_ = false;
-        paused_ = false;
-        is_running_ = true;
-        start_ = std::chrono::high_resolution_clock::now();
-        thread_ = std::make_unique<std::thread>(&PollingThread::loop_, this);
-    }
-
     /// \brief Reorder this thread's Runnables to match the order in \p runnables (only those
     /// that belong to this thread).
     void ensureRelativeOrder(const std::vector<Runnable*>& runnables)
@@ -227,14 +212,9 @@ public:
         return did_work;
     }
 
-    /// \brief Start the polling thread (must have at least one Runnable).
+    /// \brief Start the polling thread.
     virtual void open()
     {
-        if (runnables_.empty())
-        {
-            return;
-        }
-
         if (!thread_)
         {
             stop_requested_ = false;
