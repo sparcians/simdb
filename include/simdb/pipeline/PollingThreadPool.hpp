@@ -943,8 +943,7 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
         }
     }
 
-    const auto resume_workers = [&paused_workers]()
-    {
+    const auto resume_workers = [&paused_workers]() {
         for (auto worker : paused_workers)
         {
             worker->resume();
@@ -1014,9 +1013,7 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
         sorted_regs.push_back(&reg);
     }
 
-    std::sort(sorted_regs.begin(), sorted_regs.end(),
-              [](const RunnableRegistration* a, const RunnableRegistration* b)
-    {
+    std::sort(sorted_regs.begin(), sorted_regs.end(), [](const RunnableRegistration* a, const RunnableRegistration* b) {
         return a->global_order < b->global_order;
     });
 
