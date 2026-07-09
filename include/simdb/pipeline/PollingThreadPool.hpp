@@ -73,20 +73,28 @@ public:
     {
         /// Minimum number of worker PollingThreads kept open while the pool is running.
         size_t min_threads = 1;
+
         /// Maximum number of worker PollingThreads the pool may create.
         size_t max_threads = 0; // 0 => std::thread::hardware_concurrency()
+
         /// Default sleep interval for newly created workers (ms).
         size_t default_interval_ms = 100;
+
         /// How often the balancer re-evaluates load and may steal or resize.
-        std::chrono::milliseconds rebalance_period{500};
+        std::chrono::milliseconds rebalance_period_ms{500};
+
         /// Steal source: thread recent_busy_ratio must exceed this (0..1).
         double steal_busy_threshold = 0.70;
+
         /// Steal destination: thread recent_busy_ratio must be below this (0..1).
         double steal_idle_threshold = 0.30;
+
         /// Grow pool when every worker exceeds this busy ratio (0..1).
         double grow_all_busy_threshold = 0.80;
+
         /// Shrink candidate: worker busy ratio below this and runnable count <= shrink_max_runnables.
         double shrink_idle_threshold = 0.10;
+
         /// Max runnables on a thread eligible for shrink (typically 0 or 1).
         size_t shrink_max_runnables = 0;
     };
@@ -98,7 +106,15 @@ public:
         {
             config_.max_threads = std::max(size_t{1}, static_cast<size_t>(std::thread::hardware_concurrency()));
         }
-        config_.min_threads = std::max(size_t{1}, std::min(config_.min_threads, config_.max_threads));
+        if (config_.min_threads > config_.max_threads)
+        {
+            throw DBException("Pool min threads cannot be greater than pool max threads");
+        }
+        if (config_.min_threads == 0)
+        {
+            std::cout << "Zero pool min threads ignored; using 1 min thread" << std::endl;
+            config_.min_threads = 1;
+        }
     }
 
     PollingThreadPool() :
@@ -186,7 +202,6 @@ private:
     void resetWorkerPollMetrics_();
     double runnableProceedPct_(const RunnableRegistration& reg) const;
     double workerProceedPct_(PollingThread* worker) const;
-    void updatePeakWorkerCount_();
     std::string formatWorkerLabel_(PollingThread* thread) const;
     std::unique_ptr<PollingThread> createWorker_(size_t interval_ms);
 
@@ -307,7 +322,7 @@ inline void PollingThreadPool::rebalanceLoop_()
 {
     while (!stop_balancer_)
     {
-        std::this_thread::sleep_for(config_.rebalance_period);
+        std::this_thread::sleep_for(config_.rebalance_period_ms);
         if (stop_balancer_)
         {
             break;
@@ -425,14 +440,16 @@ inline void PollingThreadPool::createInitialWorkers_()
         group.interval_ms = interval_ms;
         for (size_t i = 0; i < workers_per_group; ++i)
         {
-            group.workers.push_back(createWorker_(interval_ms));
+            group.workers.push_back(std::make_unique<PollingThread>(interval_ms));
         }
         worker_groups_.push_back(std::move(group));
     }
 
     while (totalWorkerCount_() < config_.min_threads)
     {
-        worker_groups_.front().workers.push_back(createWorker_(worker_groups_.front().interval_ms));
+        const auto interval_ms = worker_groups_.front().interval_ms;
+        auto worker = std::make_unique<PollingThread>(interval_ms);
+        worker_groups_.front().workers.emplace_back(std::move(worker));
     }
 }
 
@@ -482,7 +499,7 @@ inline void PollingThreadPool::distributeInitialRunnables_()
         auto group = findWorkerGroupForInterval_(reg.interval_ms);
         if (!group || group->workers.empty())
         {
-            throw DBException("Internal error: no worker group for runnable interval");
+            throw DBException("No worker group for runnable interval");
         }
 
         size_t& worker_idx = worker_idx_by_interval[reg.interval_ms];
@@ -628,7 +645,7 @@ inline void PollingThreadPool::migrateRunnable_(Runnable* runnable, PollingThrea
     if (!from->removeRunnableWhilePaused(runnable))
     {
         from->resume();
-        throw DBException("Internal error: failed to remove runnable during migration");
+        throw DBException("Failed to remove runnable during migration");
     }
     to->pause();
     to->addRunnableWhilePaused(runnable);
@@ -651,21 +668,24 @@ inline void PollingThreadPool::migrateRunnable_(Runnable* runnable, PollingThrea
 
 inline void PollingThreadPool::growPool_(size_t interval_ms)
 {
-    if (totalWorkerCount_() >= config_.max_threads)
+    auto worker_count = totalWorkerCount_();
+    if (worker_count >= config_.max_threads)
     {
         return;
     }
+
     auto group = findWorkerGroupForInterval_(interval_ms);
     if (!group)
     {
         return;
     }
+
     auto worker = createWorker_(interval_ms);
-    auto worker_ptr = worker.get();
+    worker->open();
     group->workers.emplace_back(std::move(worker));
-    worker_ptr->open();
+
     ++num_grows_;
-    updatePeakWorkerCount_();
+    peak_worker_count_ = std::max(peak_worker_count_, worker_count);
 }
 
 inline void PollingThreadPool::shrinkPool_(const std::vector<ThreadLoadSnapshot>& snapshots)
@@ -807,11 +827,6 @@ inline void PollingThreadPool::resetWorkerPollMetrics_()
     }
 }
 
-inline void PollingThreadPool::updatePeakWorkerCount_()
-{
-    peak_worker_count_ = std::max(peak_worker_count_, totalWorkerCount_());
-}
-
 inline double PollingThreadPool::runnableProceedPct_(const RunnableRegistration& reg) const
 {
     uint64_t proceed = reg.lifetime_proceed_count;
@@ -915,25 +930,24 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
     }
 
     std::vector<PollingThread*> paused_workers;
-    paused_workers.reserve(totalWorkerCount_());
     for (auto& group : worker_groups_)
     {
         for (auto& worker : group.workers)
         {
-            auto worker_ptr = worker.get();
-            const auto metrics = worker_ptr->getMetrics();
-            if (metrics.is_running && !worker_ptr->paused())
+            const auto metrics = worker->getMetrics();
+            if (metrics.is_running && !worker->paused())
             {
-                worker_ptr->pause();
-                paused_workers.push_back(worker_ptr);
+                worker->pause();
+                paused_workers.push_back(worker.get());
             }
         }
     }
 
-    const auto resume_workers = [&paused_workers]() {
-        for (auto worker_ptr : paused_workers)
+    const auto resume_workers = [&paused_workers]()
+    {
+        for (auto worker : paused_workers)
         {
-            worker_ptr->resume();
+            worker->resume();
         }
     };
 
@@ -999,7 +1013,10 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
     {
         sorted_regs.push_back(&reg);
     }
-    std::sort(sorted_regs.begin(), sorted_regs.end(), [](const RunnableRegistration* a, const RunnableRegistration* b) {
+
+    std::sort(sorted_regs.begin(), sorted_regs.end(),
+              [](const RunnableRegistration* a, const RunnableRegistration* b)
+    {
         return a->global_order < b->global_order;
     });
 
@@ -1049,7 +1066,7 @@ inline void PollingThreadPool::printPerfReport(std::ostream& os)
     }
 
     os << "\n    Configuration:\n";
-    os << "        rebalance_period:        " << config_.rebalance_period.count() << "ms\n";
+    os << "        rebalance_period_ms:        " << config_.rebalance_period_ms.count() << "ms\n";
     os << "        steal_busy_threshold:    " << config_.steal_busy_threshold << "\n";
     os << "        steal_idle_threshold:    " << config_.steal_idle_threshold << "\n";
     os << "        grow_all_busy_threshold: " << config_.grow_all_busy_threshold << "\n";
