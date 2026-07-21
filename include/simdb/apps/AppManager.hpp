@@ -306,35 +306,6 @@ public:
         return nullptr;
     }
 
-    /// Optionally call this method after initializePipelines(), but before
-    /// openPipelines(). This will reduce the number of non-database threads
-    /// to the minimum across all app pipelines.
-    ///
-    /// Note that you can either call minimizeThreads() OR minimizeThreads(app1,
-    /// app2, ...) but you cannot call both.
-    void minimizeThreads()
-    {
-        if (!pipeline_mgr_)
-        {
-            throw DBException("Pipeline manager not set - did you call "
-                              "initializePipelines()?");
-        }
-        pipeline_mgr_->minimizeThreads();
-    }
-
-    /// Optionally call this method after initializePipelines(), but before
-    /// openPipelines(). This will share the minimum number of non-database
-    /// threads across the given apps' pipelines.
-    template <typename... Apps> void minimizeThreads(const App* app, Apps&&... rest)
-    {
-        if (!pipeline_mgr_)
-        {
-            throw DBException("Pipeline manager not set - did you call "
-                              "initializePipelines()?");
-        }
-        pipeline_mgr_->minimizeThreads(app, std::forward<Apps>(rest)...);
-    }
-
     /// \brief Set the order in which app lifecycle hooks are invoked.
     ///
     /// postInit(), preTeardown(), and postTeardown() are called in this order
@@ -552,8 +523,7 @@ private:
         std::cout << std::endl;
     }
 
-    /// Call this once after initializePipelines() (and after minimizeThreads()
-    /// if you called that too).
+    /// Call this once after initializePipelines().
     void openPipelines_()
     {
         PROFILE_APP_PHASE
@@ -994,8 +964,7 @@ public:
         }
     }
 
-    /// Call this once after initializePipelines() (and after minimizeThreads()
-    /// if you called that too).
+    /// Call this once after initializePipelines().
     void openPipelines()
     {
         for (auto& [app_mgr, _] : getAllManagers())

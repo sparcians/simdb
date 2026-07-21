@@ -135,11 +135,12 @@ public:
         return queue_repo_.getOutPortQueue<T>(port_full_name);
     }
 
-    /// \brief Assign each stage to a PollingThread (or the shared DatabaseThread); call after noMoreBindings().
-    /// \param threads Vector to which new PollingThreads may be appended.
+    /// \brief Assign each stage to the thread pool or the shared DatabaseThread; call after noMoreBindings().
+    /// \param pool Thread pool for non-database stages.
     /// \param database_thread Single shared DatabaseThread for all DatabaseStages (created if null).
-    void assignStageThreads(std::vector<std::unique_ptr<PollingThread>>& threads,
-                            std::unique_ptr<DatabaseThread>& database_thread)
+    /// \param global_order Running index across all pipelines for pool runnable ordering.
+    void assignStageThreads(PollingThreadPool& pool, std::unique_ptr<DatabaseThread>& database_thread,
+                            size_t& global_order)
     {
         if (state_ != State::BINDINGS_COMPLETE)
         {
@@ -149,9 +150,9 @@ public:
 
         queue_repo_.validateQueues();
 
-        for (auto& [stage_name, stage] : stages_)
+        for (const auto& stage_name : stages_in_order_)
         {
-            stage->assignThread_(db_mgr_, threads, database_thread);
+            stages_.at(stage_name)->assignThread_(db_mgr_, pool, database_thread, global_order);
         }
 
         state_ = State::FINALIZED;

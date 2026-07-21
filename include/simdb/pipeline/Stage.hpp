@@ -5,7 +5,7 @@
 #include "simdb/Exceptions.hpp"
 #include "simdb/pipeline/DatabaseAccessor.hpp"
 #include "simdb/pipeline/DatabaseThread.hpp"
-#include "simdb/pipeline/PollingThread.hpp"
+#include "simdb/pipeline/PollingThreadPool.hpp"
 #include "simdb/pipeline/QueueRepo.hpp"
 #include "simdb/pipeline/Runnable.hpp"
 #include <memory>
@@ -25,8 +25,8 @@ class Stage : public Runnable
 {
 protected:
     /// \brief Construct with the polling interval (ms) for the thread when no work is done.
-    /// \param interval_milliseconds Sleep time for the PollingThread; non-database stages
-    ///        that share a thread must use the same interval.
+    /// \param interval_milliseconds Sleep time for the PollingThread; stages sharing a
+    ///        pool worker must use the same interval (workers are grouped by interval).
     Stage(size_t interval_milliseconds = 100) :
         interval_milliseconds_(interval_milliseconds)
     {
@@ -53,11 +53,10 @@ private:
 
     void mergeQueueRepo_(PipelineQueueRepo& master_repo) { master_repo.merge(queue_repo_); }
 
-    virtual void assignThread_(DatabaseManager*, std::vector<std::unique_ptr<PollingThread>>& threads,
-                               std::unique_ptr<DatabaseThread>&)
+    virtual void assignThread_(DatabaseManager*, PollingThreadPool& pool, std::unique_ptr<DatabaseThread>&,
+                               size_t& global_order)
     {
-        threads.emplace_back(std::make_unique<PollingThread>(interval_milliseconds_));
-        threads.back()->addRunnable(this);
+        pool.registerRunnable(this, interval_milliseconds_, global_order++);
     }
 
     void setAsyncDatabaseAccessor_(AsyncDatabaseAccessor* async_db_accessor) { async_db_accessor_ = async_db_accessor; }
@@ -143,9 +142,10 @@ protected:
     }
 
 private:
-    void assignThread_(DatabaseManager* db_mgr, std::vector<std::unique_ptr<PollingThread>>&,
-                       std::unique_ptr<DatabaseThread>& database_thread) override final
+    void assignThread_(DatabaseManager* db_mgr, PollingThreadPool&, std::unique_ptr<DatabaseThread>& database_thread,
+                       size_t& global_order) override final
     {
+        (void)global_order;
         // Prepare the DatabaseAccessor
         db_accessor_ = std::make_unique<DatabaseAccessor>(db_mgr);
 
