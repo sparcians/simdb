@@ -61,7 +61,7 @@ SimDB pipelines are created by defining a series of stages with specific I/O dat
 
 For full pipeline documentation, see `docs/book/book.html`
 
-```
+```c++
 // Stage 1: Accept a timestamp and a vector of stats and compress them
 class CompressionStage : public simdb::pipeline::Stage
 {
@@ -194,7 +194,7 @@ Even though SimDB's main advantage is its implicit integration of pipelines with
 
 ### Database Creation
 
-```
+```c++
 using dt = simdb::SqlDataType;
 
 simdb::Schema schema;
@@ -220,7 +220,7 @@ See test/sqlite/Schema/main.cpp
 
 ### Record INSERT
 
-```
+```c++
 // Without prepared statements:
 db_mgr.INSERT(
     SQL_TABLE("SimStats"),
@@ -250,7 +250,7 @@ See test/sqlite/Insert/main.cpp
 
 Put multiple database operations in a single transaction. This will keep retrying in the event of locked schema tables or other access issues until successful.
 
-```
+```c++
 db_mgr.safeTransaction([&]()
 {
     // Do all transaction work here.
@@ -259,7 +259,7 @@ db_mgr.safeTransaction([&]()
 
 ### Record SELECT
 
-```
+```c++
 // SELECT StatsBlob FROM SimStats
 // WHERE Timestamp >= 100 AND Timestamp <= 200
 auto query = db_mgr.createQuery("SimStats");
