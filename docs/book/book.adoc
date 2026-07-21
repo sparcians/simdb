@@ -1,0 +1,64 @@
+= SimDB: The Complete Guide
+:doctype: book
+:toc: left
+:toclevels: 2
+:sectnums:
+:sectnumlevels: 1
+:icons: font
+:source-highlighter: highlight.js
+:experimental:
+:imagesdir: images
+
+[colophon]
+= About This Book
+
+SimDB is a high-performance, header-only C++17 module that unifies *concurrent
+data pipelines* with *SQLite* to power scalable simulation data engines,
+analysis tooling, and UI backends.
+
+This book is written for a specific reader: the *domain expert* -- a hardware
+architect, performance modeler, or researcher -- who needs to move large volumes
+of simulation data safely and quickly, but who does not write software for a
+living. SimDB's guiding principle is that it should be *easy to use and hard to
+misuse*. This book follows that same principle.
+
+We build understanding in layers:
+
+* *<<part-i,Part I>>* explains _why_ SimDB exists and how it differs from the alternatives.
+* *Parts <<part-ii,II>> and <<part-iii,III>>* get you productive with the standalone SQLite interface.
+* *Parts <<part-iv,IV>> through <<part-vi,VI>>* introduce the concurrent pipeline and app frameworks.
+* *<<part-vii,Part VII>>* is an end-to-end case study of Argos, SimDB's flagship
+  collection-and-visualization application.
+* *Parts <<part-viii,VIII>> and <<part-ix,IX>>* collect patterns, recipes, and reference material.
+
+[NOTE]
+====
+Parts I--IX are drafted in prose with cross-reference links throughout.
+====
+
+// Part I
+include::parts/part1-why-simdb.adoc[]
+
+// Part II
+include::parts/part2-getting-started.adoc[]
+
+// Part III
+include::parts/part3-sqlite-interface.adoc[]
+
+// Part IV
+include::parts/part4-concurrent-pipelines.adoc[]
+
+// Part V
+include::parts/part5-app-framework.adoc[]
+
+// Part VI
+include::parts/part6-advanced-pipelines.adoc[]
+
+// Part VII
+include::parts/part7-argos-case-study.adoc[]
+
+// Part VIII
+include::parts/part8-patterns-cookbook.adoc[]
+
+// Part IX
+include::parts/part9-reference.adoc[]

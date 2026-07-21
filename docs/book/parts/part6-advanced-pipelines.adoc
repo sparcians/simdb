@@ -1,0 +1,631 @@
+[#part-vi]
+= Part VI: Advanced Pipeline Techniques
+
+Once the basics work, these techniques handle synchronization, low-latency
+retrieval of in-flight data, determinism, cross-thread database access, and how
+stages are scheduled onto threads.
+
+[#ch-26-flushers]
+== Flushers
+
+A pipeline is asynchronous by design: data enters through `process`, moves stage
+by stage on the stages' own threads, and the caller never waits for it to land.
+That is exactly what you want almost all of the time. But every so often you need
+the opposite -- a moment where you can say *"stop, finish everything in flight,
+and make it real in the database right now."* That moment is a *flush*, and the
+object that provides it is a `Flusher`.
+
+The two occasions that call for one are worth naming up front:
+
+* *Before you query your own data.* If you want to `count()` the rows written so
+  far, or read back a record your pipeline just produced, the data may still be
+  sitting in a queue between stages. A flush guarantees it has reached -- and been
+  committed by -- the database stage first.
+* *At a controlled stopping point.* During teardown, or before taking a snapshot
+  or checkpoint, you want the queues drained rather than abandoned.
+
+=== What a flush actually does
+
+A flusher holds an ordered list of stages. Calling `flush()` runs each stage's
+`run_()` exhaustively -- `processAll` with `force = true` -- stage by stage, in
+the order given, cycling round-robin until *every* stage reports it has nothing
+left to do (they all return `SLEEP`). The effect is that all in-flight data is
+pushed forward through the pipeline and out its far end, rather than being
+processed lazily on the usual polling cadence.
+
+Because the stages run to completion in order, *order matters*: an upstream stage
+should flush before the downstream stage it feeds, so its output has landed in
+the next stage's input queue before that stage takes its turn. The round-robin
+loop then repeats until the whole chain is quiet.
+
+=== Creating a flusher
+
+You create a flusher inside `createPipeline` and store it on the app, so it is
+available later whenever you need a synchronization point. Naming the stages sets
+the flush order explicitly:
+
+[source,cpp]
+----
+void createPipeline(simdb::pipeline::PipelineManager* pipeline_mgr) override
+{
+    auto pipeline = pipeline_mgr->createPipeline(NAME, this);
+
+    pipeline->addStage<CompressionStage>("compressor");
+    pipeline->addStage<DatabaseStage>("db_writer", getInstance());
+    pipeline->noMoreStages();
+
+    pipeline->bind("compressor.compressed_data", "db_writer.data_to_write");
+    pipeline->noMoreBindings();
+
+    pipeline_head_ = pipeline->getInPortQueue<std::vector<double>>("compressor.input_data");
+
+    // Flush "compressor", then "db_writer".
+    pipeline_flusher_ = pipeline->createFlusher({"compressor", "db_writer"});
+}
+----
+
+If you omit the stage list, the flusher flushes every stage in the order you
+added them with `addStage` -- which is usually the order you want anyway, so the
+common case is simply:
+
+[source,cpp]
+----
+pipeline_flusher_ = pipeline->createFlusher();
+----
+
+`createFlusher` returns a `std::unique_ptr<Flusher>` that you own; store it in a
+member such as `pipeline_flusher_`. Naming a stage that does not exist throws a
+`DBException`.
+
+=== The single-transaction guarantee
+
+Here is the detail that makes flushing cheap enough to rely on. If *any* of the
+flushed stages is a `DatabaseStage`, `createFlusher` does not hand you a plain
+`Flusher` -- it automatically gives you a `FlusherWithTransaction`, which runs the
+entire flush inside one `safeTransaction`:
+
+[source,cpp]
+----
+// Inside FlusherWithTransaction::flush()
+db_mgr_->safeTransaction([&]() { outcome = Flusher::flush(); });
+----
+
+So the whole drain -- however many records the database stage writes -- commits
+as a single `BEGIN`/`COMMIT` rather than one transaction per record. This is the
+same batching principle from <<part-iv,Part IV>> and <<ch-13-transactions,Chapter 13>>, applied automatically at the
+flush boundary: a database stage is assumed to be doing real work, so its flush
+is wrapped for you. You do not choose between the two flusher types; the pipeline
+picks the right one based on whether a database stage is present.
+
+=== Using a flush before a query
+
+The canonical use is the flush-then-read pattern. Because a flush guarantees all
+prior data is committed, a query that follows it sees a consistent, complete
+picture:
+
+[source,cpp]
+----
+size_t getNumCollected()
+{
+    // Drain the compressor, then the db_writer -- all in one transaction.
+    pipeline_flusher_->flush();
+
+    // Everything produced so far is now in the database; count it.
+    auto query = db_mgr_->createQuery("CompressedData");
+    return query->count();
+}
+----
+
+Without the flush, this count could miss records still queued between stages. With
+it, the answer is exact as of the moment of the call.
+
+[WARNING]
+====
+A flush is a hard synchronization point. It does real work on the *calling*
+thread and forces the current batch to commit, so flushing on every item defeats
+the batching that makes the pipeline fast in the first place. Flush when you
+genuinely need a consistency point -- before a query or count, at a checkpoint, or
+during teardown -- not reflexively after each push.
+====
+
+When the data you are after has *not* yet reached the database, a flush followed
+by a query is also the reliable fallback for retrieving it. There is a
+lower-latency alternative that inspects data while it is still moving between
+stages -- snooping -- which is the subject of the next chapter.
+
+[#ch-27-snoopers]
+== Snoopers
+
+A flush answers the question "make everything real so I can query it." But it is
+a heavy answer: it drains the whole pipeline to disk and commits. If what you
+actually need is a single item -- "give me the data for UUID `abc123`, wherever it
+happens to be right now" -- and you need it *often*, flushing every time is
+wasteful. *Snooping* is the lightweight alternative: it peeks into the queues
+*between* stages and returns the item without draining anything or accessing the disk.
+
+=== The idea: a key and a snooped type
+
+Snooping is built around two types you choose:
+
+* a *key* type that uniquely identifies an item (some kind of UUID), and
+* a *snooped* type that every stage can produce for that key.
+
+The subtlety is that each stage stores data in its own in-flight form -- the
+compressor's input holds raw values, its output holds compressed bytes -- yet a
+snoop must return *one* common type regardless of which stage happens to hold the
+item. So each stage's snoop is responsible for converting its internal
+representation back into the shared snooped type. For snooping to work at all,
+the payloads flowing through the queues must carry the key; the examples below
+assume small structs that pair a UUID with the data.
+
+=== Peeking into a queue
+
+The primitive underneath everything is `ConcurrentQueue::snoop`. It takes a
+callback, locks the queue, and invokes the callback on each item in turn until
+the callback returns `true` (found it) or the queue is exhausted:
+
+[source,cpp]
+----
+bool snoop(const std::function<bool(const T& queue_item)>& cb) const;
+----
+
+Because it holds the queue's lock while iterating, a snoop sees a consistent
+snapshot of what is sitting in that queue at that instant.
+
+=== A stage's snoop() method
+
+Each stage that wants to be snoopable implements a method with a fixed signature
+-- `bool snoop(const KeyType&, SnoopedType&)` -- returning `true` and filling the
+out-parameter when it holds the key. Typically it just forwards to its input
+queue's `snoop`. Here the two stages from our running example: the compressor
+holds uncompressed values, so a hit is a direct copy (fast); the database stage
+holds compressed bytes, so a hit must be decompressed first (slower):
+
+[source,cpp]
+----
+using uuid_t   = std::string;
+using values_t = std::vector<double>;
+
+// CompressionStage: input queue holds { uuid, values }
+bool snoop(const uuid_t& uuid, values_t& values)
+{
+    return input_queue_->snoop([&](const Sample& in)
+    {
+        if (in.uuid == uuid)
+        {
+            values = in.values;   // direct copy -- fast
+            return true;          // found; stop looking
+        }
+        return false;             // keep scanning this queue
+    });
+}
+
+// DatabaseStage: input queue holds { uuid, compressed bytes }
+bool snoop(const uuid_t& uuid, values_t& values)
+{
+    return input_queue_->snoop([&](const CompressedSample& in)
+    {
+        if (in.uuid == uuid)
+        {
+            simdb::decompressData(in.bytes, values);  // undo zlib -- slower
+            return true;
+        }
+        return false;
+    });
+}
+----
+
+This is the reason a snooper prefers to find data *early*: the further down the
+pipeline an item has travelled, the more transforms a stage must reverse to
+reconstruct the original.
+
+=== Wiring the snooper
+
+You create a `PipelineSnooper<KeyType, SnoopedType>` from the pipeline manager and
+register each snoopable stage with it, using the stage handles returned by
+`addStage`:
+
+[source,cpp]
+----
+void createPipeline(simdb::pipeline::PipelineManager* pipeline_mgr) override
+{
+    auto pipeline    = pipeline_mgr->createPipeline(NAME, this);
+    auto compressor  = pipeline->addStage<CompressionStage>("compressor");
+    auto db_writer   = pipeline->addStage<DatabaseStage>("db_writer", getInstance());
+    pipeline->noMoreStages();
+    // ... bindings, flusher, pipeline head ...
+
+    pipeline_snooper_ = pipeline_mgr->createSnooper<uuid_t, values_t>();
+    pipeline_snooper_->addStage(compressor);
+    pipeline_snooper_->addStage(db_writer);
+}
+----
+
+Store the returned `std::unique_ptr<PipelineSnooper<...>>` on the app. Register
+stages in pipeline order -- the snooper tries them in the order you add them, so
+adding upstream stages first finds the item in its cheapest form.
+
+=== Retrieving an item
+
+`snoopAllStages(key, out)` walks the registered stages, calling each one's
+`snoop` until one returns `true`. If none do, the item is not currently sitting
+in any queue -- either it never existed, or it has already been written to the
+database (or is being processed *inside* a stage's `run_` and so is momentarily
+invisible to a queue snoop). The robust pattern therefore falls back to a flush
+and a query, exactly the mechanism from <<ch-26-flushers,Chapter 26>>:
+
+[source,cpp]
+----
+bool snoopPipeline(const uuid_t& uuid, values_t& values)
+{
+    // Fast path: find it in-flight between stages.
+    if (pipeline_snooper_->snoopAllStages(uuid, values))
+    {
+        return true;
+    }
+
+    // Slow path: force everything to disk, then query.
+    pipeline_flusher_->flush();
+
+    auto query = db_mgr_->createQuery("CompressedData");
+    std::vector<char> bytes;
+    query->select("DataBlob", bytes);
+    query->addConstraintForString("UUID", simdb::Constraints::EQUAL, uuid);
+
+    auto results = query->getResultSet();
+    if (results.getNextRecord())
+    {
+        simdb::decompressData(bytes, values);
+        return true;
+    }
+    return false;   // not found anywhere
+}
+----
+
+=== Why snooping pauses the pipeline
+
+`snoopAllStages` takes an optional third argument, `disable_pipeline`, that
+*defaults to `true`*. Before it scans, it quietly pauses all the pipeline's
+stages and threads for the duration of the snoop. There is a concrete reason for
+this. If the stages kept running while you searched, an item could slip out of
+the compressor's queue just after you scanned it (a miss), then out of the
+database stage's queue just as you got there (another miss) -- and you would
+"chase" it down the entire pipeline, never catching it in a queue. Pausing first
+freezes the picture, so the item is found in the earliest stage that holds it.
+
+That pause is a small, deliberate cost, and it is your main lever in the
+trade-off snoopers present: *pipeline throughput versus retrieval latency*. A
+snoop that pauses the pipeline briefly slows overall throughput a little but
+returns in-flight data quickly and without disk I/O; leaning on flush-and-query
+instead keeps the pipeline running at full speed but makes each retrieval
+expensive. The pause mechanism itself -- and the other uses of temporarily
+disabling a pipeline -- is the subject of the next chapter.
+
+`examples/PipelineSnoopers/main.cpp` is the complete, authoritative example: a
+four-stage pipeline (buffer, serializer, compressor, database writer) where every
+stage implements `snoop`, showing exactly how a single snooped type is
+reconstructed from four different in-flight representations.
+
+[#ch-28-disabling-pipelines]
+== Disabling Pipelines
+
+The previous chapter left a promise: `snoopAllStages` freezes the pipeline before
+it scans, and this chapter explains the mechanism behind that. Occasionally you
+need a running pipeline to *hold still* -- so you can inspect it, snapshot it, or
+debug it without data moving out from under you. SimDB provides a single RAII tool
+for that: the *scoped disabler*.
+
+=== Enable, disable, and the polling thread
+
+Every unit of work on a pipeline thread is a `Runnable` (a `Stage` is one), and
+every runnable carries an enabled flag. The polling thread simply *skips* any
+runnable whose flag is off. Disabling a stage therefore does not tear anything
+down -- the stage, its queues, and their contents stay exactly as they are; the
+thread just stops calling into it until it is re-enabled.
+
+=== The scoped disabler
+
+You rarely toggle that flag by hand. Instead you ask the pipeline manager to
+disable everything for the duration of a scope:
+
+[source,cpp]
+----
+{
+    auto disabler = pipeline_mgr_->scopedDisableAll();
+    // The entire pipeline is frozen here: no stage runs, and (by default)
+    // the polling threads are paused too. Inspect state, snoop queues, or
+    // take a consistent snapshot -- nothing moves.
+}   // disabler goes out of scope -> everything is re-enabled and resumes
+----
+
+`scopedDisableAll` returns a `std::unique_ptr<ScopedRunnableDisabler>`. On
+construction it disables all the pipeline's runnables (and pauses their polling
+threads); on destruction it re-enables and resumes them. Because it is tied to a
+scope, you cannot forget to turn the pipeline back on -- leaving the block does it
+for you, even if an exception unwinds through it.
+
+=== Threads too, or just the work?
+
+The one parameter, `disable_threads_too`, defaults to `true`:
+
+* `true` -- the polling threads are paused as well, so the process is genuinely
+  quiet. This is what you want for a clean snapshot or for deterministic
+  debugging.
+* `false` -- only the runnables are disabled; the polling threads keep spinning
+  but find nothing enabled to do. Useful when you want work to halt but the
+  threads to remain responsive.
+
+=== Nesting is safe
+
+If a disabler is already active and something requests another, `scopedDisableAll`
+returns `nullptr` -- the nested request is a harmless no-op, because the pipeline
+is already frozen by the outer disabler. This is exactly why the snooper from
+<<ch-27-snoopers,Chapter 27>> can hold a possibly-null disabler without any special handling:
+
+[source,cpp]
+----
+// Inside snoopAllStages(...)
+std::unique_ptr<ScopedRunnableDisabler> disabler =
+    disable_pipeline ? pipeline_mgr_->scopedDisableAll() : nullptr;
+// Scan the stages. If an outer disabler already froze the pipeline,
+// 'disabler' is null and we simply rely on that outer scope.
+----
+
+=== When to reach for it
+
+Two situations justify freezing a pipeline:
+
+* *Determinism while debugging.* Concurrency bugs are hard to observe precisely
+  when every stage is racing ahead. Disabling the pipeline gives you a still,
+  reproducible picture to inspect.
+* *Snapshot accuracy and performance.* This is the snooper's "chasing" problem
+  from the last chapter: if stages keep running while you search, an item can
+  slip from one queue to the next just ahead of you. Freezing first guarantees
+  you find it in the earliest stage that holds it, and avoids re-scanning a
+  moving target.
+
+[WARNING]
+====
+Disabling the pipeline stops throughput for as long as the disabler is alive.
+It is a deliberate, temporary tool -- keep the scope as short as possible, and do
+not treat it as a normal operating mode. The default snoop already applies it for
+you in exactly the right, minimal window.
+====
+
+[#ch-29-async-db-access]
+== Async Database Access from Non-DB Threads
+
+The permanent rule of SimDB's threading -- one dedicated database thread, and only
+that thread touches the database -- creates a puzzle the moment a *non*-database
+stage needs to read the database. A watchdog that wants to count rows, a stage
+that needs to look something up mid-flight: neither may grab the
+`DatabaseManager` and query it directly, because that would mean two threads
+racing on the same connection. The `AsyncDatabaseAccessor` is the sanctioned
+bridge. You hand it a callback; it runs that callback *on the database thread* and
+blocks until it finishes.
+
+=== The callback and eval
+
+The callback has one fixed signature -- it receives the `DatabaseManager` it will
+run against:
+
+[source,cpp]
+----
+using AsyncDbAccessFunc = std::function<void(simdb::DatabaseManager*)>;
+----
+
+You submit it with `eval`, which blocks the calling thread until the callback has
+run on the database thread (or a timeout fires):
+
+[source,cpp]
+----
+void eval(const AsyncDbAccessFunc& func, double timeout_seconds = 0);
+----
+
+Because `eval` blocks, you can capture results by reference in the lambda and read
+them out after `eval` returns -- by then the callback has definitely run.
+
+=== Getting an accessor
+
+There are two places to obtain an accessor, depending on who needs it:
+
+* *From inside a non-database stage*, use the protected `getAsyncDatabaseAccessor_()`:
++
+[source,cpp]
+----
+// Inside a non-DB Stage's run_()
+auto async_db_accessor = getAsyncDatabaseAccessor_();
+async_db_accessor->eval(callback);
+----
+
+* *From the app itself* (its main thread), cache the accessor from the pipeline
+  manager during `createPipeline` -- it is valid once the pipeline is open:
++
+[source,cpp]
+----
+void MyApp::createPipeline(simdb::pipeline::PipelineManager* pipeline_mgr) override
+{
+    // ... build the pipeline ...
+    async_db_accessor_ = pipeline_mgr->getAsyncDatabaseAccessor();
+}
+----
+
+[IMPORTANT]
+====
+Do *not* call `getAsyncDatabaseAccessor_()` from a `DatabaseStage`. A database
+stage already runs *on* the database thread and has direct access through
+`getDatabaseManager_()` and `getTableInserter_()` -- routing through the async
+accessor from there is nonsensical, and SimDB throws if you try. The accessor
+exists specifically for code that is *not* on the database thread.
+====
+
+=== Immediate commit, and the timeout
+
+Here is the behavior that makes this fast enough to use from a polling loop. The
+database thread is usually busy batching writes inside a long-running
+transaction. When an async request arrives, SimDB does not make you wait for that
+transaction to run its natural course -- it *immediately commits* whatever the
+database thread was doing, then runs your callback (itself inside a
+`safeTransaction`). So even if the in-progress batch would otherwise have taken
+seconds, you typically wait only for that one commit -- a fraction of a second.
+
+The optional `timeout_seconds` is a safety valve, not the normal wait. It guards
+against a genuinely stuck database thread (a bug, a runaway producer); if the
+callback has not completed within the timeout, `eval` throws rather than blocking
+forever. In healthy operation you never hit it.
+
+=== Exceptions propagate
+
+`eval` is built on `std::promise`/`std::future`, and it propagates failure
+faithfully: any exception thrown by your callback on the database thread is
+re-thrown from `eval` on the calling thread. You handle database errors from the
+async path exactly as you would from a synchronous call -- wrap the `eval` in a
+`try`/`catch` if you need to.
+
+=== Worked example: the database watchdog
+
+`examples/DatabaseWatchdog/main.cpp` is the canonical use. It runs two apps at
+once against one database:
+
+* *WatchedPipeline* -- the familiar compress-and-write pipeline, producing rows
+  with no upper bound, running on the usual 100 ms polling cadence.
+* *DatabaseWatchdog* -- a second app whose single stage has *no I/O ports at all*.
+  It exists only to poll the database. It runs on a slower 500 ms timer and, each
+  time it wakes, posts a `count()` query to the database thread. When the count
+  crosses a threshold, it tells the first app to stop.
+
+The watchdog's stage is the whole point -- a non-DB stage reaching the database
+safely from its own thread:
+
+[source,cpp]
+----
+simdb::pipeline::PipelineAction run_(bool) override
+{
+    if (finished_)
+    {
+        return simdb::pipeline::SLEEP;
+    }
+
+    size_t num_records = 0;
+    auto async_query = [&](simdb::DatabaseManager* db_mgr)
+    {
+        auto query = db_mgr->createQuery("CompressedData");
+        num_records = query->count();
+        if (num_records > TARGET_NUM_RECORDS)
+        {
+            finished_ = true;
+        }
+    };
+
+    // Post the query to the DB thread; 5s timeout is only a runaway guard.
+    auto async_db_accessor = getAsyncDatabaseAccessor_();
+    async_db_accessor->eval(async_query, 5);
+
+    // 'num_records' and 'finished_' are now safe to read: eval() has returned.
+    if (finished_)
+    {
+        watchdog_app_->thresholdReached_();
+    }
+
+    return simdb::pipeline::SLEEP;
+}
+----
+
+Notice the shape: the lambda captures `num_records` by reference, does its work on
+the database thread, and by the time `eval` returns the value is populated and the
+`finished_` flag is set. The watchdog never touches the database directly -- it
+only ever posts work to the thread that owns it.
+
+This is also the natural counterpart to the flusher: a watchdog reads the database
+*as it fills* without stopping the producer, whereas a flush would force a
+synchronization point. Together with snoopers and the scoped disabler, you now
+have the full toolkit for observing and coordinating a live pipeline.
+
+[#ch-30-threads-scheduling]
+== Threads & Scheduling
+
+Two chapters back we looked at *what* runs (stages, snoopers, disablers); this one
+is about *when* and *on what thread* it runs. Most of it you never have to touch,
+but one dial -- a stage's polling cadence -- is worth understanding, and the way
+threads are allocated is worth knowing because it is actively evolving.
+
+=== The polling loop
+
+Recall from <<ch-24-multiple-apps,Chapter 24>> that, today, each stage runs on its own `PollingThread`,
+and there is exactly one database thread. A polling thread does something very
+simple in a loop: it asks its stage to process all the work it can, and then --
+*only if there was nothing to do* -- it sleeps for a fixed interval before asking
+again. When there is a steady supply of work, the thread never sleeps; it runs
+flat out. This is precisely the behavior the per-thread performance report in
+<<ch-23-app-manager,Chapter 23>> measures as "working" versus "sleeping."
+
+=== The cadence dial
+
+That fixed sleep interval is the one scheduling parameter you set directly. It is
+a property of the stage, passed to the `Stage` constructor and defaulting to
+100 ms:
+
+[source,cpp]
+----
+class Watchdog : public simdb::pipeline::Stage
+{
+public:
+    Watchdog(DatabaseWatchdog* app) :
+        Stage(500),          // poll every 500 ms when idle
+        watchdog_app_(app)
+    {
+    }
+    // ...
+};
+----
+
+The watchdog from the previous chapter uses 500 ms deliberately: it only needs to
+check a row count periodically, so waking just twice a second keeps it cheap. The
+interval is a direct *latency-versus-waste* trade-off:
+
+* A *shorter* interval means the stage notices new work sooner -- lower latency --
+  but if work arrives only occasionally, it wakes, finds nothing, and sleeps
+  again, spending cycles on empty polls (a high "sleeping" percentage).
+* A *longer* interval means fewer wasted wakeups, but data already waiting in the
+  queue can sit up to one interval before the stage picks it up.
+
+There is nothing to tune for a stage that is saturated -- a thread that always has
+work never reaches the sleep at all. The cadence matters for the *intermittent*
+stages: watchdogs, low-rate producers, and anything that mostly waits.
+
+[NOTE]
+====
+The interval also has a structural role: if two non-database stages are ever
+placed on the *same* thread, they must share one interval. Today that rarely comes
+up because each stage gets its own thread -- but it is the reason the interval
+lives on the stage, and it matters for the thread management described next.
+====
+
+=== How threads are allocated -- today and tomorrow
+
+The current allocation is the simple one from <<ch-24-multiple-apps,Chapter 24>>: one worker thread per
+stage, plus the single database thread. It is easy to reason about, but it does
+not share threads across stages or apps, so the thread count climbs with the
+total number of stages -- the multi-app scalability limitation flagged in <<part-v,Part V>>.
+
+The planned direction is to make this automatic. Rather than fixing one thread per
+stage, SimDB will manage an unbounded worker-thread pool and *create, merge, and
+destroy* threads on its own -- co-scheduling compatible stages onto shared threads
+and splitting them back apart -- using exactly the working/sleeping balance from
+the <<ch-23-app-manager,Chapter 23>> reports as its signal. Saturated stages get their own threads;
+mostly-idle stages get merged together so they stop costing a thread each. The
+cadence dial stays a per-stage property, and the single database thread stays the
+one fixed point. Crucially, none of this will require changes to your app code:
+the same pipeline you write today will simply be scheduled more efficiently.
+
+Until that lands, the guidance is the guidance from <<part-v,Part V>>: prefer few apps per
+process, set generous polling intervals on stages that only need to wake
+occasionally, and read the per-thread reports to spot stages that are either
+saturated or spinning idle.
+
+This closes <<part-vi,Part VI>>. You now have the full advanced toolkit -- flushers for
+synchronization, snoopers for in-flight retrieval, the scoped disabler for
+freezing the pipeline, async database access for reaching the database thread
+from anywhere, and a working model of how stages are scheduled. <<part-vii,Part VII>> puts all
+of it to work in a single sustained case study: Argos, SimDB's flagship
+collection-and-visualization application.

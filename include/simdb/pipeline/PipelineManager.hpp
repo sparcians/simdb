@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/DatabaseThread.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
 #include "simdb/pipeline/PipelineSnooper.hpp"
@@ -38,11 +39,8 @@ public:
     AsyncDatabaseAccessor* getAsyncDatabaseAccessor()
     {
         checkOpen_();
-        if (!threads_opened_)
-        {
-            throw DBException("Cannot access the AsyncDatabaseAccessor before "
-                              "calling openPipelines()");
-        }
+        simdb_assert(!threads_opened_, "Cannot access the AsyncDatabaseAccessor before "
+                                       "calling openPipelines()");
         return async_db_accessor_;
     }
 
@@ -83,10 +81,7 @@ public:
     /// \throws DBException if called more than once.
     void minimizeThreads()
     {
-        if (thread_merger_)
-        {
-            throw DBException("You can only call minimizeThreads() method once.");
-        }
+        simdb_assert(!thread_merger_, "You can only call minimizeThreads() method once.");
 
         thread_merger_ = std::make_unique<ThreadMerger>(pipelines_);
         thread_merger_->mergeAllAppThreads();
@@ -95,10 +90,7 @@ public:
     /// \brief Mark one app's pipeline threads for merging (call before openPipelines()).
     void minimizeThreads(const App* app)
     {
-        if (!thread_merger_)
-        {
-            throw DBException("Cannot merge a single app's pipeline threads");
-        }
+        simdb_assert(thread_merger_, "Cannot merge a single app's pipeline threads");
         thread_merger_->addAppForMerging(app);
     }
 
@@ -268,10 +260,7 @@ private:
 
         // Ensure unique
         auto it = std::unique(disabler_threads_.begin(), disabler_threads_.end());
-        if (it != disabler_threads_.end())
-        {
-            throw DBException("Internal error: duplicate threads found in disabler_threads_");
-        }
+        simdb_assert(it == disabler_threads_.end(), "Internal error: duplicate threads found in disabler_threads_");
     }
 
     void getDisablerRunnables_()
@@ -289,22 +278,16 @@ private:
 
         // Ensure unique
         auto it = std::unique(disabler_runnables_.begin(), disabler_runnables_.end());
-        if (it != disabler_runnables_.end())
-        {
-            throw DBException("Internal error: duplicate runnables found in "
-                              "disabler_runnables_");
-        }
+        simdb_assert(it == disabler_runnables_.end(), "Internal error: duplicate runnables found in "
+                                                      "disabler_runnables_");
     }
 
     /// Get a notification when a disabler goes out of scope.
     friend class ScopedRunnableDisabler;
     void onDisablerDestruction_()
     {
-        if (!disabler_active_)
-        {
-            throw DBException("Internal error: no disabler active in "
-                              "onDisablerDestruction_()");
-        }
+        simdb_assert(disabler_active_, "Internal error: no disabler active in "
+                                       "onDisablerDestruction_()");
         disabler_active_ = false;
     }
 
@@ -312,13 +295,7 @@ private:
     bool closed_ = false;
 
     /// Validate that no APIs are called after closing the pipelines
-    void checkOpen_() const
-    {
-        if (closed_)
-        {
-            throw DBException("PipelineManager has been closed");
-        }
-    }
+    void checkOpen_() const { simdb_assert(!closed_, "PipelineManager has been closed"); }
 };
 
 /// Defined here so we can avoid circular includes

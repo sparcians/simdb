@@ -6,7 +6,7 @@
 #include <set>
 #include <vector>
 
-#include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 
 namespace simdb::pipeline {
 
@@ -40,10 +40,7 @@ public:
     template <typename StageType> void addStage(StageType* stage)
     {
         static_assert(std::is_base_of<Stage, StageType>::value);
-        if (!snooped_stages_.insert(stage).second)
-        {
-            throw DBException("Already snooping stage!");
-        }
+        simdb_assert(snooped_stages_.insert(stage).second, "Already snooping stage!");
 
         auto cb = std::bind(&StageType::snoop, stage, std::placeholders::_1, std::placeholders::_2);
         callbacks_.push_back(cb);

@@ -1,19 +1,31 @@
 import wx, wx.grid
 from collections.abc import Iterable
+from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
         super(IterableStruct, self).__init__(parent)
+        self.SetBackgroundColour('white')
         self.frame = frame
         self.elem_path = elem_path
         self.deserializer = frame.data_retriever.GetDeserializer(elem_path)
         all_field_names = self.deserializer.GetAllFieldNames()
-
         self.capacity = frame.simhier.GetCapacityByElemPath(elem_path)
+        num_rows = self.capacity
+        num_cols = len(all_field_names)
+        if 'DID' in all_field_names:
+            num_cols -= 1
+        assert len(all_field_names) > 0
+
         self.grid = wx.grid.Grid(self)
-        self.grid.CreateGrid(self.capacity, len(all_field_names), wx.grid.Grid.GridSelectNone)
+        self.grid.CreateGrid(num_rows, num_cols, wx.grid.Grid.GridSelectNone)
         self.grid.EnableEditing(False)
+        self.grid.SetLabelBackgroundColour('white')
         self.__SyncGridViewSettings()
+
+        mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        self.grid.SetDefaultCellFont(mono10)
+        self.grid.SetLabelFont(mono10)
 
         for i in range(self.capacity):
             self.grid.SetRowLabelValue(i, str(i))
@@ -24,23 +36,23 @@ class IterableStruct(wx.Panel):
         font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         location_elem.SetFont(font)
 
-        # Add a gear button (size 16x16) to the left of the time series plot.
-        # Clicking the button will open a dialog to change the plot settings.
-        # Note that we do not add the button to the sizer since we want to
-        # force it to be in the top-left corner of the widget canvas. We do
-        # this with the 'pos' argument to the wx.BitmapButton constructor.
-        gear_btn = wx.BitmapButton(self, bitmap=frame.CreateResourceBitmap('gear.png'), pos=(5,5))
-        gear_btn.Bind(wx.EVT_BUTTON, self.__EditWidget)
-        gear_btn.SetToolTip('Edit widget settings')
+        gear_btn, clear_btn, split_lr, split_tb, maximize_btn = frame.CreateWidgetStandardButtons(
+            self, self.__EditWidget, 'Edit widget settings')
 
         row1 = wx.BoxSizer(wx.HORIZONTAL)
-        row1.AddSpacer(30)
-        row1.Add(self.utiliz_elem, 0, wx.ALL, 5)
-        row1.Add(location_elem, 1, wx.EXPAND | wx.ALL, 5)
+        row1.Add(gear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+        row1.Add(maximize_btn, 0, wx.TOP | wx.RIGHT, 5)
+        row1.AddSpacer(5)
+        row1.Add(self.utiliz_elem, 0, wx.TOP, 7)
+        row1.AddSpacer(5)
+        row1.Add(location_elem, 0, wx.EXPAND | wx.TOP, 7)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(row1, 0, wx.EXPAND | wx.ALL, 10)
-        sizer.Add(self.grid, 1, wx.EXPAND | wx.ALL, 10)
+        sizer.Add(row1, 0, wx.ALL, 5)
+        sizer.Add(self.grid, 0, wx.EXPAND | wx.LEFT | wx.TOP, 5)
         self.SetSizer(sizer)
         self.Layout()
 
@@ -58,11 +70,9 @@ class IterableStruct(wx.Panel):
 
         widget_renderer = self.frame.widget_renderer
         tick = widget_renderer.tick
-        queue_data = self.frame.data_retriever.Unpack(self.elem_path, (tick,tick))
+        queue_data = self.frame.data_retriever.Unpack(self.elem_path, tick)
 
-        auto_colorize_col = self.frame.data_retriever.GetAutoColorizeColumn(self.elem_path)
-        auto_colorize_col_idx = self.visible_field_names.index(auto_colorize_col) if auto_colorize_col in self.visible_field_names else None
-
+        auto_colorize_col_name = 'DID' if 'DID' in self.visible_field_names else self.visible_field_names[0]
         self.__ClearGrid()
 
         if len(queue_data['DataVals']) and isinstance(queue_data['DataVals'][0], Iterable):
@@ -70,11 +80,23 @@ class IterableStruct(wx.Panel):
                 if row_data is None:
                     continue
 
-                for j, field_name in enumerate(self.visible_field_names):
-                    self.grid.SetCellValue(idx, j, str(row_data[field_name]))
-                    if auto_colorize_col_idx is not None:
-                        color = widget_renderer.GetAutoColor(row_data[self.visible_field_names[auto_colorize_col_idx]])
-                        self.grid.SetCellBackgroundColour(idx, j, color)
+                write_col = 0
+                for read_col, field_name in enumerate(self.visible_field_names):
+                    if field_name == 'DID':
+                        continue
+
+                    self.grid.SetCellValue(idx, write_col, str(row_data[read_col][1]))
+
+                    color_keyval = None
+                    for key, keyval in row_data:
+                        if key == auto_colorize_col_name:
+                            color_keyval = keyval
+                            break
+
+                    assert color_keyval is not None
+                    color = widget_renderer.GetAutoColor(color_keyval)
+                    self.grid.SetCellBackgroundColour(idx, write_col, color)
+                    write_col += 1
 
             num_rows_shown = len(queue_data['DataVals'][0])
         else:
@@ -109,16 +131,11 @@ class IterableStruct(wx.Panel):
             self.grid.SetColLabelValue(i, '')
 
         # Only show the visible field names
-        for i, field_name in enumerate(self.visible_field_names):
-            self.grid.SetColLabelValue(i, field_name)
-
-        # Make sure we are showing the visible columns
-        for i in range(len(self.visible_field_names)):
-            self.grid.ShowCol(i)
-
-        # Hide any columns that are not visible
-        for i in range(len(self.visible_field_names), self.grid.GetNumberCols()):
-            self.grid.HideCol(i)
+        i = 0
+        for field_name in self.visible_field_names:
+            if field_name != 'DID':
+                self.grid.SetColLabelValue(i, field_name)
+                i += 1
 
         self.grid.AutoSizeColumns()
         self.Layout()
@@ -130,19 +147,26 @@ class IterableStruct(wx.Panel):
                 self.grid.SetCellBackgroundColour(i, j, wx.WHITE)
 
     def __EditWidget(self, event):
-        all_field_names = self.deserializer.GetAllFieldNames()
-        auto_colorize_col = self.frame.data_retriever.GetAutoColorizeColumn(self.elem_path)
-        dlg = QueueTableCustomizationDlg(self,
-                                         all_field_names,
-                                         self.visible_field_names,
-                                         auto_colorize_col)
+        assert self.elem_path not in (None, '')
+        selected = [self.elem_path]
+        dlg = WidgetDataSelectionsDlg(self, self.frame, selected, queues_only=True, single_selection=True)
+        result = dlg.ShowModal()
 
-        if dlg.ShowModal() == wx.ID_OK:
-            # Note that the data retriever will update all widgets when these method is called
-            self.frame.data_retriever.SetVisibleFieldNames(self.elem_path, dlg.GetDisplayedColumns())
-            self.frame.data_retriever.SetAutoColorizeColumn(self.elem_path, dlg.GetAutoColorizeColumn())
-
+        if result == wx.ID_OK:
+            selected = dlg.GetSelectedElemPaths()
+            if len(selected) == 0:
+                wx.MessageBox('No data selected', 'Error', wx.OK | wx.ICON_ERROR)
+                selected = None
+            else:
+                selected = selected[0]
+        else:
+            selected = None
         dlg.Destroy()
+
+        if selected:
+            widget_container = self.GetParent()
+            widget = IterableStruct(widget_container, self.frame, selected)
+            widget_container.SetWidget(widget)
 
 class UtilizElement(wx.StaticText):
     def __init__(self, parent, frame, capacity):
@@ -160,112 +184,3 @@ class UtilizElement(wx.StaticText):
 
         tooltip = 'Utilization: {}% ({}/{} bins filled)'.format(round(utiliz_pct * 100), int(utiliz_pct * self.capacity), self.capacity)
         self.SetToolTip(tooltip)
-
-class QueueTableCustomizationDlg(wx.Dialog):
-    def __init__(self, widget, all_columns, displayed_columns, auto_colorize_col):
-        super().__init__(widget, title='Customize Widget')
-
-        self.checkboxes = []
-        self.radio_buttons = []
-        self.panel = wx.Panel(self)
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        tbox = wx.StaticText(self.panel, label='Select columns to display:')
-        sizer.Add(tbox, 0, wx.ALL | wx.EXPAND, 5)
-
-        # Create a checkbox for each item
-        for s in all_columns:
-            hbox = wx.BoxSizer(wx.HORIZONTAL)
-            self.radio_buttons.append(wx.RadioButton(self.panel, label='Auto-colorize'))
-            self.radio_buttons[-1].SetToolTip('Auto-colorize based on this column')
-            hbox.Add(self.radio_buttons[-1], flag=wx.ALIGN_CENTER_VERTICAL)
-
-            if s == auto_colorize_col:
-                self.radio_buttons[-1].SetValue(True)
-            else:
-                self.radio_buttons[-1].SetValue(False)
-
-            checkbox = wx.CheckBox(self.panel, label=s)
-            hbox.Add(checkbox, 1, wx.ALL | wx.EXPAND, 5)
-
-            if s in displayed_columns:
-                checkbox.SetValue(True)
-            else:
-                checkbox.SetValue(False)
-
-            self.checkboxes.append(checkbox)
-            sizer.Add(hbox, 1, wx.ALL | wx.EXPAND, 5)
-
-        # OK and Cancel buttons
-        self._ok_btn = wx.Button(self.panel, wx.ID_OK)
-        btn_sizer = wx.StdDialogButtonSizer()
-        btn_sizer.AddButton(self._ok_btn)
-        btn_sizer.AddButton(wx.Button(self.panel, wx.ID_CANCEL))
-        btn_sizer.Realize()
-
-        sizer.Add(btn_sizer, 0, wx.ALIGN_CENTER | wx.ALL, 10)
-        self.panel.SetSizerAndFit(sizer)
-
-        # Find the longest string length of all our checkbox labels
-        dc = wx.ClientDC(self.panel)
-        dc.SetFont(wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-        longest_length = 0
-
-        for s in all_columns:
-            text_width, _ = dc.GetTextExtent(s)
-            longest_length = max(longest_length, text_width)
-
-        w,h = sizer.GetMinSize()
-        h += 100
-        w = max(w, longest_length + 100)
-        self.SetSize((w,h))
-        self.Layout()
-        self.Refresh()
-
-        for checkbox in self.checkboxes:
-            checkbox.Bind(wx.EVT_CHECKBOX, self.__OnCheckbox)
-
-        for radio_button in self.radio_buttons:
-            radio_button.Bind(wx.EVT_RADIOBUTTON, self.__OnRadioButtonGroup)
-
-    def GetDisplayedColumns(self):
-        # Return a list of selected items
-        return [checkbox.GetLabel() for checkbox in self.checkboxes if checkbox.IsChecked()]
-    
-    def GetAutoColorizeColumn(self):
-        for i,radio_btn in enumerate(self.radio_buttons):
-            if radio_btn.GetValue():
-                return self.checkboxes[i].GetLabel()
-
-        return None
-
-    def __OnCheckbox(self, event):
-        any_selected = any(checkbox.IsChecked() for checkbox in self.checkboxes)
-        self._ok_btn.Enable(any_selected)
-
-        if not any_selected:
-            self._ok_btn.SetToolTip('Select at least one column to display')
-            return
-        else:
-            self._ok_btn.UnsetToolTip()
-
-        for i,checkbox in enumerate(self.checkboxes):
-            radio_btn = self.radio_buttons[i]
-            if not checkbox.IsChecked() and radio_btn.GetValue():
-                self._ok_btn.Enable(False)
-                self._ok_btn.SetToolTip('Auto-colorize column must be displayed')
-                return
-
-    def __OnRadioButtonGroup(self, event):
-        for radio_button in self.radio_buttons:
-            radio_button.SetValue(False)
-
-        event.GetEventObject().SetValue(True)
-
-        for i,radio_btn in enumerate(self.radio_buttons):
-            if radio_btn == event.GetEventObject():
-                self.checkboxes[i].SetValue(True)
-                break
-
-        self._ok_btn.Enable(True)
-        self._ok_btn.UnsetToolTip()

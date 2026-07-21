@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/Exceptions.hpp"
 #include <cstring>
 #include <vector>
@@ -21,8 +22,7 @@ enum class CompressionLevel {
 };
 
 /// Perform zlib compression.
-inline void compressData(const void* data_ptr, size_t num_bytes, std::vector<char>& out,
-                         CompressionLevel compression_level = CompressionLevel::DEFAULT)
+inline void compressData(const void* data_ptr, size_t num_bytes, std::vector<char>& out, const int compression_level)
 {
     if (num_bytes == 0)
     {
@@ -52,7 +52,7 @@ inline void compressData(const void* data_ptr, size_t num_bytes, std::vector<cha
     defstream.avail_out = (uInt)(out.size());
     defstream.next_out = (Bytef*)(out.data());
 
-    deflateInit(&defstream, static_cast<int>(compression_level));
+    deflateInit(&defstream, compression_level);
     deflate(&defstream, Z_FINISH);
     deflateEnd(&defstream);
 
@@ -60,14 +60,28 @@ inline void compressData(const void* data_ptr, size_t num_bytes, std::vector<cha
     out.resize(num_bytes_after);
 }
 
+/// Perform zlib compression.
+inline void compressData(const void* data_ptr, size_t num_bytes, std::vector<char>& out,
+                         CompressionLevel compression_level = CompressionLevel::DEFAULT)
+{
+    compressData(data_ptr, num_bytes, out, static_cast<int>(compression_level));
+}
+
+/// Perform zlib compression on a vector.
+template <typename T>
+inline void compressData(const std::vector<T>& in, std::vector<char>& out, const int compression_level)
+{
+    const void* data_ptr = in.data();
+    size_t num_bytes = in.size() * sizeof(T);
+    compressData(data_ptr, num_bytes, out, compression_level);
+}
+
 /// Perform zlib compression on a vector.
 template <typename T>
 inline void compressData(const std::vector<T>& in, std::vector<char>& out,
                          CompressionLevel compression_level = CompressionLevel::DEFAULT)
 {
-    const void* data_ptr = in.data();
-    size_t num_bytes = in.size() * sizeof(T);
-    compressData(data_ptr, num_bytes, out, compression_level);
+    compressData(in, out, static_cast<int>(compression_level));
 }
 
 /// Perform zlib decompression.
@@ -87,10 +101,7 @@ template <typename T> inline void decompressData(const std::vector<char>& in, st
     stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in.data()));
     stream.avail_in = static_cast<uInt>(in.size());
 
-    if (inflateInit(&stream) != Z_OK)
-    {
-        throw DBException("Failed to initialize zlib inflate stream.");
-    }
+    simdb_assert(inflateInit(&stream) == Z_OK, "Failed to initialize zlib inflate stream.");
 
     do
     {
@@ -104,8 +115,9 @@ template <typename T> inline void decompressData(const std::vector<char>& in, st
         if (ret != Z_OK && ret != Z_STREAM_END)
         {
             inflateEnd(&stream);
-            throw DBException("Decompression failed with zlib error code: " + std::to_string(ret));
         }
+        simdb_assert(ret == Z_OK || ret == Z_STREAM_END,
+                     "Decompression failed with zlib error code: " + std::to_string(ret));
     } while (stream.avail_out == 0);
 
     // Adjust actual used size
@@ -115,10 +127,7 @@ template <typename T> inline void decompressData(const std::vector<char>& in, st
 
     // Convert decompressed bytes to std::vector<T>
     size_t byte_count = decompressed_buffer.size();
-    if (byte_count % sizeof(T) != 0)
-    {
-        throw DBException("Decompressed data size is not aligned with type T.");
-    }
+    simdb_assert(byte_count % sizeof(T) == 0, "Decompressed data size is not aligned with type T.");
 
     size_t elem_count = byte_count / sizeof(T);
     out.resize(elem_count);

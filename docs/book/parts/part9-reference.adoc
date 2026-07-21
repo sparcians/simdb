@@ -1,0 +1,437 @@
+[#part-ix]
+= Part IX: Reference & Appendices
+
+Quick-reference material for day-to-day lookups. The narrative parts of this book
+explain *why* and *when*; this part is *what* and *where* -- headers, macros,
+lifecycle calls, glossary terms, common failure modes, and migration paths.
+
+[appendix]
+[#appendix-utilities-reference]
+== Utilities Reference
+
+General-purpose helpers in `include/simdb/utils/`. Most are header-only and usable
+outside pipelines.
+
+=== Compression (`Compress.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| API | Purpose
+
+| `compressData(ptr, nbytes, out, level)` | Zlib-compress raw bytes into `std::vector<char>`.
+| `compressData(vector<T>, out, level)` | Compress a typed vector's bytes.
+| `decompressData(in, out)` | Decompress into `std::vector<T>`.
+| `CompressionLevel` | `DISABLED`, `DEFAULT`, `FASTEST`, `HIGHEST` (maps to zlib levels).
+|===
+
+Empty inputs produce a valid minimal zlib wrapper (compatible with Python
+`zlib.decompress`).
+
+=== Queues (`ConcurrentQueue.hpp`)
+
+Thread-safe FIFO built on `std::deque`.
+
+[cols="1,3", options="header"]
+|===
+| Method | Purpose
+
+| `push` / `emplace` | Enqueue (copy, move, or in-place construct).
+| `try_pop(T&)` | Dequeue if non-empty; returns `false` when empty.
+| `size` / `empty` | Queue depth under lock.
+| `snoop(callback)` | Scan items without removing; stop when callback returns `true`. Used by pipeline snoopers (<<part-vi,Part VI>>).
+|===
+
+=== Metrics and timing
+
+*RunningMean* (`RunningMean.hpp`) -- Welford streaming average: `add(value)`,
+`mean()`, `count()`. No sample storage.
+
+*SelfProfiler* (`TickTock.hpp`) -- Singleton method/block timer. `PROFILE_METHOD`
+or `PROFILE_BLOCK("label")` at scope start; prints sorted average times on process
+exit. Despite the filename, there is no class named `TickTock`.
+
+=== Logging (`ThreadSafeLogger.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| API | Purpose
+
+| `ThreadSafeLogger(prefix)` | Writes prefixed lines to stdout.
+| `ThreadSafeFileLogger(path)` | Same, to a file.
+| `protect()` | Returns a `Guard`; stream into it; one atomic line on destruction.
+|===
+
+=== String interning (`TinyStrings.hpp`)
+
+Maps strings to `uint32_t` ids for compact binary encoding. `insert(s)` returns
+`(id, is_new)`; `getStringID(s)` returns id (`0` = bad/empty). `serialize(db_mgr)`
+writes new mappings to the database (call at teardown when you use this pattern --
+today not automatic via `postSimLoopTeardown`; see <<part-v,Part V>>). Template parameter
+`MutexProtect` enables optional locking for multi-threaded producers.
+
+=== Values and comparison
+
+*ValidValue\<T\>* (`ValidValue.hpp`) -- Optional-like holder with explicit validity;
+`getValue()` throws if unset.
+
+*approximatelyEqual* (`FloatCompare.hpp`) -- Relative tolerance compare for
+floating-point types; default tolerance is machine epsilon. Used by
+`EXPECT_WITHIN_EPSILON` in tests.
+
+=== Symbol and type helpers
+
+*demangle* / *demangle_type\<T\>* (`Demangle.hpp`) -- Itanium ABI demangling via
+`__cxa_demangle`; falls back to input on failure. Buffer size
+`DEMANGLE_BUF_LENGTH` (4096).
+
+*simdb::type_traits* (`TypeTraits.hpp`) -- Template metaprogramming helpers
+(`enable_if_t`, pointer/string detection, container traits, etc.) used throughout
+SimDB headers.
+
+*ios_format_saver* (`StreamFormatters.hpp`) -- RAII restore of `std::ios` format
+flags after temporary manipulators.
+
+=== Lock helpers
+
+*ConditionalLock\<Mutex\>* (`ConditionalLock.hpp`) -- Locks only when the bool
+constructor argument is true.
+
+*DeferredLock\<Mutex\>* (`DeferredLock.hpp`) -- Call `lock()` manually; unlocks in
+destructor. Used by `TinyStrings` when `MutexProtect` is enabled.
+
+=== Test utilities
+
+*generateRandomData* (`Random.hpp`, namespace `simdb::utils`) -- Random arithmetic
+vectors for unit tests.
+
+*utf16* (`utf16.hpp`) -- UTF-16 conversion helpers for narrow/wide string
+interoperability where needed.
+
+[appendix]
+[#appendix-api-glossary]
+== API Quick Reference & Glossary
+
+One-page cheat sheets. For worked examples and rationale, see Parts <<part-iii,Part III>>--<<part-vi,Part VI>>.
+
+=== SQLite interface
+
+*Schema* (`simdb/sqlite/Schema.hpp`, `Table.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| Construct | Notes
+
+| `schema.addTable("Name")` | Returns `Table&`. Implicit auto-increment `Id` PK unless changed.
+| `tbl.addColumn("Col", dt::…)` | Types: `int32_t`, `uint32_t`, `int64_t`, `uint64_t`, `double_t`, `string_t`, `blob_t`.
+| `tbl.setPrimaryKey("Col")` | Replace default `Id` PK.
+| `tbl.unsetPrimaryKey()` | No primary key.
+| `tbl.setDefaultValue("Col", val)` | Column default on INSERT omit.
+| `tbl.addIndex(…)` | Query acceleration (<<part-iii,Part III>>).
+|===
+
+*DatabaseManager* (`DatabaseManager.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| Call | Purpose
+
+| `DatabaseManager(path, create_if_missing)` | Open or create `.db`.
+| `appendSchema(schema)` | Apply schema to file (create/alter tables).
+| `getDatabaseFilePath()` | Path string for reopening elsewhere.
+|===
+
+*Insert macros* (`Table.hpp`)
+
+[,cpp]
+----
+db_mgr.INSERT(
+    SQL_TABLE("MyTable"),
+    SQL_COLUMNS("A", "B"),      // optional if all columns in order
+    SQL_VALUES(a_val, b_val));
+----
+
+Returns a record handle with typed getters/setters. Omit `SQL_COLUMNS` when
+supplying every column in schema order.
+
+*Query* (`Query.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| Pattern | Purpose
+
+| `createQuery("Table")` | Start a SELECT builder.
+| `select("Col", var)` | Bind output column to variable (or `std::optional` for NULL).
+| `addConstraintForInt/UInt/Double/String(…)` | WHERE clauses; `SetConstraints::IN_SET`, etc.
+| `orderBy`, `setLimit`, `resetConstraints` | Ordering and pagination.
+| `count()` | Row count for current query.
+| `getResultSet()` + `getNextRecord()` | Iterate rows.
+| `findRecord(table, id)` | Direct row fetch by primary key.
+|===
+
+*Transactions* (`Transaction.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| API | Purpose
+
+| `safeTransaction([&]{ … })` | Runs lambda inside a transaction; retries on lock/contention until success. Reentrant-safe.
+|===
+
+*Inspection* -- `simdb/sqlite/Dump.hpp` prints human-readable schema/table dumps for debugging.
+
+=== Pipeline interface
+
+*Core types* (`Stage.hpp`, `Pipeline.hpp`, `PipelineManager.hpp`)
+
+[cols="1,3", options="header"]
+|===
+| Concept | API / behavior
+
+| `Stage` | Subclass; implement `run_(bool force)`; return `PROCEED` or `SLEEP`.
+| `CompressionStage` | Optional base for zlib compression stages; `getBestCompressionLevel_()` maps thread sleep % to a `CompressionLevel`.
+| Ports | `addInPort_<T>("name", queue_ptr)` / `addOutPort_<T>(…)` in constructor.
+| `PipelineManager` | Owns pipelines for one or more apps.
+| `createPipeline(name, app)` | Register one pipeline for an app (typical: one call per app). Multiple apps ⇒ multiple pipelines on the shared manager.
+| `addStage<MyStage>("name", …)` | Register stage; order matters for flush.
+| `bind("src.port", "dst.port")` | Connect output queue to input.
+| `noMoreStages()` / `noMoreBindings()` | Seal pipeline definition.
+| Head queue | `pipeline->getInPortQueue<T>("stage.port")` for producer injection. Several heads = several unbound inputs on the same pipeline.
+| `DatabaseStage<AppT>` | Terminal stage; writes via app's `DatabaseManager`.
+|===
+
+*Synchronization and inspection*
+
+[cols="1,3", options="header"]
+|===
+| Tool | Purpose
+
+| `pipeline->createFlusher({stage_names…})` | Ordered flush; DB stages commit in one `safeTransaction` when present.
+| `flusher->flush()` | Drain all listed stages with `force=true`.
+| `PipelineManager::createSnooper<Key,Snooped>()` | Key-based in-flight reads.
+| `snooper->addStage(…)` / `snoopAllStages(key, out)` | Wire and query without draining.
+| `ScopedRunnableDisabler` | RAII pause of pipeline runnables (<<part-vi,Part VI>>).
+| `AsyncDatabaseAccessor::eval(func, timeout)` | Run `func(DatabaseManager*)` on DB thread from any other thread.
+|===
+
+*Scheduling* -- `Stage(interval_ms)` sets polling sleep when idle (default 100&nbsp;ms).
+`PipelineAction::PROCEED` keeps the stage hot; `SLEEP` yields until next poll.
+
+=== App framework
+
+*App lifecycle* (`App.hpp`, `AppManager.hpp`) -- call via `AppManagers` in order:
+
+[cols="1,2", options="header"]
+|===
+| Phase | Calls
+
+| Register | `enableApp<MyApp>()`, optional `parameterize(…)` for custom factories (<<part-v,Part V>>).
+| Startup | `createSchemas()` → `postInit(argc, argv)` → `initializePipelines()` → `openPipelines()`.
+| Run | Your simulator loop; `process()` on pipeline heads, collect via app API.
+| Shutdown | `postSimLoopTeardown()` on *every* exit path.
+|===
+
+*App hooks* (override on your `simdb::App` subclass)
+
+[cols="1,3", options="header"]
+|===
+| Hook | When
+
+| `defineSchema` | Declare tables before DB creation.
+| `postInit` | After schema exists; pre-sim metadata and configuration. Runs inside automatic `safeTransaction` (with all apps' hooks in one transaction).
+| `createPipeline` | Wire one pipeline; store one or more pipeline head queues.
+| `preTeardown` / `postTeardown` | App-local cleanup around sim-loop end. `postTeardown` runs inside automatic `safeTransaction` (with all apps' hooks in one transaction).
+|===
+
+`getInstance()` / `setInstance(n)` -- access the active app instance from stages
+and static contexts (<<part-v,Part V>>).
+
+=== Glossary
+
+[cols="1,3", options="header"]
+|===
+| Term | Meaning
+
+| *Stage* | A `Runnable` unit of pipeline work with input/output ports and a `run_(force)` loop.
+| *Port* | Named attachment point on a stage; typed by the queue's payload.
+| *Queue* | `ConcurrentQueue<T>` connecting an output port to an input port.
+| *Pipeline head* | The input queue where the producer (sim thread) injects work. One pipeline may have several heads; one app typically has one pipeline.
+| *DB stage* | Terminal `DatabaseStage` that performs SQLite writes on the dedicated DB thread.
+| *Flusher* | Ordered, forced drain of stages through to the database commit point.
+| *Snooper* | Key-based peek at in-flight queue items without dequeuing.
+| *Heartbeat* | (Argos) Interval between full snapshots; deltas between heartbeats. Performance dial only -- does not gate collection.
+| *Collectable* | (Argos) A registered simulation object whose state can be collected over time.
+| *CID* | Collectable ID -- stable integer identity for a collectable in the Argos schema.
+| *Tick* | One step of the simulation clock; timestamps in the DB refer to tick (or cycle) values per clock.
+| *Flush-then-query* | `flush()` (and/or teardown) before reading the database so batched data is visible.
+| *Funnel* | The single dedicated database thread through which all commits pass.
+|===
+
+[appendix]
+[#appendix-faq]
+== FAQ & Troubleshooting
+
+[#faq-database-locked]
+=== "Database is locked" / SQLite contention
+
+*What SimDB handles for you.* All SQLite access from pipeline database stages goes
+through one dedicated thread. Writes are batched inside `safeTransaction`, which
+*retries* until the transaction succeeds if SQLite reports lock contention. You do
+not manually retry INSERTs in normal pipeline use.
+
+*What you must still avoid.* Calling SQLite (or opening a second writer) from
+ arbitrary threads without `AsyncDatabaseAccessor::eval`. Opening the same `.db`
+ from another *process* while the sim is writing. Heavy unrelated disk I/O from
+ your simulator competing with the DB thread (<<part-iv,Part IV>>, <<part-viii,Part VIII>>).
+
+*If you see lock errors from async `eval`.* Another tool may hold the file; ensure
+ only one writer; use read-only opens for external viewers where possible.
+
+[#faq-pipeline-sleeping]
+=== "Why is my pipeline sleeping?"
+
+A stage returns `SLEEP` when `run_(force)` finds no work (empty input queue and
+nothing left to do on force). That is normal idle behavior.
+
+*Upstream not feeding.* Perf report shows ~100% sleep on a stage whose input
+should be busy -- check the producer and bindings.
+
+*Downstream bottleneck.* Upstream stages sleep because the DB stage or a saturated
+middle stage is not draining -- tune batching/compression (<<part-viii,Part VIII>>) or split hot
+stages.
+
+*Polling cadence.* A stage wakes every `interval_ms` (default 100). Long intervals
+look like "sleeping" between bursts -- shorten for latency-sensitive paths.
+
+*Disabler left active.* `ScopedRunnableDisabler` still in scope pauses everything.
+
+*Wrong action return.* Forgetting `PROCEED` after successful work makes the stage
+go idle even when data remains (until the next poll).
+
+[#faq-rows-not-visible]
+=== "Why don't I see my rows yet?"
+
+Almost always: *data is still in flight.*
+
+* Batched transactions have not committed.
+* Rows sit in an upstream queue.
+* You queried before `flush()` or `postSimLoopTeardown()`.
+
+Fix: flush at the synchronization point, or teardown before assert; then reopen the
+file with a fresh `DatabaseManager` (<<part-viii,Part VIII>>, <<ch-41-testing-simdb-apps,Chapter 41>>).
+
+[#faq-partial-database]
+=== "My database is partial or corrupt after a crash"
+
+Did `postSimLoopTeardown()` run? Without it, queues may not drain, blobs may be
+truncated, and `std::thread` destructors may throw on unjoined pipeline threads
+(<<part-v,Part V>>). Install teardown on exception/abort paths you control.
+
+If you use `TinyStrings`, mappings may not be flushed at teardown today -- call
+`serialize` explicitly until automatic flush is added.
+
+[#faq-release-werror]
+=== "Why did CI fail in Release but not Debug?"
+
+Release builds with `-Werror` treat unused parameters, members, and includes as
+errors. After editing headers or tests, build Release locally:
+
+[source,bash,subs=none]
+----
+cmake --build build --target YourTest -DCMAKE_BUILD_TYPE=Release
+----
+
+Remove dead code rather than silencing warnings unless intentionally stubbing an
+interface.
+
+[#faq-snooper-key]
+=== "Snooper never finds my key"
+
+Snoopers search *in-flight* queue contents on wired stages, not the database. Keys
+must match what the stage stores; the snooped type must match the queue payload (or
+a registered transform). If data already passed to the DB stage, use flush-then-query
+instead.
+
+[#faq-async-eval-hangs]
+=== "AsyncDatabaseAccessor eval hangs or times out"
+
+The DB thread may be blocked on a long transaction or crashed. Do not call `eval`
+from inside a `DatabaseStage` (deadlock). Set a non-zero `timeout_seconds` during
+development to surface hangs (<<part-vi,Part VI>>).
+
+[appendix]
+[#appendix-migration-guide]
+== Migration Guide
+
+Paths for teams replacing ad-hoc data plumbing with SimDB. Each is incremental --
+you do not need all three at once.
+
+=== From "write everything to files" to one SQLite database
+
+*Problem.* Per-metric log files, ad-hoc directories, post-processing scripts that
+merge and repair formats after every run.
+
+*Approach.*
+
+1. *Inventory outputs* -- list every file type, who reads it, and what queries
+   they run (filter by time? by component name?).
+2. *Design schema first* (<<part-iii,Part III>>, <<part-viii,Part VIII>> <<ch-36-schema-pipeline-together,Chapter 36>>) -- columns for anything you
+   filter on; blobs for bulk payloads you only read whole.
+3. *Replace writes incrementally* -- one metric family at a time; keep legacy
+   files behind a flag until the DB path is verified.
+4. *Add a pipeline when the sim thread must not block* -- producer pushes to the
+   head queue; compress + DB stage at the tail (<<part-iv,Part IV>>).
+5. *Wrap in `simdb::App`* when multiple subsystems share one database and lifecycle
+   (<<part-v,Part V>>).
+6. *Retire file writers* when tests prove query/export from `.db` replaces them.
+
+*Win.* One artifact per run, queryable with SQL, Python, or your viewer; no merge
+step; SimDB handles concurrent writes safely.
+
+=== From raw SQLite (or a thin wrapper) to the SimDB SQLite interface
+
+*Problem.* Hand-written `CREATE TABLE`, manual prepared statements, custom retry
+logic, `uint64_t` and blob bugs.
+
+*Approach.*
+
+1. Express tables as `simdb::Schema` instead of SQL DDL strings.
+2. Replace raw INSERTs with `SQL_TABLE` / `SQL_VALUES` and typed record handles.
+3. Replace ad-hoc SELECT strings with `createQuery` and bound `select()` variables.
+4. Wrap multi-row writes in `safeTransaction` (or let database stages batch for you).
+5. Run the `test/sqlite/**` regressions alongside your port to validate parity (<<part-ii,Part II>>).
+
+*Keep.* External tools that already read SQLite -- the file format remains standard
+SQLite. SimDB adds type safety and retry semantics, not a proprietary container.
+
+=== From a hand-rolled thread pipeline to SimDB stages
+
+*Problem.* Custom worker threads, queues, condition variables, and "one thread owns
+SQLite" conventions copied into every project.
+
+*Approach.*
+
+1. *Map each worker to a stage* -- one responsibility per stage; move-only payloads
+   between queues (<<part-iv,Part IV>>, <<part-viii,Part VIII>> Ch 37).
+2. *Replace your DB thread* with `DatabaseStage` + `Flusher` -- do not keep a
+   second SQLite writer.
+3. *Replace cross-thread DB calls* with `AsyncDatabaseAccessor::eval` (<<part-vi,Part VI>>).
+4. *Replace debug freezes* with `ScopedRunnableDisabler` + flush.
+5. *Delete home-grown retry/transaction code* where `safeTransaction` and
+   `FlusherWithTransaction` cover the same ground.
+
+*Pitfall.* Porting thread-for-thread without rethinking stage boundaries recreates
+the old queue graph with extra overhead. Merge idle stages; split saturated ones
+using perf reports (<<part-v,Part V>>, <<part-viii,Part VIII>> <<ch-38-performance-tuning,Chapter 38>>).
+
+=== A clean break vs. gradual adoption
+
+SimDB is designed as a *replacement* architecture for tangled data paths (README:
+"A Clean Break for Complex Codebases"), not a shim around every legacy writer.
+Gradual migration works best *per metric or subsystem*, not by running two parallel
+pipelines inside one app forever. Pick a boundary -- one database, one pipeline
+per app, multiple heads if you need several producers -- and converge writers
+there until legacy paths can be deleted.
+
+When migration is done, your simulator talks to SimDB at the edges (collect /
+process / teardown); everything else is SQL, analysis scripts, or a viewer on the
+`.db` file.

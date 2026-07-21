@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/Flusher.hpp"
 #include "simdb/pipeline/Stage.hpp"
 #include <map>
@@ -55,17 +56,11 @@ public:
     template <typename StageType, typename... StageCtorArgs>
     StageType* addStage(const std::string& name, StageCtorArgs&&... args)
     {
-        if (state_ != State::ACCEPTING_STAGES)
-        {
-            throw DBException("Cannot add stage '" + name + "' to pipeline '" + pipeline_name_ +
-                              "'; not accepting stages.");
-        }
+        simdb_assert(state_ == State::ACCEPTING_STAGES,
+                     "Cannot add stage '" + name + "' to pipeline '" + pipeline_name_ + "'; not accepting stages.");
 
         auto& stage = stages_[name];
-        if (stage)
-        {
-            throw DBException("Stage '" + name + "' already exists in pipeline '" + pipeline_name_ + "'.");
-        }
+        simdb_assert(!stage, "Stage '" + name + "' already exists in pipeline '" + pipeline_name_ + "'.");
         stage = std::make_unique<StageType>(std::forward<StageCtorArgs>(args)...);
         stage->setName_(name);
         stages_in_order_.push_back(name);
@@ -76,11 +71,8 @@ public:
     /// \throws DBException if not accepting stages.
     void noMoreStages()
     {
-        if (state_ != State::ACCEPTING_STAGES)
-        {
-            throw DBException("Cannot finalize stages for pipeline '" + pipeline_name_ +
-                              "'; stage changes already finalized.");
-        }
+        simdb_assert(state_ == State::ACCEPTING_STAGES,
+                     "Cannot finalize stages for pipeline '" + pipeline_name_ + "'; stage changes already finalized.");
         for (auto& [stage_name, stage] : stages_)
         {
             stage->mergeQueueRepo_(queue_repo_);
@@ -93,10 +85,8 @@ public:
     /// \throws DBException if not accepting bindings.
     void bind(const std::string& output_port_full_name, const std::string& input_port_full_name)
     {
-        if (state_ != State::ACCEPTING_BINDINGS)
-        {
-            throw DBException("Cannot bind ports for pipeline '" + pipeline_name_ + "'; not accepting bindings.");
-        }
+        simdb_assert(state_ == State::ACCEPTING_BINDINGS,
+                     "Cannot bind ports for pipeline '" + pipeline_name_ + "'; not accepting bindings.");
         queue_repo_.bind(output_port_full_name, input_port_full_name);
     }
 
@@ -104,11 +94,8 @@ public:
     /// \throws DBException if not accepting bindings.
     void noMoreBindings()
     {
-        if (state_ != State::ACCEPTING_BINDINGS)
-        {
-            throw DBException("Cannot finalize bindings for pipeline '" + pipeline_name_ +
-                              "'; binding changes already finalized.");
-        }
+        simdb_assert(state_ == State::ACCEPTING_BINDINGS, "Cannot finalize bindings for pipeline '" + pipeline_name_ +
+                                                              "'; binding changes already finalized.");
         queue_repo_.finalizeBindings();
         state_ = State::BINDINGS_COMPLETE;
     }
@@ -117,10 +104,8 @@ public:
     /// \tparam T Element type of the queue.
     template <typename T> simdb::ConcurrentQueue<T>* getInPortQueue(const std::string& port_full_name)
     {
-        if (state_ != State::BINDINGS_COMPLETE && state_ != State::FINALIZED)
-        {
-            throw DBException("Cannot access port queues until noMoreBindings() is called.");
-        }
+        simdb_assert(state_ == State::BINDINGS_COMPLETE || state_ == State::FINALIZED,
+                     "Cannot access port queues until noMoreBindings() is called.");
         return queue_repo_.getInPortQueue<T>(port_full_name);
     }
 
@@ -128,10 +113,8 @@ public:
     /// \tparam T Element type of the queue.
     template <typename T> simdb::ConcurrentQueue<T>* getOutPortQueue(const std::string& port_full_name)
     {
-        if (state_ != State::BINDINGS_COMPLETE && state_ != State::FINALIZED)
-        {
-            throw DBException("Cannot access port queues until noMoreBindings() is called.");
-        }
+        simdb_assert(state_ == State::BINDINGS_COMPLETE || state_ == State::FINALIZED,
+                     "Cannot access port queues until noMoreBindings() is called.");
         return queue_repo_.getOutPortQueue<T>(port_full_name);
     }
 
@@ -141,11 +124,8 @@ public:
     void assignStageThreads(std::vector<std::unique_ptr<PollingThread>>& threads,
                             std::unique_ptr<DatabaseThread>& database_thread)
     {
-        if (state_ != State::BINDINGS_COMPLETE)
-        {
-            throw DBException("Cannot assign stage threads for pipeline '" + pipeline_name_ +
-                              "; noMoreBindings() never called");
-        }
+        simdb_assert(state_ == State::BINDINGS_COMPLETE,
+                     "Cannot assign stage threads for pipeline '" + pipeline_name_ + "; noMoreBindings() never called");
 
         queue_repo_.validateQueues();
 
@@ -169,10 +149,7 @@ public:
         for (const auto& name : ordered_stage_names)
         {
             auto it = stages_.find(name);
-            if (it == stages_.end())
-            {
-                throw DBException("Stage does not exist: ") << name;
-            }
+            simdb_assert(it != stages_.end(), "Stage does not exist: " << name);
             stages.emplace_back(it->second.get());
         }
 

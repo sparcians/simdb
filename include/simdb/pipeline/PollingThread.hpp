@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/Runnable.hpp"
 #include "simdb/utils/StreamFormatters.hpp"
 
@@ -44,11 +44,9 @@ public:
     /// \throws DBException if called while the thread is running.
     void addRunnable(Runnable* runnable)
     {
-        if (is_running_)
-        {
-            throw DBException("Cannot add runnables while thread is running");
-        }
+        simdb_assert(!is_running_, "Cannot add runnables while thread is running");
         runnables_.emplace_back(runnable);
+        runnable->thread_ = this;
     }
 
     /// \brief Return the Runnables on this thread.
@@ -189,10 +187,7 @@ public:
             return;
         }
 
-        auto now = std::chrono::high_resolution_clock::now();
-        const std::chrono::duration<double> dur = now - start_;
-        const auto total_elap_seconds = dur.count();
-        const auto pct_time_sleeping = (total_sleep_seconds_ / total_elap_seconds) * 100;
+        const auto pct_time_sleeping = getSleepPct();
         const auto pct_time_working = 100 - pct_time_sleeping;
 
         std::cout << "Thread containing:\n";
@@ -208,6 +203,15 @@ public:
         std::cout << "        Pct time sleeping:  " << std::fixed << std::setprecision(1) << pct_time_sleeping << "%\n";
         std::cout << "        Pct time working:   " << std::fixed << std::setprecision(1) << pct_time_working << "%\n";
         std::cout << "\n";
+    }
+
+    double getSleepPct() const
+    {
+        auto now = std::chrono::high_resolution_clock::now();
+        const std::chrono::duration<double> dur = now - start_;
+        const auto total_elap_seconds = dur.count();
+        const auto pct_time_sleeping = (total_sleep_seconds_ / total_elap_seconds) * 100;
+        return pct_time_sleeping;
     }
 
 private:

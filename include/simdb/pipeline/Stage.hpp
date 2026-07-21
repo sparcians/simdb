@@ -2,12 +2,14 @@
 
 #pragma once
 
-#include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/DatabaseAccessor.hpp"
 #include "simdb/pipeline/DatabaseThread.hpp"
 #include "simdb/pipeline/PollingThread.hpp"
 #include "simdb/pipeline/QueueRepo.hpp"
 #include "simdb/pipeline/Runnable.hpp"
+#include "simdb/utils/Compress.hpp"
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 
@@ -96,6 +98,42 @@ private:
 };
 
 /*!
+ * \class CompressionStage
+ *
+ * \brief For stages that perform zlib compression, subclassing from
+ * CompressionStage adds an API to get the best compression level given
+ * the thread's current pct time spent sleeping vs working.
+ */
+class CompressionStage : public Stage
+{
+public:
+    // \brief Construct
+    // \param force_compress_regardless If true, the minimum compression
+    // level will always be 1 (fastest compression) even if the thread
+    // is not keeping up (never sleeping). If false, level=0 can be
+    // returned to denote "thread is too slow; do not compress"
+    CompressionStage(bool force_compress_regardless = true) :
+        force_compress_regardless_(force_compress_regardless)
+    {
+    }
+
+protected:
+    int getBestCompressionLevel_() const
+    {
+        const auto sleep_pct = std::clamp(getThread_()->getSleepPct(), 0.0, 100.0);
+
+        // Idle threads can spend CPU on better compression; busy threads favor speed.
+        const int min_level = force_compress_regardless_ ? static_cast<int>(CompressionLevel::FASTEST)
+                                                         : static_cast<int>(CompressionLevel::DISABLED);
+        const int max_level = static_cast<int>(CompressionLevel::HIGHEST);
+        return min_level + static_cast<int>((max_level - min_level) * sleep_pct / 100.0 + 0.5);
+    }
+
+private:
+    const bool force_compress_regardless_;
+};
+
+/*!
  * \class DatabaseStageBase
  *
  * \brief Base for stages that run on the dedicated DatabaseThread and use
@@ -126,19 +164,13 @@ template <typename AppT> class DatabaseStage : public DatabaseStageBase
 protected:
     DatabaseManager* getDatabaseManager_()
     {
-        if (!db_accessor_)
-        {
-            throw DBException("DatabaseAccessor not initialized");
-        }
+        simdb_assert(db_accessor_, "DatabaseAccessor not initialized");
         return db_accessor_->getDatabaseManager();
     }
 
     PreparedINSERT* getTableInserter_(const std::string& tbl_name)
     {
-        if (!db_accessor_)
-        {
-            throw DBException("DatabaseAccessor not initialized");
-        }
+        simdb_assert(db_accessor_, "DatabaseAccessor not initialized");
         return db_accessor_->template getTableInserter<AppT>(tbl_name);
     }
 

@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/Queue.hpp"
 #include <set>
 
@@ -43,11 +43,8 @@ public:
     InputQueuePlaceholder(ConcurrentQueue<T>*& queue) :
         queue_(queue)
     {
-        if (queue_)
-        {
-            throw DBException("Input queue placeholder cannot be initialized "
+        simdb_assert(!queue_, "Input queue placeholder cannot be initialized "
                               "with non-null queue pointer.");
-        }
     }
 
     std::unique_ptr<QueueBase> createQueue() override
@@ -60,10 +57,7 @@ public:
     void assignQueue(QueueBase* queue) override
     {
         auto typed_queue = dynamic_cast<Queue<T>*>(queue);
-        if (!typed_queue)
-        {
-            throw DBException("Incompatible queue types in binding");
-        }
+        simdb_assert(typed_queue, "Incompatible queue types in binding");
         queue_ = &typed_queue->get();
     }
 
@@ -93,11 +87,8 @@ public:
     OutputQueuePlaceholder(ConcurrentQueue<T>*& queue) :
         queue_(queue)
     {
-        if (queue_)
-        {
-            throw DBException("Output queue placeholder cannot be initialized "
+        simdb_assert(!queue_, "Output queue placeholder cannot be initialized "
                               "with non-null queue pointer.");
-        }
     }
 
     /// \brief Create a new Queue and return ownership.
@@ -112,10 +103,7 @@ public:
     void assignQueue(QueueBase* queue) override
     {
         auto typed_queue = dynamic_cast<Queue<T>*>(queue);
-        if (!typed_queue)
-        {
-            throw DBException("Incompatible queue types in binding");
-        }
+        simdb_assert(typed_queue, "Incompatible queue types in binding");
         queue_ = &typed_queue->get();
     }
 
@@ -142,16 +130,10 @@ public:
     /// \throws DBException if stage name already set, or port name already exists.
     template <typename T> void addInPortPlaceholder(const std::string& port_name, ConcurrentQueue<T>*& queue)
     {
-        if (!stage_name_.empty())
-        {
-            throw DBException("You may only add in/out ports in Stage subclass constructors");
-        }
+        simdb_assert(stage_name_.empty(), "You may only add in/out ports in Stage subclass constructors");
 
         auto& placeholder = input_placeholders_[port_name];
-        if (placeholder)
-        {
-            throw DBException("Input port placeholder '" + port_name + "' already exists in QueueRepo");
-        }
+        simdb_assert(!placeholder, "Input port placeholder '" + port_name + "' already exists in QueueRepo");
         placeholder = std::make_unique<InputQueuePlaceholder<T>>(queue);
     }
 
@@ -159,16 +141,10 @@ public:
     /// \throws DBException if stage name already set, or port name already exists.
     template <typename T> void addOutPortPlaceholder(const std::string& port_name, ConcurrentQueue<T>*& queue)
     {
-        if (!stage_name_.empty())
-        {
-            throw DBException("You may only add in/out ports in Stage subclass constructors");
-        }
+        simdb_assert(stage_name_.empty(), "You may only add in/out ports in Stage subclass constructors");
 
         auto& placeholder = output_placeholders_[port_name];
-        if (placeholder)
-        {
-            throw DBException("Output port placeholder '" + port_name + "' already exists in QueueRepo");
-        }
+        simdb_assert(!placeholder, "Output port placeholder '" + port_name + "' already exists in QueueRepo");
         placeholder = std::make_unique<OutputQueuePlaceholder<T>>(queue);
     }
 
@@ -176,11 +152,9 @@ public:
     /// \throws DBException if renaming or if name already set differently.
     void setStageName(const std::string& stage_name)
     {
-        if (stage_name_ != stage_name && !stage_name_.empty())
-        {
-            throw DBException("Cannot rename StageQueueRepo stage name from '" + stage_name_ + "' to '" + stage_name +
-                              "'. Can only set the stage name once.");
-        }
+        simdb_assert(stage_name_ == stage_name || stage_name_.empty(),
+                     "Cannot rename StageQueueRepo stage name from '" + stage_name_ + "' to '" + stage_name +
+                         "'. Can only set the stage name once.");
         stage_name_ = stage_name;
 
         std::vector<std::string> keys_to_delete;
@@ -232,27 +206,20 @@ public:
     /// \throws DBException if not accepting stages or if a port name collides.
     void merge(StageQueueRepo& other)
     {
-        if (state_ != RepoState::ACCEPTING_STAGES)
-        {
-            throw DBException("Cannot merge StageQueueRepo; PipelineQueueRepo "
-                              "not accepting stages.");
-        }
+        simdb_assert(state_ == RepoState::ACCEPTING_STAGES, "Cannot merge StageQueueRepo; PipelineQueueRepo "
+                                                            "not accepting stages.");
 
         for (auto& [key, placeholder] : other.input_placeholders_)
         {
-            if (input_placeholders_.find(key) != input_placeholders_.end())
-            {
-                throw DBException("Input port placeholder '" + key + "' already exists in QueueRepo");
-            }
+            simdb_assert(input_placeholders_.find(key) == input_placeholders_.end(),
+                         "Input port placeholder '" + key + "' already exists in QueueRepo");
             input_placeholders_[key] = std::move(placeholder);
         }
 
         for (auto& [key, placeholder] : other.output_placeholders_)
         {
-            if (output_placeholders_.find(key) != output_placeholders_.end())
-            {
-                throw DBException("Output port placeholder '" + key + "' already exists in QueueRepo");
-            }
+            simdb_assert(output_placeholders_.find(key) == output_placeholders_.end(),
+                         "Output port placeholder '" + key + "' already exists in QueueRepo");
             output_placeholders_[key] = std::move(placeholder);
         }
 
@@ -264,11 +231,8 @@ public:
     /// \throws DBException if not accepting stages.
     void noMoreStages()
     {
-        if (state_ != RepoState::ACCEPTING_STAGES)
-        {
-            throw DBException("Cannot finalize stages; PipelineQueueRepo not "
-                              "accepting stages.");
-        }
+        simdb_assert(state_ == RepoState::ACCEPTING_STAGES, "Cannot finalize stages; PipelineQueueRepo not "
+                                                            "accepting stages.");
         state_ = RepoState::ACCEPTING_BINDINGS;
     }
 
@@ -276,10 +240,8 @@ public:
     /// \throws DBException if not accepting bindings.
     void bind(const std::string& output_port_full_name, const std::string& input_port_full_name)
     {
-        if (state_ != RepoState::ACCEPTING_BINDINGS)
-        {
-            throw DBException("Cannot bind ports; PipelineQueueRepo not accepting bindings.");
-        }
+        simdb_assert(state_ == RepoState::ACCEPTING_BINDINGS,
+                     "Cannot bind ports; PipelineQueueRepo not accepting bindings.");
         port_bindings_[output_port_full_name] = input_port_full_name;
     }
 
@@ -287,24 +249,17 @@ public:
     /// \throws DBException if not accepting bindings or if a port is missing.
     void finalizeBindings()
     {
-        if (state_ != RepoState::ACCEPTING_BINDINGS)
-        {
-            throw DBException("Cannot finalize bindings; PipelineQueueRepo not "
-                              "accepting bindings.");
-        }
+        simdb_assert(state_ == RepoState::ACCEPTING_BINDINGS, "Cannot finalize bindings; PipelineQueueRepo not "
+                                                              "accepting bindings.");
 
         for (const auto& [out_port, in_port] : port_bindings_)
         {
             auto out_it = output_placeholders_.find(out_port);
-            if (out_it == output_placeholders_.end())
-            {
-                throw DBException("Output port placeholder '" + out_port + "' not found in QueueRepo");
-            }
+            simdb_assert(out_it != output_placeholders_.end(),
+                         "Output port placeholder '" + out_port + "' not found in QueueRepo");
             auto in_it = input_placeholders_.find(in_port);
-            if (in_it == input_placeholders_.end())
-            {
-                throw DBException("Input port placeholder '" + in_port + "' not found in QueueRepo");
-            }
+            simdb_assert(in_it != input_placeholders_.end(),
+                         "Input port placeholder '" + in_port + "' not found in QueueRepo");
 
             auto queue = out_it->second->createQueue();
             queues_.emplace_back(std::move(queue));
@@ -339,22 +294,14 @@ public:
     /// \throws DBException if bindings not finalized, port not found, or type mismatch.
     template <typename T> ConcurrentQueue<T>* getInPortQueue(const std::string& port_full_name)
     {
-        if (state_ != RepoState::BINDINGS_COMPLETE)
-        {
-            throw DBException("Cannot access port queues until "
-                              "finalizeBindings() is called.");
-        }
+        simdb_assert(state_ == RepoState::BINDINGS_COMPLETE, "Cannot access port queues until "
+                                                             "finalizeBindings() is called.");
 
         auto it = input_placeholders_.find(port_full_name);
-        if (it == input_placeholders_.end())
-        {
-            throw DBException("Input port placeholder '" + port_full_name + "' not found in PipelineQueueRepo");
-        }
+        simdb_assert(it != input_placeholders_.end(),
+                     "Input port placeholder '" + port_full_name + "' not found in PipelineQueueRepo");
         auto typed_placeholder = dynamic_cast<InputQueuePlaceholder<T>*>(it->second.get());
-        if (!typed_placeholder)
-        {
-            throw DBException("Incompatible queue types for input port '" + port_full_name + "'");
-        }
+        simdb_assert(typed_placeholder, "Incompatible queue types for input port '" + port_full_name + "'");
         unbound_input_queues_.erase(port_full_name);
         return typed_placeholder->getQueue();
     }
@@ -364,22 +311,14 @@ public:
     /// \throws DBException if bindings not finalized, port not found, or type mismatch.
     template <typename T> ConcurrentQueue<T>* getOutPortQueue(const std::string& port_full_name)
     {
-        if (state_ != RepoState::BINDINGS_COMPLETE)
-        {
-            throw DBException("Cannot access port queues until "
-                              "finalizeBindings() is called.");
-        }
+        simdb_assert(state_ == RepoState::BINDINGS_COMPLETE, "Cannot access port queues until "
+                                                             "finalizeBindings() is called.");
 
         auto it = output_placeholders_.find(port_full_name);
-        if (it == output_placeholders_.end())
-        {
-            throw DBException("Output port placeholder '" + port_full_name + "' not found in PipelineQueueRepo");
-        }
+        simdb_assert(it != output_placeholders_.end(),
+                     "Output port placeholder '" + port_full_name + "' not found in PipelineQueueRepo");
         auto typed_placeholder = dynamic_cast<OutputQueuePlaceholder<T>*>(it->second.get());
-        if (!typed_placeholder)
-        {
-            throw DBException("Incompatible queue types for output port '" + port_full_name + "'");
-        }
+        simdb_assert(typed_placeholder, "Incompatible queue types for output port '" + port_full_name + "'");
         unbound_output_queues_.erase(port_full_name);
         return typed_placeholder->getQueue();
     }
@@ -410,10 +349,7 @@ public:
         }
 
         auto err = oss.str();
-        if (!err.empty())
-        {
-            throw DBException(err);
-        }
+        simdb_assert(err.empty(), err);
     }
 
 private:

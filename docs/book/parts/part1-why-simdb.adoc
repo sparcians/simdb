@@ -1,0 +1,496 @@
+[#part-i]
+= Part I: Why SimDB
+
+This part answers the question a brand-new user asks first: _"What is SimDB, and
+why would I choose it over the tools I already know?"_ No code yet -- just the
+problem, the landscape, and the mental model you will carry through the rest of
+the book.
+
+[#ch-01-introduction]
+== Introduction
+
+Every simulation produces data, and sooner or later that data becomes the
+project. Statistics pile up. Traces balloon. Someone wants a live view of what
+the model is doing, someone else wants to replay a run from an hour ago, and a
+third person wants to compare a thousand runs at once. The simulator was the
+interesting part; moving its data around safely and quickly turns into a
+second, unplanned engineering project.
+
+SimDB exists to make that second project disappear.
+
+=== The one-sentence version
+
+SimDB is a header-only C++17 module that unifies *concurrent data pipelines*
+with *SQLite* to power scalable simulation data engines, analysis tooling, and
+user-interface backends.
+
+"Header-only" means there is no library to build and link against separately:
+you include SimDB's headers and compile. "Concurrent data pipelines" means you
+can process data on multiple threads without hand-writing the locking and
+coordination that usually comes with that. And "SQLite" means everything your
+simulation emits can land in a single, ordinary database file that any tool,
+language, or teammate can open later.
+
+The thesis of the whole project fits on one line:
+
+[.text-center]
+*SQLite + Concurrency + Flexibility -- safe and fast.*
+
+Plenty of libraries give you concurrency. A different set of libraries give you
+convenient access to SQLite. SimDB's reason to exist is that it gives you *both
+at once*, wired together so the fast path is also the safe path. We will make
+that claim concrete when we survey the alternatives later in this part.
+
+=== Who this book is for
+
+This book is written for a specific reader: the *domain expert*. You might be a
+hardware architect, a performance modeler, or a researcher. You know your
+problem domain deeply, you have a real imagination for what you want to build,
+and you write code to get your work done -- but you do not write software for a
+living, and you would rather not become a concurrency specialist just to save
+your results.
+
+That reader shaped SimDB's single most important design imperative: it should be
+*easy to use and hard to misuse*. SimDB was deliberately not built "for software
+engineers, by software engineers". The sharp edges that usually come with
+threading and databases -- race conditions, lock contention, half-written files,
+transactions that are too small to be fast or too large to be safe -- are
+handled for you by default. You are meant to spend your attention on _what_ to
+capture and _how_ to look at it, not on the machinery that moves it.
+
+[NOTE]
+====
+You do not need to be a database or threading expert to use this book. Where a
+concept from either world matters, we introduce it in plain terms the first time
+it comes up.
+====
+
+If you _are_ a career software engineer, you are very welcome here too -- SimDB
+will not get in your way, and the later parts expose enough control for advanced
+use. But when a tradeoff had to be made between raw flexibility and a design
+that is hard to get wrong, SimDB chose the latter, and this book takes the same
+stance.
+
+=== The three pillars
+
+SimDB's value rests on three ideas that recur throughout the book.
+
+*Unified pipelines and SQLite.* SimDB pairs a concurrent processing pipeline
+with native SQLite integration, so database work is batched and routed
+automatically onto a single database thread. You get the throughput of a
+purpose-built pipeline and the convenience of a real, queryable database,
+without the two fighting each other for access.
+
+*High performance.* SimDB is built for the kind of throughput that fast
+simulations demand -- and it gets there by doing the heavy data work on its own
+threads, so your simulator itself does not have to be multi-threaded to benefit.
+It minimizes transaction overhead, eliminates database access contention, and
+moves data through the pipeline by move (rather than copy) whenever you let it.
+
+*A clean break for complex codebases.* Large simulation projects tend to
+accumulate tangled data paths and "just write it to a file" habits that are hard
+to unwind. SimDB replaces that sprawl with one unified, optimized path from
+"data produced" to "data stored", which lets teams reach a performant solution
+with fewer moving parts.
+
+=== What you can build
+
+SimDB is a foundation, not a single-purpose tool. The same building blocks
+support a wide range of workflows:
+
+* Fast, scalable simulation statistics engines.
+* Backends for live dashboards or post-run analysis user interfaces.
+* Simulation state replayers that reconstruct what the model looked like at any
+  point in time.
+* Aggregate analysis across hundreds or thousands of simulation runs.
+
+If your work involves producing simulation data and then needing to store,
+inspect, replay, or compare it, it very likely fits one of these shapes -- and
+<<part-vii,Part VII>> walks through a complete, real example (Argos) that does several of
+them at once.
+
+=== How to read this book
+
+The book is built in layers, and the parts are ordered so each one leans only on
+what came before.
+
+* *<<part-i,Part I>>* (this part) makes the case for SimDB: the problem it solves, how it
+  compares to the alternatives, and the mental model you will carry everywhere
+  else.
+* *Parts <<part-ii,Part II>> and <<part-iii,Part III>>* get you productive with the standalone SQLite interface --
+  installing SimDB, building a first program, and working with schemas, inserts,
+  queries, and transactions. This is where code snippets begin.
+* *Parts <<part-iv,Part IV>> through <<part-vi,Part VI>>* introduce the concurrent pipeline and the application
+  framework that composes pipelines and schemas into cohesive units.
+* *<<part-vii,Part VII>>* is an end-to-end case study of Argos, SimDB's flagship
+  collection-and-visualization system.
+* *Parts <<part-viii,Part VIII>> and <<part-ix,Part IX>>* collect patterns, recipes, and reference material for when
+  you are building in earnest.
+
+[TIP]
+====
+This part is intentionally concept-first: there is no code in it. If you learn
+best by running something, you can jump to <<part-ii,Part II>> now and refer back here when
+you want the "why" behind what you are doing.
+====
+
+Wherever you start, the next chapter is the place to understand the problem
+SimDB was built to solve -- because the shape of the solution follows directly
+from it.
+
+[#ch-02-simulation-data-problem]
+== The Simulation Data Problem
+
+Before we can appreciate what SimDB does, it helps to look squarely at the
+problem it was built to solve. If you have written a simulator of any real size,
+some of what follows will feel familiar -- perhaps uncomfortably so.
+
+=== Where the data comes from
+
+A simulation is a data generator. As it runs, it produces a steady stream of
+things you will want to keep and look at later:
+
+* *Statistics* -- counters, rates, histograms, and rolled-up metrics that
+  summarize how the model behaved.
+* *Traces* -- fine-grained, often per-cycle records of what happened, used for
+  debugging and detailed analysis.
+* *Checkpoints* -- snapshots of the model's state, so a run can be inspected or
+  replayed after the fact.
+* *Events* -- notable occurrences worth logging as they happen.
+* *User-interface updates* -- data feeding a live dashboard or a
+  post-run visualization tool.
+
+Individually, none of these is hard to write down. The difficulty is one of
+_scale and speed_: a fast simulator can produce this data faster than a naive
+output path can absorb it. The quicker your model runs, the more the plumbing
+that carries its data becomes the thing that limits you. It is a common and
+demoralizing surprise to discover that a carefully optimized simulator spends
+much of its time simply trying to save its own results.
+
+=== Two hard problems at once
+
+The reason this plumbing is hard is that it forces two difficult requirements
+together:
+
+. The data handling must not *stall the simulation*. Even a single-threaded
+  model runs fast, and it cannot afford to stop and wait on disk (or on
+  compression, or on a database commit) every time it emits a value. The heavy
+  data work has to happen off to the side -- concurrently -- so the simulation
+  can keep moving.
+. The data must be *persisted durably*, in a form you can query and share long
+  after the run is over.
+
+Each of these is manageable on its own. Together they are in tension. To keep up
+without stalling, the data work must be spread across background threads -- but a
+file on disk fundamentally wants a single writer. Resolve that tension the
+obvious ways and you get one of two bad outcomes: serialize everything through
+one lock and the simulation crawls, or let threads race and you get corruption,
+lost data, and heisenbugs.
+
+[NOTE]
+====
+Your simulator does not need to be multi-threaded for any of this to matter, and
+you do not need to write threaded code to fix it. Most hardware simulators are
+single-threaded, and that is perfectly fine: SimDB supplies the concurrency for
+you, running the data and database work on its own background threads while your
+model runs on its own. The tension above is SimDB's problem to solve, not yours.
+====
+
+=== The hidden costs of doing it by hand
+
+Reaching for SQLite directly is a reasonable instinct -- it is a real database
+in a single file, with no server to run. But used naively to keep up with a fast
+simulator, it has sharp edges that are easy to find and hard to remove:
+
+* *Tiny transactions.* Committing one row at a time turns every write into a
+  durability barrier. The overhead dwarfs the actual work, and throughput
+  collapses.
+* *Implicit file locks.* SQLite guards the database file with locks. When
+  several threads try to write at once, they block, retry, or simply fail with
+  "database is locked".
+* *Schema-level contention.* Coordinating which thread may touch which table,
+  and when, becomes your responsibility -- and getting it wrong is subtle.
+
+Handle all of this correctly and you have, in effect, taken a second job as a
+part-time database concurrency engineer. That is precisely the job SimDB is
+meant to spare you.
+
+=== The anti-patterns SimDB replaces
+
+Faced with these costs, large simulation projects tend to drift into a few
+recognizable habits, none of which age well:
+
+* *"Write everything to files."* Each subsystem invents its own output file and
+  its own format. You end up with many formats, many readers, and many bugs --
+  and no single place to ask a question that spans them.
+* *Ad hoc binary formats.* Fast to write today, painful forever after: they are
+  hard to version, hard to evolve, and hard for anyone (including future you) to
+  read back.
+* *Tangled data paths and unbounded coupling.* The simulator's core sprouts
+  tendrils into output code until you can no longer change one without breaking
+  the other.
+
+These patterns are not the sign of a careless team; they are the natural result
+of the underlying problem being genuinely hard. SimDB's proposition is that the
+problem is better solved once, underneath, than re-solved badly in every
+project. It replaces the sprawl with one unified, highly optimized path -- from
+"data produced" to "data stored" -- so teams reach a performant solution with
+far fewer moving parts.
+
+The obvious question is whether some existing library already does this. That is
+what the next chapter examines.
+
+[#ch-03-landscape]
+== The Landscape
+
+<<ch-02-simulation-data-problem,Chapter 2>> ended with a fair question: surely some existing library already
+solves this? There are many excellent libraries in this space, and it is worth
+understanding them -- both to see why none of them quite fits, and to know when
+one of them is actually the better choice than SimDB.
+
+When you go looking, you find two separate shelves. On one are toolkits for
+moving work across threads. On the other are conveniences for talking to SQLite.
+What you do not find is something that is genuinely both.
+
+=== Concurrency and dataflow toolkits
+
+The first shelf holds mature, well-respected libraries for concurrency and
+dataflow:
+
+* *Intel TBB (oneTBB)* -- a flow graph, parallel algorithms, and concurrent
+  containers.
+* *RaftLib* -- streaming "kernels" connected by data streams.
+* *Folly* -- building blocks such as lock-free queues, futures, and executors.
+* *HPX* -- an asynchronous, many-task runtime.
+* *CAF* -- the actor model for C++.
+
+These are very good at what they do: they help you spread work across threads
+and pass data between the pieces. What none of them offers is any notion of
+_durable, queryable storage_. Persistence is left entirely to you -- which drops
+you right back into the SQLite problems from the previous chapter. They solve
+the "concurrently" half of the problem and are silent on the "persist it
+durably" half.
+
+=== SQLite convenience libraries
+
+The second shelf holds pleasant C++ wrappers over SQLite:
+
+* *SQLiteCpp* -- a modern, RAII-style C++ wrapper.
+* *SOCI* -- a general database access library with a SQLite backend.
+* *sqlite_orm* and *sqlpp11* -- type-safe, ORM- and query-builder-style
+  interfaces.
+
+These make SQL access in C++ genuinely nicer to write and safer to get right.
+What none of them offers is a _concurrency model_. They assume you have already
+decided who writes when; batching, locking, and contention remain your problem.
+They are a fine choice when database access is simple and occasional -- and a
+poor one for a high-rate simulation data path, because they leave the hardest
+part exactly where it was.
+
+=== The gap SimDB fills
+
+Neither shelf solves the combined problem, and the combined problem is the whole
+point. SimDB exists to unify a *safe concurrent pipeline* with *first-class
+SQLite*, so that:
+
+* database work is funneled onto a single database thread, with no contention;
+* operations are batched into implicit transactions and retried until they
+  succeed, with no `BEGIN`/`COMMIT` from you;
+* worker threads are shared across independent workloads so they scale together;
+* and the whole thing is approachable enough for a domain expert to use
+  correctly on the first try.
+
+That is the meaning of the one-line thesis from <<ch-01-introduction,Chapter 1>> -- *SQLite +
+Concurrency + Flexibility, safe and fast* -- and it is what no single library on
+either shelf provides.
+
+[NOTE]
+====
+Could you assemble a concurrency toolkit from the first shelf and a SQLite
+wrapper from the second and wire them together yourself? Absolutely -- and you
+would be taking on precisely the hard integration work that SimDB was built to
+do once, carefully, so that you do not have to.
+====
+
+=== When not to use SimDB
+
+Being honest about the fit cuts both ways. SimDB is probably not the right tool
+when:
+
+* *You do not need persistence at all.* If your work is pure in-memory
+  computation with no data to store, a parallel-algorithms library from the
+  first shelf is a lighter choice.
+* *You need neither concurrency nor volume.* If you write only a handful of rows,
+  occasionally, a thin SQLite wrapper (or raw SQLite) is simpler and perfectly
+  adequate.
+* *You need a networked or multi-process database, or streaming across many
+  machines.* Systems like a client/server RDBMS or a distributed log (for
+  example, Kafka) target a different problem. SimDB is designed for a single
+  simulation process writing to a single local database file.
+
+Within its target -- one simulation process producing data that must be stored,
+queried, replayed, or compared, quickly and safely -- SimDB is purpose-built,
+and the rest of this book assumes you are in that target.
+
+With the "why" settled, the next chapter gives you the small vocabulary and
+mental model that everything else in the book builds on.
+
+[#ch-04-core-concepts]
+== Core Concepts & Mental Model
+
+The rest of this book uses a small, consistent vocabulary. If you internalize
+the handful of ideas in this chapter, everything that follows -- schemas,
+pipelines, apps, and the Argos case study -- will feel like variations on a
+theme you already know. There is no code here; this is the map, not the
+territory.
+
+=== One database to rule them all
+
+The first principle is the simplest: *a simulator has one database, and
+everything goes into it*.
+
+Simulation output tends to sprawl. Statistics land in one file, traces in
+another, a debug log somewhere else, and analysis results in a folder nobody can
+find six months later. Each format needs its own reader, its own tooling, and
+its own tribal knowledge. SimDB rejects that sprawl. All of it -- statistics,
+trace data, user-interface updates, analysis results -- is consolidated into a
+single, queryable SQLite database.
+
+That single file is an ordinary SQLite database, which means it is also a
+durable, portable artifact. You can archive it, copy it to a colleague, or open
+it with any SQLite-compatible tool in any language, long after the simulation
+that produced it has finished. The database _is_ the deliverable.
+
+=== The single database thread
+
+The second principle is the one that makes the rest possible: *only one thread
+ever talks to the database*.
+
+A SQLite database lives on the filesystem, and letting many threads hammer a
+filesystem-backed database at once is never fast enough for a high-volume
+simulation -- you get lock contention, retries, and unpredictable stalls. So
+SimDB does the opposite of what a naive design would do: instead of many threads
+racing for the database, every database operation is funneled onto one dedicated
+database thread (and there is only ever one, or none at all).
+
+Concentrating database work on a single thread is what lets SimDB hand you three
+guarantees that would otherwise be your problem to enforce:
+
+* *No user-facing transactions required.* You never write `BEGIN` or `COMMIT`.
+  SimDB gathers many operations together and commits them as large, efficient
+  implicit transactions, which is dramatically faster than many tiny ones.
+* *Retry-on-fail.* If the database is momentarily busy or a table is locked,
+  SimDB keeps retrying the work until it succeeds, rather than failing back to
+  you.
+* *No manual concurrency management.* You do not coordinate access to SQLite,
+  reason about file locks, or worry about schema-level contention. Safe,
+  high-throughput execution under heavy parallel load is the default.
+
+[NOTE]
+====
+"Only one database thread" is a rule about _writing to the database_, not a
+limit on your simulation's parallelism. Your data-processing work can run across
+as many threads as you like; it is only the final hand-off to SQLite that is
+serialized -- on purpose.
+====
+
+=== The object model
+
+SimDB gives you four kinds of building blocks. From the outside in:
+
+* An *App* is a self-contained unit of functionality that owns a database
+  *schema* and, typically, *one pipeline*. A logger is an app; a statistics
+  collector is an app; a UI backend is an app. Several producers usually fan in
+  through *multiple pipeline heads* on that single pipeline rather than through
+  multiple pipelines per app. The guiding paradigm is one simulator with many
+  apps, all writing to the single shared database.
+* A *Pipeline* is an ordered arrangement of stages that transforms data on its
+  way to the database.
+* A *Stage* is one step of work. An ordinary stage runs on its own thread. A
+  special *DatabaseStage* is the only kind of stage allowed to write to the
+  database, and every database stage -- from every app -- runs on that one
+  shared database thread.
+* Stages are wired together with *ports* (a stage's typed inputs and outputs)
+  and *queues*. A queue is a thread-safe, first-in-first-out hand-off that sits
+  between one stage's output and the next stage's input.
+
+Put together, data flows from your simulation, through one or more apps'
+pipelines, and finally onto the single database thread that persists it:
+
+.The SimDB mental model: many apps and threads, one database thread, one database
+[listing]
+----
+  Your simulation
+        |
+        |  hand data to an app (moved when possible, copied when needed)
+        v
+  App .......... owns a Schema and one or more Pipelines
+        |        (a simulator may run many apps over ONE database)
+        v
+  Pipeline ..... a chain of Stages connected by thread-safe Queues
+        |
+        |   [Stage] --queue--> [Stage] --queue--> [DatabaseStage]
+        |    own thread         own thread          shared DB thread
+        v
+  Single database thread
+        |        every DatabaseStage, from every app, runs here and
+        |        ONLY here; it batches writes into implicit transactions
+        |        and retries them until they succeed
+        v
+  One SQLite database  (the single source of truth)
+----
+
+You will meet each of these pieces in detail in Parts <<part-iii,Part III>> through <<part-v,Part V>>, and see
+them assembled into a real system in <<part-vii,Part VII>>. For now it is enough to hold the
+shape in your head: work fans out across many stages and threads, then funnels
+back down to one database thread and one database.
+
+=== The threading model
+
+The durable rule of SimDB's threading is the one you already know: there is
+exactly one database thread, shared by every database stage, and you cannot ask
+for a private one. That constraint is not a limitation to work around -- it is
+the very thing that keeps database access fast and contention-free.
+
+Around that fixed point, the pipeline's other stages run on ordinary worker
+threads. How those worker threads are allocated is an area SimDB is still
+evolving: today the thread count grows with the amount of pipeline work you
+create, so running many apps at once is not yet as thread-efficient as it will
+be. <<part-v,Part V>> returns to this with the specifics; the takeaway here is simply that
+the single database thread is the permanent anchor of the model.
+
+=== Move-only by default
+
+The last idea is about performance. Data travels through a pipeline's queues by
+*move* whenever possible: instead of copying a payload from one stage to the
+next, SimDB transfers ownership of it, which avoids duplicating potentially
+large buffers. When you genuinely need to keep your own copy of the data, you
+can copy instead -- SimDB supports both -- but the fast path, and the default
+you should reach for, is to move.
+
+This is why you will often see large payloads (vectors of statistics, compressed
+byte buffers) flow through a SimDB pipeline with almost no copying overhead. Keep
+"move when you can, copy when you must" in mind and your pipelines will be fast
+by construction.
+
+=== A quick glossary
+
+For reference, here are the core terms as this book uses them:
+
+App:: A self-contained unit that owns a schema and one pipeline (often with
+multiple pipeline heads). Many apps share one database.
+Schema:: The definition of your database's tables and columns.
+DatabaseManager:: The object that owns the SQLite connection and applies your
+schema.
+Pipeline:: An ordered set of stages that transforms and routes data toward the
+database. One app, one pipeline is the usual layout.
+Stage:: One step of work in a pipeline, running on its own thread.
+DatabaseStage:: The special stage that may write to the database; all database
+stages run on the single shared database thread.
+Port:: A typed input or output on a stage.
+Queue (ConcurrentQueue):: The thread-safe FIFO that connects one stage's output
+port to the next stage's input port.
+Pipeline head:: An unbound input port on the first stage -- where producers
+`emplace` work into the pipeline. One pipeline may expose several heads.
+Database thread:: The single dedicated thread through which all database work
+flows.

@@ -5,8 +5,14 @@ class WidgetRenderer:
     def __init__(self, frame):
         self.frame = frame
         cursor = frame.db.cursor()
-        cursor.execute('SELECT MIN(Tick), MAX(Tick) FROM CollectionRecords')
+        cursor.execute('SELECT MIN(Timestamp), MAX(Timestamp) FROM Timestamps')
         self._start_tick, self._end_tick = cursor.fetchone()
+
+        # Recall that uint64_t is stored as a string
+        if isinstance(self._start_tick, str):
+            self._start_tick = int(self._start_tick)
+            self._end_tick = int(self._end_tick)
+
         self._current_tick = self._start_tick
         self._utiliz_handler = IterableUtiliz(self, frame.simhier)
         self._auto_colors_by_key = {}
@@ -103,9 +109,6 @@ class WidgetRenderer:
         return tag
 
     def __UpdateWidgetsOnCurrentTab(self):
-        self.frame.explorer.navtree.UpdateUtilizBitmaps()
-        self.frame.explorer.watchlist.UpdateUtilizBitmaps()
-
         notebook = self.frame.inspector
         page_idx = notebook.GetSelection()
         page = notebook.GetPage(page_idx)

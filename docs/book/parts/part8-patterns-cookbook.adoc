@@ -1,0 +1,779 @@
+[#part-viii]
+= Part VIII: Patterns, Best Practices & Cookbook
+
+You now know how SimDB works part by part. This part is the glue: how to *design*
+with it, how to *tune* and *debug* pipelines, which *application shapes* fit
+common goals (without pretending there is only one architecture), and how to
+*test* that the `.db` file your app produces is correct. No new API surface --
+just the habits and decision frames that keep real projects from fighting the
+library.
+
+This part walks through six topics in order:
+
+* *Schema and pipeline together* -- co-design storage and dataflow before you
+  write stages.
+* *Stage boundaries and payload types* -- split, merge, move-only payloads, and
+  forced-flush behavior.
+* *Performance tuning* -- measure first, turn one knob at a time, respect the
+  single database-thread funnel.
+* *Determinism and debugging* -- freeze, flush, log, and diagnose a concurrent
+  pipeline without guessing.
+* *Application shapes* -- stats engines, live UI backends, replay backends, and
+  farm-scale analysis as decision spaces, not single canonical layouts.
+* *Testing SimDB apps* -- `SimDBTester`, flush/teardown discipline, and
+  verifying the database with a reader that did not write it.
+
+[#ch-36-schema-pipeline-together]
+== Designing Schema and Pipeline Together
+
+The recurring mistake with SimDB is to design the two halves separately -- to lay
+out tables first, then bolt on a pipeline to fill them (or the reverse). The
+schema and the pipeline are two views of one design: the pipeline exists to
+produce exactly the rows and blobs the schema defines, and the schema exists to
+capture exactly what the pipeline can efficiently emit. Design them together.
+
+=== Start from the reads
+
+Begin with the question *"what will I ask this database later?"* Your queries
+determine your schema, and your schema determines what the pipeline's terminal
+database stage must write. If you will filter runs by a status column, that status
+must be a real column, not buried inside a blob. If you will only ever read a
+record back whole, it can be a single blob. Working backward from the reads keeps
+you from persisting data you never query and from burying data you do.
+
+=== Columns or blobs?
+
+The central storage decision is per field: a queryable column, or a byte in a
+blob.
+
+* *Columns* are for values you will *filter, sort, join, or aggregate on* -- ids,
+  names, timestamps, small scalars, enums. They are visible to the Query API from
+  <<part-iii,Part III>>.
+* *Blobs* are for *bulk or opaque payloads* you will read back as a unit -- large
+  vectors, serialized structures, encoded state. They are compact and cheap to
+  write, but SQLite cannot see inside them.
+
+Argos is the worked example: its *metadata* -- clocks, the collectable tree,
+timestamps -- lives in ordinary columns you can query, while the *bulk state* lives
+in compressed blobs in `CollectionRecords`. The rule of thumb: if you would ever
+put it in a `WHERE` clause, it is a column; if you only ever reconstruct it, it is
+a blob.
+
+=== Where compression belongs
+
+Compression is a pipeline decision, not a schema one. Compress *late and off the
+hot path*: a dedicated worker stage just before the database stage, never on the
+thread producing the data. Compress *bulk blobs*, not small columns -- there is
+nothing to gain from compressing an integer. This is exactly the shape of the
+Argos pipeline (stage, then compress, then write) and of `SimplePipeline` from
+<<part-iv,Part IV>>.
+
+=== Persist versus derive
+
+Not everything needs to be stored. Persist what is *expensive to recompute* or
+*needed to answer a query*; derive the cheap and the rare on read. The
+snapshot-and-delta encoding from the Argos case study is the aggressive end of
+this spectrum -- it stores a compact encoding and reconstructs full state on read,
+trading a little read-time work for a much smaller database. Most designs sit
+somewhere in the middle: store the raw facts, compute summaries at read time.
+
+=== Normalized tables versus a blob-of-record
+
+Two shapes recur, and the right one depends on access pattern:
+
+* *Normalized tables* -- data spread across columns and related tables, joinable
+  and queryable, with repeated strings interned to integer ids (the `TinyStrings`
+  pattern from the Argos schema). Choose this when you will slice the data many
+  ways.
+* *Blob-of-record* -- one blob per logical record, written and read as a unit.
+  Choose this when a record is only ever consumed whole and write speed matters
+  more than queryability.
+
+Neither is universally right; many real databases use both, as Argos does. The
+point of this chapter is simply that the choice is made *once, for schema and
+pipeline together* -- the database stage that writes a blob and the table that
+stores it are two ends of the same decision.
+
+[#ch-37-stage-boundaries]
+== Choosing Stage Boundaries & Data Types
+
+Once you know what the pipeline must produce, you have to decide how to *carve it
+into stages* and *what to hand between them*. Both choices have a direct cost:
+every stage is a thread and every boundary is a queue hop. Getting the
+granularity right is most of what separates a pipeline that scales from one that
+spends its time shuffling data.
+
+=== One responsibility per stage -- but not too little
+
+The unit of a stage is a *responsibility*: transform, compress, write. Keeping
+each stage to one job makes the pipeline easy to reason about, easy to reorder,
+and easy to tune, because the per-thread performance report (<<part-v,Part V>>) tells you
+exactly which responsibility is the bottleneck.
+
+The failure mode in the other direction is *tiny stages*. A stage that does almost
+no work still costs a thread, a queue, and a handoff on every item. When the
+handoff costs more than the work, the stage is a net loss -- you have added
+latency and a thread to accomplish nothing. If two adjacent stages are both mostly
+idle, they belong together.
+
+The practical test is the active/sleep balance from <<part-v,Part V>>:
+
+* A stage *saturated* (near 100% active) and doing parallelizable work is a
+  candidate to *split*.
+* A stage *mostly asleep* is a candidate to *merge* into its neighbor.
+* A stage with a *balanced* active/sleep ratio is correctly sized -- leave it
+  alone.
+
+=== Move-only payloads
+
+The data you pass between stages should *move, not copy*. Prefer payload types
+that own their storage and move cheaply -- `std::vector`, `std::unique_ptr`, or
+your own move-only structs -- and hand them across queues with `std::move` /
+`emplace`. Types that force a copy on every hop (or, worse, that copy large
+buffers) turn every stage boundary into a hidden allocation-and-copy. SimDB's
+queues are built around move semantics precisely so that a payload can travel the
+length of the pipeline without its bytes ever being duplicated.
+
+=== Buffering and partial flushes
+
+Some stages naturally *batch* -- a windowing stage, a compressor that prefers
+larger inputs, a stage that groups records before a transaction. Batching is good
+for throughput, but a batching stage must answer one question correctly: *what
+happens on a forced flush?*
+
+When a flusher runs (<<part-vi,Part VI>>), it drives every stage with the force flag set. A
+batching stage must, on force, emit whatever it currently holds -- *even a partial
+batch* -- rather than waiting for its window to fill. A stage that ignores force
+will strand data in memory and defeat the flush-then-query guarantee. Whenever you
+introduce internal buffering, handle the forced-flush path explicitly.
+
+=== Sizing the payload
+
+Payload size is a latency-versus-throughput dial:
+
+* *Larger payloads* amortize the per-item overhead -- fewer queue hops, fewer
+  transactions, better compression ratios -- at the cost of higher latency and
+  more memory in flight.
+* *Smaller payloads* lower latency and memory but pay the per-hop cost more often.
+
+There is no universal answer; size the payload to the stage's job and measure. The
+one constant is structural: keep the database stage *last and singular*, since it
+is the single-threaded funnel every payload must pass through (<<part-iv,Part IV>>).
+
+[#ch-38-performance-tuning]
+== Performance Tuning
+
+SimDB gives you several knobs -- batch size, compression level, polling cadence,
+stage boundaries, heartbeat interval -- and the temptation is to turn all of them
+at once. Resist it. Performance tuning is a loop: *measure, change one thing,
+measure again.* This chapter is a guide to the knobs and to the instruments that
+tell you which one to turn.
+
+=== Know the funnel
+
+Every payload in a SimDB pipeline eventually passes through *one* database thread.
+That single thread is the funnel, and it is almost always the thing you are
+tuning around. The goal is to keep it *fed but not thrashing*: enough work batched
+per commit that it is not paying transaction overhead on every row, but not so
+much held back that memory balloons or data appears late. Most of the knobs below
+are really about how work arrives at that funnel.
+
+=== The knobs
+
+*Batch / transaction sizing.* Committing many rows in one transaction is far
+cheaper than one transaction per row (<<part-iii,Part III>>). Larger batches mean fewer commits
+and higher throughput, at the cost of data becoming visible later and more memory
+in flight. Flush only at genuine synchronization points (<<part-vi,Part VI>>) -- flushing per
+item throws the batching advantage away.
+
+*Compression level.* Compression shrinks the database and the disk I/O the funnel
+must do, but it costs CPU on a worker stage. Derive from
+`CompressionStage::getBestCompressionLevel_()` (<<part-iv,Part IV>>, SimplePipeline;
+rationale in <<part-v,Part V>>): a compressor that never sleeps gets a *lower* ratio
+(or should be split); one that always sleeps can afford a *higher* ratio (or be
+merged into a neighbor).
+
+*Polling cadence.* Each stage's polling interval (default 100&nbsp;ms, <<part-vi,Part VI>>)
+trades latency against wasted wakeups. Shorter intervals lower latency but wake
+idle threads more often; longer intervals do the reverse. Intermittent, latency-
+tolerant stages want *longer* intervals; a stage on the critical path wants a
+*shorter* one.
+
+*Stage boundaries.* Splitting a saturated, parallelizable stage or merging two
+idle ones (<<ch-37-stage-boundaries,Chapter 37>>) is often the highest-leverage change of all, because it
+rebalances where the threads spend their time.
+
+*Heartbeat cadence (Argos).* For collectors, the heartbeat interval is the
+size-versus-speed dial from the case study (<<part-vii,Part VII>>): more frequent snapshots
+cost simulation speed and database size; less frequent ones cost read-time
+reconstruction work. It is a performance knob, not a correctness one.
+
+WARNING: Thread count today grows with the number of apps -- there is no shared
+pool yet (<<part-v,Part V>>). Keep the app count low; multi-app systems are not yet
+thread-scalable. This is on the roadmap, not available now.
+
+WARNING: Unrelated heavy disk I/O from your simulator -- its own logging system,
+trace dumps, or checkpoint files -- contends with SimDB's dedicated database
+thread on the same filesystem path and can collapse throughput (<<part-iv,Part IV>>). Treat
+that as an environmental tuning problem: redirect or throttle non-SimDB writes
+during collection.
+
+=== The instruments
+
+You cannot tune what you have not measured. SimDB gives you three levels of
+instrument, from coarse to fine:
+
+*Per-thread performance reports* are the primary guide. The working-versus-
+sleeping percentages (<<part-v,Part V>>) tell you which stage is the bottleneck and which is
+idle -- and therefore which knob to turn. Start here every time.
+
+*The self-profiler* times specific methods or blocks. Drop `PROFILE_METHOD` at the
+top of a function, or `PROFILE_BLOCK("label")` around a region, and the profiler
+prints a per-label average-time report, sorted slowest-first, when the program
+exits:
+
+[,cpp]
+----
+void MyStage::process_(Payload&& p)
+{
+    PROFILE_METHOD;                 // times this whole method
+    {
+        PROFILE_BLOCK("compress");  // times just this region
+        compress_(p);
+    }
+}
+----
+
+Use it to confirm *which line* of a hot stage is actually expensive, once the
+per-thread report has told you which stage to look at.
+
+*`RunningMean`* keeps a running average of any metric you feed it, using Welford's
+method, without storing the samples:
+
+[,cpp]
+----
+simdb::RunningMean batch_sizes;
+batch_sizes.add(records.size());
+// later:
+std::cout << "avg batch: " << batch_sizes.mean() << "\n";
+----
+
+Use it to track average payload bytes, average queue depth -- rather than time a code
+path.
+
+=== The tuning loop
+
+Put the instruments and knobs together into a discipline:
+
+1. Run a representative workload and read the per-thread performance report.
+2. Find the saturated stage (the funnel, or an upstream bottleneck feeding it) and
+   the idle ones.
+3. Turn *one* knob -- split/merge a stage, change the compression level, resize the
+   batch, adjust a polling interval.
+4. Re-run and compare the reports.
+
+Changing one knob at a time is what makes the comparison meaningful. Tuning
+everything at once tells you the result but never the cause.
+
+[#ch-39-determinism-debugging]
+== Determinism & Debugging Concurrent Pipelines
+
+A concurrent pipeline is nondeterministic by construction: stages run on their own
+threads, wake on their own cadence, and interleave differently on every run. That
+is exactly what makes it fast -- and exactly what makes it hard to debug, because
+the state you want to inspect is a moving target. This chapter is about buying back
+*enough* determinism to reason about a running pipeline, and about the symptoms you
+will actually encounter.
+
+=== Freeze before you look
+
+The first rule of debugging a pipeline is: *stop it moving before you inspect it.*
+If you read a queue, a counter, or the database while stages are still running,
+you are reading a value that was already stale by the time you looked. <<part-vi,Part VI>>'s
+`ScopedRunnableDisabler` exists for precisely this -- it pauses runnables for the
+duration of a scope (RAII), so you can take a *consistent* snapshot:
+
+[,cpp]
+----
+{
+    simdb::ScopedRunnableDisabler disable_all(pipeline_manager);
+    // Nothing advances here. Inspect queues, counters, in-flight state
+    // knowing they will not change out from under you.
+}
+// Stages resume when the disabler goes out of scope.
+----
+
+Nested disablers are safe -- inner scopes are no-ops -- so you can reach for one
+without worrying about whether an outer one is already active.
+
+=== Freeze, then flush, then query
+
+Disabling stops the pipeline in place, but data mid-flight has not yet reached the
+database. When you want a *consistent on-disk* state to inspect with the Query API
+or an external SQLite tool, pair disabling with a *flush* (<<part-vi,Part VI>>). A flusher
+drives every stage with the force flag set, draining buffered data all the way to
+the single-transaction database commit. The flush-then-query pattern is the only
+way to guarantee that what you read from the database reflects everything produced
+so far -- without it, batched transactions mean rows you expect simply are not
+there yet. (See also the FAQ's <<faq-rows-not-visible,Why don't I see my rows yet?>>)
+
+=== Inspect in flight with snoopers
+
+Sometimes you do not want to freeze or flush at all -- you want to peek at what is
+*currently* moving through a stage. That is what snoopers (<<part-vi,Part VI>>) are for:
+key-based retrieval of in-flight payloads without draining the pipeline. They are
+the right tool for a live dashboard or a "what is stage 3 holding right now?"
+diagnostic, with the tradeoffs already covered in the advanced chapter (snooping
+briefly pauses the pipeline so the snapshot is coherent).
+
+=== Logging without interleaved lines
+
+`std::cout` from several stage threads produces garbled, interleaved lines --
+half of one stage's message spliced into another's. `ThreadSafeLogger` fixes this
+by buffering a whole line and writing it under a lock only when the `Guard`
+returned by `protect()` is destroyed:
+
+[,cpp]
+----
+simdb::ThreadSafeLogger log("[compressor] ");
+log.protect() << "batch " << n << " -> " << nbytes << " bytes\n";
+----
+
+Each line is atomic and prefixed by the string you constructed
+the logger with. Give each stage its own prefix and every line in the merged
+output is instantly attributable to a thread -- which is most of what you need to
+reconstruct an interleaving after the fact. `ThreadSafeFileLogger` is the same
+thing pointed at a file when you want the log out of the console.
+
+=== "Why is my pipeline sleeping / not draining?" -- a checklist
+
+The most common confusion is a pipeline that appears stuck. Work through this in
+order:
+
+. *Read the per-thread performance report first* (<<part-v,Part V>>). A stage sleeping at
+  ~100% is simply not being fed -- the problem is upstream, not here. A stage
+  active at ~100% is the bottleneck everything else is waiting behind.
+. *Check the polling cadence.* A long polling interval (<<part-vi,Part VI>>) looks like a
+  stall -- the stage is just waiting for its next wakeup. Latency-sensitive stages
+  want shorter intervals.
+. *Did you forget to flush?* Rows you produced but do not see are almost always
+  still batched in flight. Flush at the synchronization point (above).
+. *Is a disabler still in scope?* An outstanding `ScopedRunnableDisabler` -- for
+  example, one held longer than intended -- keeps everything paused. Confirm the
+  scope has exited.
+. *Is the database thread the funnel?* Everything commits through one thread
+  (<<part-iv,Part IV>>). If that thread is saturated, upstream stages back up and sleep
+  waiting for room. Tune batch size and compression (<<ch-38-performance-tuning,Chapter 38>>) rather than the
+  upstream stages.
+. *Did teardown run?* If the pipeline never drained at shutdown, confirm
+  `postSimLoopTeardown` was called on every exit path (<<part-v,Part V>>) -- an app that
+  aborts without it leaves data stranded and threads unjoined.
+
+The theme throughout: don't guess about a concurrent system. *Freeze it, flush it,
+log it, and read the perf report* -- in that order -- and the nondeterminism stops
+being in your way.
+
+[#ch-40-application-shapes]
+== Application shapes
+
+The README lists four things people build with SimDB: statistics engines, live
+UI backends, replay backends, and aggregate analysis across many runs. Each of
+those is a *product* problem with many valid architectures. SimDB does not pick
+one for you -- it gives you a consistent way to *persist* data concurrently and
+to *reach* that data from other threads. This chapter is a set of *application
+shapes*: the decisions you must make, the SimDB pieces that map to each part, and
+several workable designs per shape so you are not locked into a single layout.
+
+IMPORTANT: These are not copy-paste skeletons and not references to runnable
+demos. A half-dozen quality UI backends exist for the same collector; a stats
+engine can be as simple as "flat table, query after the run" or as rich as a
+multi-clock snapshot/delta system. The book shows mechanics elsewhere (Parts
+III--VII); here we show *where the hard design choices live*.
+
+=== A simulation statistics engine
+
+*Outcome.* During simulation, metrics leave the hot path quickly and land in a
+`.db` file you can query, export, or hand to a viewer later.
+
+*The spectrum.* At one end is the *minimal engine*: a flat schema -- timestamp,
+metric id, scalar value (or a small blob) -- and a short pipeline (optional
+compress, then database stage). After the run, SQL or a script produces CSVs or
+summary tables. That is genuinely useful and genuinely easy relative to everything
+else on this page. At the other end is a *rich collector*: hierarchical
+collectables, multiple clocks, typed containers, snapshot/delta encoding, and a
+schema that is itself a contract for a replay tool. Argos (<<part-vii,Part VII>>) is the
+worked example of that end; most teams start at the minimal end and grow toward
+rich encoding only when post-hoc flat tables stop answering their questions.
+
+*Decisions to make together* (schema + pipeline, <<ch-36-schema-pipeline-together,Chapter 36>>):
+
+[cols="1,2", options="header"]
+|===
+| Question | Consequence
+
+| What will you filter or group on later?
+| Those fields must be *columns*, not only bytes inside a blob.
+
+| How often do you write?
+| High frequency favors batching, larger payloads, and fewer commits; low
+frequency can afford row-at-a-time simplicity.
+
+| Scalars only, or vectors/structures too?
+| Scalars fit normalized tables; bulk state fits blobs (often compressed).
+
+| One time base or several?
+| One clock keeps the schema simple; multiple clocks need explicit clock ids on
+every time-stamped row (as in the Argos data model).
+|===
+
+*SimDB pieces.* An `simdb::App` with `defineSchema` and `createPipeline`; move-
+only payloads between stages; optional compression before the terminal database
+stage; `createFlusher` at the points where you need visibility or teardown safety;
+`postSimLoopTeardown` on every exit path so the file is whole.
+
+*Pitfalls.* Designing the pipeline before you know your queries (you will bury
+filterable fields in blobs). Flushing every sample (you lose batching and stall
+the funnel). Growing into Argos-scale encoding before you need it (complexity
+without payoff).
+
+=== A live UI backend
+
+*Outcome.* Something on screen updates while the simulation runs -- or within a
+bounded delay -- without stalling the simulator.
+
+*Split the problem.* SimDB owns *how data gets out of the sim thread safely* and
+*how it becomes durable*. Your UI framework owns windows, layout, plotting, and
+networking. No single recipe spans both; the shapes below are only the SimDB-side
+patterns. Combine them.
+
+*Shape A -- Post-run or flush-bound UI (simplest).* The collector writes the
+database; the UI opens the `.db` after a flush or after the run. The UI reads
+committed rows and blobs only. Latency equals your flush cadence (or end of run).
+Design: schema with queryable timestamps and ids; periodic `flush()` at
+heartbeats if you want near-live updates without snoop machinery. Fits tools that
+tolerate hundreds of milliseconds to seconds of lag.
+
+*Shape B -- Thin client over the database (Argos-like).* The collector checkpoints
+on a heartbeat; the viewer loads *on demand* -- no full preload, no requirement
+to cache what was already shown (<<part-vii,Part VII>>). Live enough for many workflows because
+deserialization/replay is fast and the UI only pulls what the current widgets need.
+Design: rich blob encoding + metadata columns the UI can index; heartbeat as a
+performance dial, not a gate on collection.
+
+*Shape C -- Snoop the pipeline tail (lowest latency for hot metrics).* Wire a
+snooper on a stage that carries the payloads your dashboard cares about; read by
+key without waiting for SQLite (<<part-vi,Part VI>>). Use for a *small* set of hot signals
+(gauge, last N queue depths), not for full history. Accept the tradeoff: snooping
+coordinates with the pipeline briefly so the snapshot is coherent.
+
+*Shape D -- Metadata from the UI thread via async DB access.* When the UI thread
+needs counts, last timestamp, or schema discovery, post work to the dedicated
+database thread with `AsyncDatabaseAccessor::eval` (<<part-vi,Part VI>>) -- never call SQLite
+from the UI thread directly, and never from inside a `DatabaseStage`. Bulk curves
+still come from Shape A, B, or C; this shape is for *light* queries.
+
+*Shape E -- Dual path (advanced).* Pipeline persists everything to the database
+(cold, authoritative path) while a separate fan-out -- fed by the same stage
+output, a snooper, or a side queue you own -- pushes decimated samples to the UI
+(hot path). Two consumers, one producer; you must define which path is source of
+truth when they disagree (almost always the database).
+
+[cols="1,1,1", options="header"]
+|===
+| Shape | Best when | SimDB cost
+
+| A -- flush-bound | Lag OK; simplest mental model | Flusher + schema
+| B -- thin DB client | Rich state; many widgets; replay | Encoding + heartbeat design
+| C -- snoop | Sub-flush latency for few metrics | Snooper wiring + key design
+| D -- async eval | UI thread needs safe metadata queries | Accessor discipline
+| E -- dual path | High rate + live plot + full archive | Two paths to keep consistent
+|===
+
+*Pitfalls.* Treating snoopers as a generic message bus (they are keyed peeks, not
+a stream API). Querying SQLite from the UI thread (locks, wrong thread). Expecting
+the UI to mirror the entire simulation state in memory (defeats SimDB's pipeline
+and bloats RAM). Choosing Shape E when Shape B plus a sensible heartbeat would
+ suffice.
+
+=== A simulation state replayer backend
+
+*Outcome.* Given a time (or tick), reconstruct what the simulation *would have
+looked like* at that moment -- for a debugger, a regression diff, or a standalone
+replay tool.
+
+*The contract is the schema.* The replayer does not guess. Every blob column, enum
+table, and timestamp column is part of a *versioned contract*: what is snapshotted
+vs delta-encoded, how containers are laid out in binary, which clock id applies.
+<<part-vii,Part VII>>'s on-disk model is one full instance of that contract; your engine can be
+smaller, but the same rule applies -- document the bytes.
+
+*Write path (collector side).* Producers emit state on a schedule you define:
+full snapshots at rebases, deltas between them, or append-only event rows if your
+replay logic prefers an event log. Compression and the database stage stay at the
+end of the pipeline; flush at rebases so a crash mid-run still leaves a coherent
+prefix.
+
+*Read path (replayer side).* Load the nearest snapshot at or before the target
+time, apply deltas forward (or walk events), deserialize blobs using the same
+rules the collector used to serialize them. The replayer may live in another process
+(Python, Qt, a batch verifier); it only needs the `.db` and the contract.
+
+*Encoding choices (pick one primary strategy).*
+
+* *Snapshot + delta* -- smaller database, more read work; good when state is
+large and changes incrementally (Argos).
+* *Full snapshot only* -- trivial replay, heavy writes and disk; good when state
+is small or runs are short.
+* *Event log* -- append rows `(time, event_type, payload)`; replay is apply-until-T;
+good when state is derivable from events and snapshots are awkward.
+
+*SimDB pieces.* Blobs and side tables (`TinyStrings`, enum maps); flushers at
+rebase boundaries; optional `ScopedRunnableDisabler` plus flush when the replayer
+and collector share a process and you need a quiescent point (<<ch-39-determinism-debugging,Chapter 39>>).
+
+*Pitfalls.* Changing blob layout without a schema/version column (old databases
+become unreadable). Mixing clocks without tagging rows (replay at the wrong
+"time"). Skipping flush at rebases (partial last snapshot after crash).
+
+=== Aggregate analysis across many simulations
+
+*Outcome.* Compare or summarize results from hundreds or thousands of runs --
+parameter sweeps, regression suites, nightly farms.
+
+*Two phases.* (1) *Produce* one `.db` per run with the *same* app schema so every
+file has identical tables. (2) *Analyze* offline -- merge, attach, or query across
+files. Phase 2 often needs *no* SimDB pipeline at all; SQLite, Python, or R on the
+files is enough. SimDB's role in phase 1 is making each run's artifact consistent;
+in phase 2 it is optional unless you build a merge app as another `simdb::App`.
+
+*Warehouse shapes.*
+
+* *Many files, query with `ATTACH`* -- keep runs isolated; good for parallel sim
+and simple tooling.
+* *ETL into one warehouse database* -- copy normalized summary columns into a
+`runs(id, params…)` plus `metrics(run_id, …)` layout; good for heavy cross-run
+SQL.
+* *Blob-per-run with summary columns extracted at end* -- full state stays in per-
+run files; a lightweight post-pass inserts only scalars you care about for sweeps.
+
+*Schema discipline across runs.* Store run parameters as *columns* (or a dedicated
+params table) at collection time if you know them upfront; inferring params later
+from filenames is fragile. Add a `schema_version` or tool version column early so
+a farm does not mix incompatible blob layouts silently.
+
+*SimDB pieces (production phase).* Same `defineSchema` for every run; batch writes
+and compression so per-run overhead stays low; reliable teardown so farm workers
+do not leave corrupt files.
+
+*Pitfalls.* One giant pipeline-fed database fed by all sim processes concurrently
+(fights the single-writer model -- prefer one DB per process). Storing only blobs
+with no summary columns (every analysis pass deserializes everything). Schema drift
+across tool versions without version metadata.
+
+=== How to use this chapter
+
+Pick the shape closest to your goal, then go back to the parts that teach the
+mechanics: schema and INSERT (<<part-iii,Part III>>), pipelines (<<part-iv,Part IV>>), apps and lifecycle
+(<<part-v,Part V>>), flush/snoop/async (<<part-vi,Part VI>>), and Argos if you need the rich collector/
+viewer split (<<part-vii,Part VII>>). Tuning and debugging loops live in Chapters <<ch-38-performance-tuning,Chapter 38>> and <<ch-39-determinism-debugging,Chapter 39>>.
+None of the shapes above is mandatory; mixing them -- flush-bound persistence plus
+snoop for one live gauge, flat tables for farm summary columns -- is normal
+engineering, not a violation of SimDB.
+
+[#ch-41-testing-simdb-apps]
+== Testing SimDB Apps
+
+Regression tests are how SimDB keeps its API honest, and they are the model for
+how you should test your own apps. The goal is not to re-run your simulator inside
+every test -- it is to prove that the *artifact* your app produces (the `.db`
+file, its schema, and the bytes in its blobs) matches what you expect, independent
+of how the app got there. This chapter covers the test harness SimDB uses, the
+flush-and-teardown habits pipeline apps require, and how to verify persisted data
+without trusting the app that wrote it.
+
+=== What to test at each layer
+
+SimDB apps stack three separable concerns. Test them at the boundary where bugs
+actually show up:
+
+[cols="1,2,1", options="header"]
+|===
+| Layer | What can go wrong | Typical test
+
+| SQLite interface | Schema mistakes, query constraints, blob round-trip | Direct
+`DatabaseManager` tests (<<part-ii,Part II>>, `test/sqlite/**`)
+| App + pipeline | Stages never drain, wrong flush points, lifecycle skipped | Drive
+`AppManagers` through simulate → teardown; assert on the file
+| Encoding / contract | Blob layout drift, replay mismatch | Deserialize the `.db`
+with a *separate* reader (C++ helper, Python script, or the viewer's replay path)
+|===
+
+You do not need every test to exercise all three. A schema test can skip the
+pipeline entirely; an end-to-end collector test should hit the file and an
+independent reader, not only in-app getters.
+
+=== The SimDBTester harness
+
+SimDB's regression programs use a lightweight macro harness in `test/SimDBTester.hpp`
+-- not GoogleTest, but the same shape: accumulate failures, print a summary, return
+a non-zero exit code for CI.
+
+Every test translation unit starts with `TEST_INIT` (once, at file scope). Inside
+`main`, use `EXPECT_*` macros and finish with `REPORT_ERROR` followed by
+`return ERROR_CODE`:
+
+[,cpp]
+----
+TEST_INIT;
+
+int main()
+{
+    EXPECT_EQUAL(2 + 2, 4);
+    EXPECT_TRUE(some_condition);
+    EXPECT_WITHIN_EPSILON(actual, expected);   // floating-point
+    EXPECT_THROW(bad_call());
+
+    REPORT_ERROR;
+    return ERROR_CODE;
+}
+----
+
+The macros worth knowing:
+
+* `EXPECT_EQUAL` / `EXPECT_NOTEQUAL` -- equality with values printed on failure.
+* `EXPECT_WITHIN_EPSILON` / `EXPECT_WITHIN_TOLERANCE` -- floating-point compares
+  (the SQLite regression tests use these heavily).
+* `EXPECT_THROW` / `EXPECT_NOTHROW` -- exception discipline.
+* `EXPECT_FILES_EQUAL` -- byte-compare two files (lines starting with `#` are
+  ignored, useful for golden text output).
+* `EXPECT_REACHED` / `ENSURE_ALL_REACHED(N)` -- mark that a callback or hook fired;
+  useful when testing that lifecycle methods or stage paths actually ran.
+
+IMPORTANT: Call `REPORT_ERROR` *before* teardown that might crash if earlier
+assertions left the app in a bad state (dangling pointers, half-built pipelines).
+Return `ERROR_CODE` after teardown completes. The harness separates reporting from
+exit so you still get a clean failure summary when cleanup is fragile.
+
+Build the full regression suite with the `simdb_regress` target (<<part-ii,Part II>>). Your
+own app tests can follow the same pattern and plug into CTest the same way.
+
+=== Flush, teardown, then assert
+
+Pipeline apps add one rule SQLite-only tests never need: *do not query what is still
+in flight.* Batched stages and the single database thread mean rows and blobs you
+just `process()`'d may not exist on disk yet. Before any assertion that reads the
+database:
+
+1. *Flush* if you need mid-run visibility (`flusher_->flush()`, <<part-vi,Part VI>>).
+2. Always call `postSimLoopTeardown()` on every exit path before you treat the file
+   as final (<<part-v,Part V>>) -- normal finish, caught exception, or abort handler you
+   install.
+
+A minimal integration-test skeleton for an `simdb::App`:
+
+[,cpp]
+----
+// Arrange
+simdb::AppManagers app_mgrs;
+app_mgrs.enableApp<MyCollector>();
+app_mgrs.createSchemas();
+app_mgrs.postInit(0, nullptr);
+app_mgrs.initializePipelines();
+app_mgrs.openPipelines();
+
+// Act -- drive your simulator or inject test inputs
+runSimulationOrInjectTestData();
+
+// Assert -- drain and finalize FIRST
+app_mgrs.postSimLoopTeardown();
+
+simdb::DatabaseManager verifier("output.db");  // reopen independently
+auto q = verifier.createQuery("MyMetrics");
+EXPECT_EQUAL(q->count(), expected_rows);
+// ... read columns/blobs and compare ...
+
+REPORT_ERROR;
+return ERROR_CODE;
+----
+
+Notice the verifier opens the file with a *new* `DatabaseManager`. That is
+intentional: you are testing the persisted artifact, not whether your app's in-
+memory caches happen to agree with themselves.
+
+=== Verify the database independent of the app
+
+The strongest tests treat the `.db` as the contract and use a reader that does not
+share code with the writer.
+
+*Reopen and query.* After teardown, connect with a fresh `DatabaseManager` (or the
+Query API patterns from <<part-iii,Part III>>). Check row counts, column values, and blob bytes
+with `EXPECT_EQUAL`. This catches schema drift and wrong INSERT paths even when
+the app's own "get last value" helper still works.
+
+*Deserialize blobs on their own.* When your app stores encoded state, add a small
+test-side deserializer (or reuse your replay logic) that reads blobs from
+`CollectionRecords` -- or your equivalent table -- and compares to an in-test
+*ground truth* you maintained while driving the sim. The Argos regression harness
+does exactly this: a simulation engine holds expected values per tick; after
+teardown, a blob iterator walks the file and asserts each decoded value matches.
+You do not need the viewer for that -- only the same decoding rules the viewer
+would use.
+
+*External scripts.* For complex encodings, a Python (or other) script that opens
+the `.db` with `sqlite3`, validates scaffolding tables, and replays blobs is
+often clearer than C++ assertion code. The Argos tree ships `test/argos/compare.py`,
+which compares two databases tick-by-tick using the viewer's `DataRetriever` unpack
+path -- proving two runs produce identical replayed values, not just identical
+SQL rows. That pattern generalizes: *your* script encodes what "correct bytes mean"
+and fails CI when decoding diverges.
+
+*Baseline comparison.* Keep a known-good `.db` (or exported golden query results)
+and diff against test output -- `EXPECT_FILES_EQUAL` for text, or a script for
+binary databases. Version the baseline when you intentionally change the encoding;
+store `schema_version` in the file so mismatches are explainable.
+
+=== What belongs in the test vs. what belongs outside
+
+Keep tests *focused on SimDB's guarantees*:
+
+* Schema matches `defineSchema`.
+* Pipeline + teardown produce a readable file.
+* Queryable columns and blob decodings match ground truth.
+
+Push these out of the core regression loop when they bloat or flake:
+
+* Full GUI automation (test the data contract; let humans or separate UI tests
+  cover widgets).
+* Performance thresholds unless you have a stable benchmark harness (use
+  `PollingThread::printPerfReport` manually or in a dedicated perf job, not every
+  CI run).
+* Non-deterministic sim workloads without a fixed seed -- reproduce failures first,
+  then assert.
+
+For collectors with randomness, fix the RNG seed in tests (the Argos harness uses
+a constant seed so two runs are comparable). For concurrent pipelines, prefer
+teardown-then-verify over asserting mid-flight ordering unless you are explicitly
+testing flush/disable behavior (<<ch-39-determinism-debugging,Chapter 39>>).
+
+=== A practical checklist
+
+Before you merge a SimDB app change, ask:
+
+. Does every test path call `postSimLoopTeardown()` (including error paths you
+  simulate)?
+. Are database assertions made *after* flush/teardown, on a freshly opened manager
+  or external reader?
+. Do blob tests decode through the same rules production replay uses?
+. Did you run a Release build? Unused parameters, members, and includes that Debug
+  ignores can fail CI under `-Werror`.
+. If you changed encoding or schema, did you update baselines *and* bump a version
+  column/metadata so old files fail loudly?
+
+Testing SimDB apps is mostly discipline: treat the `.db` as the product, finalize
+it correctly, and verify it with code that did not write it. The harness macros
+handle reporting; flush and teardown handle visibility; an independent reader
+handles trust.
+
+<<part-ix,Part IX>> collects quick-reference material -- utilities, API cheat sheets, FAQ,
+troubleshooting, and a migration guide -- for when you need a lookup rather than
+the narrative through Parts <<part-i,Part I>>--<<part-viii,Part VIII>>.

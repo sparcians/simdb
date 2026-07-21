@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/schema/SchemaDef.hpp"
 #include "simdb/sqlite/Connection.hpp"
 #include "simdb/sqlite/PreparedINSERT.hpp"
@@ -148,10 +149,7 @@ public:
     /// \return SqlRecord which wraps the table and the ID of its record.
     std::unique_ptr<SqlRecord> INSERT(SqlTable&& table, SqlColumns&& cols, SqlValues&& vals)
     {
-        if (table.getName().find("internal$") == 0)
-        {
-            throw DBException("Cannot perform INSERT. This is an internal table.");
-        }
+        simdb_assert(table.getName().find("internal$") != 0, "Cannot perform INSERT. This is an internal table.");
         return INSERT_(std::move(table), std::move(cols), std::move(vals));
     }
 
@@ -161,10 +159,7 @@ public:
     ///        the table's columns.
     std::unique_ptr<SqlRecord> INSERT(SqlTable&& table, SqlValues&& vals)
     {
-        if (table.getName().find("internal$") == 0)
-        {
-            throw DBException("Cannot perform INSERT. This is an internal table.");
-        }
+        simdb_assert(table.getName().find("internal$") != 0, "Cannot perform INSERT. This is an internal table.");
         std::vector<std::string> col_names;
         for (const auto& col : schema_.getTable(table.getName()).getColumns())
         {
@@ -178,10 +173,7 @@ public:
     /// at least one default value for its column(s).
     std::unique_ptr<SqlRecord> INSERT(SqlTable&& table)
     {
-        if (table.getName().find("internal$") == 0)
-        {
-            throw DBException("Cannot perform INSERT. This is an internal table.");
-        }
+        simdb_assert(table.getName().find("internal$") != 0, "Cannot perform INSERT. This is an internal table.");
         return INSERT_(std::move(table));
     }
 
@@ -189,10 +181,7 @@ public:
     ///        when you are creating many of the same table records.
     std::unique_ptr<PreparedINSERT> prepareINSERT(SqlTable&& table, SqlColumns&& cols)
     {
-        if (table.getName().find("internal$") == 0)
-        {
-            throw DBException("Cannot perform INSERT. This is an internal table.");
-        }
+        simdb_assert(table.getName().find("internal$") != 0, "Cannot perform INSERT. This is an internal table.");
         return prepareINSERT_(std::move(table), std::move(cols));
     }
 
@@ -201,10 +190,7 @@ public:
     ///        of the table, in schema order.
     std::unique_ptr<PreparedINSERT> prepareINSERT(SqlTable&& table)
     {
-        if (table.getName().find("internal$") == 0)
-        {
-            throw DBException("Cannot perform INSERT. This is an internal table.");
-        }
+        simdb_assert(table.getName().find("internal$") != 0, "Cannot perform INSERT. This is an internal table.");
         std::vector<std::string> col_names;
         for (const auto& col : schema_.getTable(table.getName()).getColumns())
         {
@@ -227,10 +213,8 @@ public:
             std::transform(args[1].begin(), args[1].end(), args[1].begin(),
                            [](unsigned char ch) { return std::tolower(ch); });
 
-            if (args[0] == "insert" && args[1] == "into" && args[2].find("internal$") == 0)
-            {
-                throw DBException("Invalid command. Cannot write to internal tables. Command: ") << sql_cmd;
-            }
+            simdb_assert(!(args[0] == "insert" && args[1] == "into" && args[2].find("internal$") == 0),
+                         "Invalid command. Cannot write to internal tables. Command: " << sql_cmd);
         }
 
         if (in_transaction)
@@ -238,19 +222,13 @@ public:
             db_conn_->safeTransaction([&]() {
                 auto rc =
                     SQLiteReturnCode(sqlite3_exec(db_conn_->getDatabase(), sql_cmd.c_str(), nullptr, nullptr, nullptr));
-                if (rc)
-                {
-                    throw DBException(sqlite3_errmsg(db_conn_->getDatabase()));
-                }
+                simdb_assert(!rc, sqlite3_errmsg(db_conn_->getDatabase()));
             });
         } else
         {
             auto rc =
                 SQLiteReturnCode(sqlite3_exec(db_conn_->getDatabase(), sql_cmd.c_str(), nullptr, nullptr, nullptr));
-            if (rc)
-            {
-                throw DBException(sqlite3_errmsg(db_conn_->getDatabase()));
-            }
+            simdb_assert(!rc, sqlite3_errmsg(db_conn_->getDatabase()));
         }
     }
 
@@ -282,10 +260,7 @@ public:
             const auto cmd = oss.str();
 
             auto rc = SQLiteReturnCode(sqlite3_exec(db_conn_->getDatabase(), cmd.c_str(), nullptr, nullptr, nullptr));
-            if (rc)
-            {
-                throw DBException(sqlite3_errmsg(db_conn_->getDatabase()));
-            }
+            simdb_assert(!rc, sqlite3_errmsg(db_conn_->getDatabase()));
         });
 
         return sqlite3_changes(db_conn_->getDatabase()) == 1;
@@ -302,10 +277,7 @@ public:
             const auto cmd = oss.str();
 
             auto rc = SQLiteReturnCode(sqlite3_exec(db_conn_->getDatabase(), cmd.c_str(), nullptr, nullptr, nullptr));
-            if (rc)
-            {
-                throw DBException(sqlite3_errmsg(db_conn_->getDatabase()));
-            }
+            simdb_assert(!rc, sqlite3_errmsg(db_conn_->getDatabase()));
         });
 
         return sqlite3_changes(db_conn_->getDatabase());
@@ -557,10 +529,8 @@ private:
             vals.bindValsForINSERT(stmt);
 
             auto rc = SQLiteReturnCode(sqlite3_step(stmt));
-            if (rc != SQLITE_DONE)
-            {
-                throw DBException("Could not perform INSERT. Error: ") << sqlite3_errmsg(db_conn_->getDatabase());
-            }
+            simdb_assert(rc == SQLITE_DONE,
+                         "Could not perform INSERT. Error: " << sqlite3_errmsg(db_conn_->getDatabase()));
 
             auto db_id = db_conn_->getLastInsertRowId();
             record.reset(new SqlRecord(table.getName(), db_id, db_conn_->getDatabase(), db_conn_.get()));
@@ -579,10 +549,8 @@ private:
             auto stmt = db_conn_->prepareStatement(cmd);
 
             auto rc = SQLiteReturnCode(sqlite3_step(stmt));
-            if (rc != SQLITE_DONE)
-            {
-                throw DBException("Could not perform INSERT. Error: ") << sqlite3_errmsg(db_conn_->getDatabase());
-            }
+            simdb_assert(rc == SQLITE_DONE,
+                         "Could not perform INSERT. Error: " << sqlite3_errmsg(db_conn_->getDatabase()));
 
             auto db_id = db_conn_->getLastInsertRowId();
             record.reset(new SqlRecord(table.getName(), db_id, db_conn_->getDatabase(), db_conn_.get()));
@@ -644,20 +612,18 @@ private:
         auto stmt = SQLitePreparedStatement(db_conn_->getDatabase(), cmd);
         auto rc = SQLiteReturnCode(sqlite3_step(stmt));
 
-        if (must_exist && rc == SQLITE_DONE)
-        {
-            throw DBException("Record not found with ID ") << db_id << " in table " << table_name;
-        } else if (rc == SQLITE_DONE)
+        simdb_assert(!(must_exist && rc == SQLITE_DONE),
+                     "Record not found with ID " << db_id << " in table " << table_name);
+        if (rc == SQLITE_DONE)
         {
             return nullptr;
-        } else if (rc == SQLITE_ROW)
+        }
+        if (rc == SQLITE_ROW)
         {
             return std::unique_ptr<SqlRecord>(
                 new SqlRecord(table_name, db_id, db_conn_->getDatabase(), db_conn_.get()));
-        } else
-        {
-            throw DBException("Internal error has occured: ") << sqlite3_errmsg(db_conn_->getDatabase());
         }
+        throw DBException("Internal error has occured: ") << sqlite3_errmsg(db_conn_->getDatabase());
     }
 
     /// Database connection.

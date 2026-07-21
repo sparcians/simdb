@@ -66,7 +66,7 @@ protected:
 
 private:
     /// Compress on pipeline thread 1
-    class CompressionStage : public simdb::pipeline::Stage
+    class CompressionStage : public simdb::pipeline::CompressionStage
     {
     public:
         CompressionStage()
@@ -86,7 +86,7 @@ private:
             if (input_queue_->try_pop(data))
             {
                 std::vector<char> compressed_data;
-                simdb::compressData(data, compressed_data);
+                simdb::compressData(data, compressed_data, getBestCompressionLevel_());
                 output_queue_->emplace(std::move(compressed_data));
                 return simdb::pipeline::PROCEED;
             }

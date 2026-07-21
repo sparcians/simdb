@@ -1,0 +1,635 @@
+[#part-vii]
+= Part VII: Case Study -- Argos
+
+Argos is SimDB's flagship application: a simulation data _collector_ plus a
+Python _viewer_. It exercises nearly every SimDB feature and is the best way to
+see the pieces working together end-to-end.
+
+[#ch-31-argos-is]
+== What Argos Is
+
+Everything so far in this book has been a *capability*: a way to define a schema,
+build a pipeline, persist safely, observe a running system. Argos is what those
+capabilities look like when assembled into a real, shipping product. It is
+SimDB's flagship application, and it is the clearest answer to the question "what
+is all of this actually *for*?"
+
+Argos is a *collect-then-visualize* system. One half runs inside your simulator
+and captures its state as it runs; the other half is a desktop application that
+opens the captured data and lets you replay the simulation, scrubbing back and
+forth through simulated time to see how every collected object evolved.
+
+.The Argos viewer replaying a collected run -- where this case study is headed
+image::argos-hero.png[The Argos viewer replaying a collected run,role=text-center]
+
+=== Two halves: the collector and the viewer
+
+Argos has exactly two pieces, and they meet at a single file:
+
+* The *collector* (`simdb::argos::ArgosCollector`) is the write side. It is an
+  ordinary `simdb::App` -- the same kind of app you learned to build in <<part-v,Part V>> --
+  that you enable inside your simulator. As the simulation advances, it captures
+  the state of the objects you have marked for collection and streams that data,
+  through a SimDB pipeline, into *one* SQLite database.
+* The *viewer* is the read side: a standalone desktop GUI. It opens that database
+  and reconstructs the state of every collected object at any point in simulated
+  time, presenting it through a set of composable visualization widgets.
+
+The collector answers "how do I get simulation data out, fast and safely?" The
+viewer answers "now that it is captured, how do I look at it?" The only thing
+that passes between them is the database file:
+
+....
+    your simulator
+   (ArgosCollector, a simdb::App)
+            |
+            |  streams collected state through a SimDB pipeline
+            v
+     collected.db   <-- one SQLite file: the entire contract
+            |
+            |  opened read-only, replayed over simulated time
+            v
+     Argos viewer (desktop GUI)
+....
+
+[NOTE]
+====
+That single `.db` file is the *whole* handoff. Argos does not emit sidecar files,
+trace logs, or index files alongside it -- the SQLite database is the complete,
+self-contained artifact, exactly as promised back in <<part-ii,Part II>>. Copy it, archive
+it, or hand it to a colleague, and the viewer can open it anywhere.
+====
+
+=== How Argos maps onto SimDB
+
+Argos is worth studying precisely because it exercises nearly every concept from
+Parts <<part-iv,Part IV>> through <<part-vi,Part VI>> at once. Nothing in the collector is special-cased; it is
+built from the same parts you already know:
+
+[cols="1,2"]
+|===
+| SimDB concept (where it was introduced) | How Argos uses it
+
+| *App + lifecycle* (<<part-v,Part V>>)
+| The collector is a `simdb::App`, enabled through an `AppManager`, with its
+  schema declared in `defineSchema` and its pipeline built in `createPipeline`.
+
+| *Concurrent pipeline* (<<part-iv,Part IV>>)
+| Collected state is encoded and compressed on worker threads, then written by a
+  database stage -- so the simulator itself is never blocked on disk I/O.
+
+| *Single database thread* (Parts <<part-iv,Part IV>>--<<part-vi,Part VI>>)
+| All of Argos's writes funnel onto the one database thread, keeping collection
+  fast and contention-free no matter how much the simulator produces.
+
+| *Blobs & compression* (<<part-iii,Part III>>)
+| Collected snapshots and deltas are stored as compressed blobs -- the collector
+  is a heavy, real-world user of the blob and compression APIs.
+
+| *Flush at teardown* (<<part-vi,Part VI>>)
+| When the run ends, the collector flushes any pending data so the database is
+  complete before the process exits.
+|===
+
+If you have read this far, you already understand the collector's machinery. What
+remains specific to Argos is *what* it collects and *how it encodes* that state
+for efficient replay -- the subjects of the next two chapters.
+
+=== The data contract
+
+Because the database is the entire interface between collector and viewer, its
+contents form a contract. At a high level it captures four things:
+
+* A *collectable tree* -- the hierarchy of objects that were collected, mirroring
+  the structure of the simulated system; it is the set of objects you can choose
+  to visualize in the viewer.
+* One or more *clocks* -- the time bases that drove the run. Each collected object
+  updates on the edges of the clock it was collected against, and a database may
+  contain a single clock or many.
+* *Timestamps* -- the points in simulated time at which state was captured, which
+  become the range you scrub through in the viewer.
+* *Encoded state blobs* -- periodic full snapshots plus small deltas in between,
+  from which the viewer reconstructs any object's exact value at any requested
+  tick.
+
+We will unpack each of these -- especially the snapshot-plus-delta encoding, which
+is the heart of Argos's efficiency -- in "The Argos Collector" and "On-Disk Data
+Model & Encodings." For now the shape is enough: a tree of objects, the clocks
+that move them, the times they were sampled, and the compact encoding of their
+values.
+
+=== Why Argos is the case study
+
+Two reasons. First, breadth: a single application that touches the schema,
+pipeline, app framework, blobs, compression, and flushing is the best possible
+demonstration that these features compose into something greater than their
+parts. Second, tangibility: the viewer turns all of that invisible machinery into
+something you can *see and click*, which makes it the ideal lens for understanding
+what SimDB delivers.
+
+The rest of <<part-vii,Part VII>> follows the data. We start where the data is born -- the
+collector -- then examine how it is laid out on disk, then cross over to the viewer
+that brings it back to life, and finally walk a complete run end to end.
+
+[#ch-32-argos-collector]
+== The Argos Collector
+
+The collector's job is narrow and demanding: turn the state of a running
+simulation into rows and blobs in a database, continuously, without slowing the
+simulation down. This chapter is about *what it captures* and *how it encodes*
+that capture efficiently -- the features, not the internals. Everything here is
+built from the SimDB machinery of Parts <<part-iv,Part IV>> through <<part-vi,Part VI>>; where that machinery shows
+through, we point back to it rather than re-explaining it.
+
+=== Setting up: clocks, collectables, and time
+
+Before a run begins, you tell the collector three things.
+
+*Clocks.* A simulation advances on one or more clocks, and the collector needs to
+know about them -- each has a name and a period (and, for derived clocks, a
+numerator/denominator ratio). Clocks are the time bases everything else is
+measured against.
+
+*Collectables.* Each object you want to capture is registered as a *collectable*
+with three attributes: a *path* (its dotted position in the system hierarchy, e.g.
+`top.core0.rob`), the *clock* it is collected against, and its *data type*. The
+collector assigns each collectable a small integer id -- a *CID* -- and records the
+whole set as a tree of collectables. That set is exactly what you choose from when
+building views in the viewer.
+
+*A source of simulated time.* Finally, you give the collector a way to read the
+current simulation time -- a back-pointer to a counter, or a function it can call.
+Time must advance *monotonically*; the collector rejects time that moves
+backward.
+
+=== Collecting as the simulation runs
+
+Once the run is live, you *collect* each object's current value whenever it
+changes (or on whatever cadence your instrumentation chooses). The collector
+gathers everything staged at a single point in simulated time into one unit of
+work -- internally a "ledger" for that time point. When simulated time advances,
+the collector seals the current ledger, hands it off to its pipeline, and starts a
+fresh one for the new time.
+
+[IMPORTANT]
+====
+Collection cadence is entirely up to you and your instrumentation. The
+*heartbeat* introduced below does *not* decide when you may collect, how often, or
+which ticks are captured. It affects only how the already-collected data is
+*encoded* on disk. Collect as much or as little as you like; the heartbeat is a
+separate, purely internal performance concern.
+====
+
+=== Inside the collector: the pipeline
+
+Handing the ledger off is where Parts IV and V come back into view. The collector
+is a `simdb::App`, and its `createPipeline` builds a three-stage pipeline. The
+simulation thread only ever pushes a ledger into the head of that pipeline -- it
+never compresses, encodes, or touches the database itself:
+
+....
+  simulation thread
+        |  push sealed ledger (one point in sim time)
+        v
+  [ Stager ]      per-CID checkpoint chains; decides FULL snapshot vs DELTA
+        |
+        v
+  [ Compressor ]  zlib-compresses the encoded window
+        |
+        v
+  [ Writer ]      runs on the single database thread; writes blobs + timestamps
+        |
+        v
+     collected.db
+....
+
+Three stages, three threads, plus the one database thread -- the exact shape from
+<<part-iv,Part IV>>. The stager does the interesting work (turning raw snapshots into
+snapshots-plus-deltas); the compressor subclasses `pipeline::CompressionStage`
+and zlib-compresses the encoded window with adaptive levels from
+<<part-iii,Part III>>; and the writer is a `DatabaseStage`, so all persistence funnels onto the single
+database thread. Because the hand-off is a queue push, the simulation is never
+blocked waiting on encoding or disk.
+
+=== Snapshots and deltas: what the heartbeat controls
+
+Storing the full state of every object at every time point would be enormous and
+mostly redundant -- from one tick to the next, most values do not change. So the
+stager keeps, for each collectable, a *checkpoint chain* and encodes most time
+points as a small *delta* against the previous checkpoint. Periodically it writes
+a *full snapshot* instead, "rebasing" the chain so that reconstruction never has
+to walk back too far.
+
+The *heartbeat* is the knob that governs that rebase cadence: it bounds how many
+deltas may accumulate (and how long, in simulated time) before the next full
+snapshot is forced. Its default is `10`. This is a pure space-versus-speed
+trade-off:
+
+[cols="1,2,2"]
+|===
+| Heartbeat | Effect on the database | Effect on the viewer
+
+| *Larger* (more deltas between snapshots)
+| Smaller database -- fewer full snapshots written.
+| Slower reconstruction -- to show a given tick, the viewer must replay more
+  deltas back to the last snapshot.
+
+| *Smaller* (more frequent snapshots)
+| Larger database -- full snapshots cost more space.
+| Faster reconstruction -- a snapshot is always close to any requested tick.
+
+| *Default (10)*
+| A balanced starting point for most runs.
+| Reasonable replay latency without excessive size.
+|===
+
+The key point, restated because it matters: the heartbeat trades *simulation-time
+database size* against *viewer responsiveness*. It never changes which data is
+collected -- only how compactly that data is laid down and how much work the viewer
+does to replay it.
+
+=== Scalars, containers, and lifecycle
+
+Collectables come in two shapes. A *scalar* is a single value (a counter, a state
+enum, a struct). A *container* is a collection of values -- a queue or buffer --
+and comes in two flavors: *contiguous* (front-packed, like a ring buffer) and
+*sparse* (indexed slots that may have gaps). Containers declare a fixed
+*capacity* which the viewer uses to render queue-utilization views (%-full widgets).
+
+Collectables also have a lifecycle: an entry can be *closed* to mark that a record
+ended at a particular time. The encoder understands these close events and, when
+needed, primes them with a fresh snapshot so the viewer can always reconstruct the
+state leading up to a close.
+
+=== Multi-clock collection
+
+A database may contain a single clock or many. When there are several, each
+collectable participates only in the windows belonging to *its own* clock, and the
+collector records which clocks were active at each captured timestamp. The viewer
+uses that to update each object only on the edges of the clock it was collected
+against -- so a fast clock and a slow clock coexist correctly in one database.
+
+=== What gets written, and when
+
+The collector leans on the app lifecycle from <<part-v,Part V>> to write the right things at
+the right moments:
+
+* *Before the run* (`postInit`): the global settings (including the heartbeat), the
+  clock definitions, and the collectable tree -- the static scaffolding the viewer
+  reads first.
+* *During the run*: compressed state blobs and their timestamps, written by the
+  database stage as ledgers flow through the pipeline.
+* *Just before teardown* (`preTeardown`): the last in-flight ledger is flushed into
+  the pipeline so no final time point is lost.
+* *After the run* (`postTeardown`): closing metadata -- which collectables actually
+  produced data (only those are flagged to *show in the UI*; ones that never
+  collected anything trigger a friendly warning), observed queue maximums, and the
+  string/enum lookup tables.
+
+[NOTE]
+====
+Two lifecycle details connect directly to earlier chapters. First, every app's
+`postInit` and `postTeardown` each run inside one automatic `safeTransaction`
+(<<part-v,Part V>>) -- `postInit` for pre-sim scaffolding metadata, `postTeardown` for
+closing metadata -- so those writes commit together without manual transaction
+wrapping. Second, the collector's string tables are flushed in `postTeardown`
+explicitly -- the same `TinyStrings` flush called out in <<ch-24-multiple-apps,Chapter 24>> as a step
+that teardown does not yet do for you automatically.
+====
+
+That is the collector end to end: register clocks and collectables, feed values as
+time advances, and let a three-stage pipeline encode, compress, and persist them
+onto the single database thread. The next chapter opens up the file it produces
+and reads its schema as the contract the viewer depends on.
+
+[#ch-33-on-disk-model]
+== On-Disk Data Model & Encodings
+
+Because the database file is the entire interface between collector and viewer,
+its schema is a *contract*. The collector promises to write these tables in this
+shape; the viewer relies on exactly that shape to reconstruct the run. This
+chapter reads that contract -- not table by table as a reference, but grouped by
+the role each part plays -- and then explains the one idea that underpins all of
+it: everything is stored in binary.
+
+=== The schema, by role
+
+The tables fall into a few natural groups.
+
+*Static scaffolding* -- written before the run, describing its shape:
+
+* `CollectionGlobals` -- run-wide settings, including the heartbeat.
+* `Clocks` -- each clock's name and timing (period, and an optional ratio).
+* `CollectableTreeNodes` -- one row per collectable: its `CID`, its dotted
+  `FullPath`, the `ClockID` it belongs to, its `TypeName`, and a `ShowInUI` flag.
+  This table captures the collectable tree -- the set of objects you can choose to
+  visualize in the viewer.
+* `DataTypeSchemas` / `DataTypeNodes` -- per-type layout and display metadata (field
+  names, type names, and format strings) used to render structured values.
+
+*Time and data* -- the bulk of the file, written as the run proceeds:
+
+* `Timestamps` -- the distinct points in simulated time that were captured; these
+  become the range you scrub through.
+* `CollectionRecords` -- the actual payload: one compressed blob per captured time
+  point, keyed by `TimestampID`.
+* `TimestampClocks` -- which clocks were active at each timestamp, so multi-clock
+  runs reconstruct correctly.
+
+*Encoding side tables* -- the lookups that make the binary payload legible:
+
+* `TinyStringIDs` -- the string-to-integer dictionary (below).
+* `CollectedEnums` / `EnumMembers` -- the enum-to-name maps (below).
+
+*Extras*:
+
+* `QueueMaxSizes` -- the peak occupancy each container reached, for
+  queue-utilization views.
+* `Notifications` -- sporadic messages surfaced in the viewer's Logs tab.
+
+.An Argos database opened in a SQLite browser, showing the collection tables described here
+image::argos-schema-db-browser.png[An Argos database opened in a SQLite browser,role=text-center]
+
+=== Everything is collected in binary
+
+The single most important thing to understand about Argos data is that the
+collector stores *everything in binary*. Collected values are not written as
+human-readable columns -- they are packed as raw bytes into the compressed
+`CollectionRecords` blobs. This is what keeps collection fast and the database
+small, and it is why the viewer, not a plain `SELECT`, is the tool for reading a
+run. Two data types deserve special mention because they are *not* stored the way
+you might expect.
+
+*Strings become integers.* A string is never written as its characters in the
+data blobs. Instead the collector interns it through *`TinyStrings`*: the first
+time a given string is seen it is assigned a small integer id, and only that
+integer is written into the blob. The id-to-string dictionary is saved once, at
+teardown, into the `TinyStringIDs` table. The viewer joins against that table to
+recover the text. (The empty string is a reserved id of zero.) A repeated label
+that might appear millions of times across a run therefore costs a few bytes each
+time instead of its full length -- a large space win for essentially free.
+
+*Enums use their underlying integer.* Enum values are always serialized in the
+blob as their underlying integer type -- never as text. To make those integers
+meaningful in the UI, the collector also records a value-to-name map for each enum
+type that supports it, in `CollectedEnums` (the enum's name and integer type) and
+`EnumMembers` (each `name` and its raw integer value). The viewer uses that map to
+display, say, `ISSUED` instead of `2`. An enum that has no string conversion is
+simply shown as its raw integer value -- still correct, just not labeled.
+
+The pattern generalizes: the blob is a compact, uniform byte stream, and a handful
+of side tables (`TinyStringIDs`, `CollectedEnums`, `EnumMembers`) plus the type
+metadata are the key that turns those bytes back into readable values. Nothing is
+lost; it is just encoded for size and speed rather than for direct human reading.
+
+=== Full snapshots and deltas on disk
+
+<<ch-32-argos-collector,Chapter 32>> explained *why* the collector writes periodic full snapshots with small
+deltas in between, and how the heartbeat bounds that. On disk, this is what fills
+`CollectionRecords`: each collectable's value at a given time point is encoded
+either as a *full snapshot* or as a *delta* against its previous checkpoint. To
+reconstruct an object's exact value at a requested tick, the viewer finds the most
+recent full snapshot at or before that tick and replays the deltas forward -- the
+"lookback" whose depth the heartbeat caps. That is the whole replay model; the
+mechanics of building the delta chains live in the collector's implementation and
+are not something the on-disk format asks you to understand.
+
+=== Contiguous vs. sparse containers
+
+Containers record their kind and capacity in their encoded type: a *contiguous*
+container is front-packed (occupied slots first, like a ring buffer's live
+region), while a *sparse* container keeps values at explicit indices that may have
+gaps. Both declare a fixed capacity, and the collector tracks the maximum
+occupancy each one actually reached over the run in `QueueMaxSizes`. The viewer
+uses the kind to lay a container out correctly and the max size to scale its
+utilization displays.
+
+=== The contract, from the viewer's side
+
+Two fields in `CollectableTreeNodes` are worth calling out because the viewer
+leans on them directly. `ClockID` binds each collectable to the clock it updates
+on, so the viewer advances each object only on the right edges. And `ShowInUI` is
+the filter that keeps the object list honest: only collectables that actually
+produced data during the run are flagged for display, so an
+instrumented-but-never-fired object does not clutter the objects you can choose to
+visualize (the collector even emits a notification listing anything it dropped for
+this reason).
+
+With the contract in hand -- a tree of collectables on their clocks, a timeline of
+timestamps, compressed binary blobs of snapshots and deltas, and the small tables
+that decode them -- we can finally cross to the read side and see how the viewer
+turns all of this back into something you can explore.
+
+[#ch-34-argos-viewer]
+== The Argos Viewer
+
+The viewer is the read side of Argos: a desktop application that opens a collected
+database and lets you *replay* the simulation, scrubbing back and forth through
+simulated time to watch collected objects change. Where the collector chapter was
+about features and encodings, this one is about *what you see and do* -- it is
+deliberately a user's tour of the interface, not a look under the hood.
+
+=== Opening a database
+
+You point the viewer at a collected database, and optionally at a saved layout.
+When you open a run for the first time, you are met with an almost-empty
+workspace: a single canvas tab filling most of the window, and the playback
+controls along the bottom. The canvas does not sit blank, though -- an empty cell
+shows a small *Quick Links* menu (described next) that is your starting point for
+building a view. Nothing is visualized yet because you have not chosen anything to
+look at.
+
+.Argos on first open: an empty canvas showing the Quick Links menu, with the playback bar at the bottom
+image::argos-first-launch.png[Argos on first open: an empty canvas showing the Quick Links menu,role=text-center]
+
+If you have looked at this data before, the viewer reopens your last layout
+automatically; you can also hand it a saved *view file* to jump straight to a
+prepared arrangement (more on those below).
+
+=== Quick Links: building a view from an empty cell
+
+Every empty canvas cell displays a *Quick Links* menu -- a short bulleted list of
+hyperlinks -- and this is how you populate the viewer. It has two groups:
+
+* *Widgets* -- one link per kind of widget you can create in that cell: *Queue
+  Inspector*, *Queue Utilizations*, *Scheduling Lines*, and *Watchlist*. Clicking
+  one opens a small dialog to choose *which* collected objects it should show (for
+  example, which queue to inspect, or which elements to draw scheduling lines
+  for), and then places the widget in that cell.
+* *Canvas* -- links to *Split left/right* and *Split top/bottom*, which divide the
+  cell in two. The freshly created empty half again shows its own Quick Links, so
+  you build up a multi-widget layout by splitting and filling, cell by cell.
+
+This is the mental model that replaces any single "browse everything" panel:
+choosing data is part of creating each widget, right where that widget will live.
+
+=== Tabs and the splittable canvas
+
+The workspace is organized as a *data inspector* of tabs, each holding one
+*canvas*. A trailing `+` ("Add Tab") page creates a new tab for a different
+arrangement, and you can right-click a tab to rename or delete it. When the run
+recorded notifications worth surfacing (the sporadic messages from the collector's
+`Notifications` table), a fixed *Logs* tab appears as well.
+
+Within a tab, the canvas is recursively splittable -- every split leaves two
+cells, each of which can hold a widget or be split again -- so you can arrange many
+widgets side by side and watch related objects together. Splitting is available
+both from the Quick Links of an empty cell and from a populated widget itself.
+
+=== Widgets
+
+Widgets are how collected objects are actually visualized. Each is created from a
+Quick Links entry and then configured through its own selection dialog and
+settings. The viewer ships several kinds, each suited to a different shape of
+data.
+
+*Queue Inspector* -- a tabular view of a container object such as a queue or
+buffer. You choose which columns are visible, and per-column *auto-colorization*
+tints values so patterns jump out as you scrub through time.
+
+.A Queue Inspector widget with configurable columns and per-column auto-colorization
+image::argos-queue-inspector.png[A Queue Inspector widget with colorized columns,role=text-center]
+
+*Queue Utilizations* -- how full container objects are over time, scaled against
+the queue's max capacity given to the `ArgosCollector`.
+
+.A Queue Utilizations widget showing container occupancy over time
+image::argos-queue-utilizations.png[A queue-utilizations widget,role=text-center]
+
+*Scheduling Lines* -- a timeline-style view of scheduled activity across the
+elements you select, over a configurable window of ticks before and after the
+current position.
+
+.A Scheduling Lines widget showing scheduled activity across a window of ticks
+image::argos-scheduling-lines.png[A scheduling-lines widget,role=text-center]
+
+*Watchlist* -- an aggregate/summary view gathering several selected objects
+together.
+
+.A Watchlist widget aggregating several selected objects
+image::argos-watchlist.png[A watchlist / summary widget,role=text-center]
+
+=== The playback bar: moving through time
+
+The bottom of the window is where Argos becomes a *replay* tool rather than a
+static viewer. The playback bar has a clock selector (for multi-clock runs), a
+readout of the current cycle/tick, step buttons for jumping by fixed amounts in
+either direction, and a scrubber that spans the whole run from start to end.
+
+As you move the playback position, every widget updates to show its objects'
+state *at that instant* -- reconstructed behind the scenes from the nearest full
+snapshot plus the deltas up to that tick, exactly the encoding from the previous
+two chapters. You never think about snapshots or deltas; you just move the slider
+and watch the system evolve. In a multi-clock database, each object updates only
+on the edges of the clock it was collected against.
+
+=== A thin client, by design
+
+It is worth being explicit about what the viewer does *not* do, because it shapes
+how Argos scales. The viewer is a deliberately *lightweight, thin client*: it
+never loads a whole run into memory. When you land on a tick, it reads only the
+blobs it needs to reconstruct exactly what the visible widgets are showing, right
+then. Move to another tick and it does the work again for the new position.
+
+It does not even cache blobs it has already decoded -- revisiting a tick re-reads
+and re-replays it from scratch. (A cache might be a reasonable future
+optimization; today there simply isn't one.) What makes this practical is that the
+viewer is *fast at deserializing and replaying* the compressed snapshot-and-delta
+blobs, so on-demand reconstruction stays responsive even though nothing is kept
+around.
+
+The upshot is a viewer whose memory footprint is tied to *what is on screen*, not
+to the size of the database. A multi-gigabyte run opens as readily as a small one,
+because Argos only ever pulls the slice of data the current view and tick require.
+
+=== View files: saving and sharing a layout
+
+A carefully arranged view is worth keeping, so the viewer can save your layout to a
+*view file*. It captures the whole arrangement -- the tabs, how each canvas is
+split, which widgets sit where, the columns and colorization chosen for each
+object, and the selected clock -- so you can reopen it later or hand it to a
+colleague to reproduce your exact setup. The window title marks when there are
+unsaved changes, and the viewer remembers your most recent layout and restores it
+automatically the next time you open the same data without naming a view file.
+
+One deliberate exception: the *playback position* -- the specific tick you happen to
+be viewing -- is treated as a per-session preference and is *not* stored in the
+shared view file. A view file describes how to look at a run, not where in time you
+last paused, so sharing one does not drag your colleague to your current tick.
+
+[NOTE]
+====
+The viewer is intentionally described here at the level of features and workflow.
+Its implementation is being revised, so this chapter avoids tying anything to
+specific internals -- what a user does with the canvas, Quick Links, widgets,
+playback bar, and view files is what matters, and that is stable.
+====
+
+That is the viewer as an instrument: open a run, create widgets from an empty
+cell's Quick Links (choosing their data as you go), compose them on a splittable
+canvas, and scrub through simulated time while everything updates in step. All
+that remains is to see the two halves working together in a single, concrete run
+-- the end-to-end walkthrough that closes the case study.
+
+[#ch-35-end-to-end]
+== End-to-End
+
+We have followed the data from one side to the other: born in the collector,
+encoded into a database, brought back to life in the viewer. This closing chapter
+walks the whole loop once as a single workflow, and shows how Argos proves to
+itself that the round trip is lossless.
+
+=== The three steps
+
+Using Argos end to end is always the same three moves:
+
+. *Instrument and collect.* Enable the `ArgosCollector` app in your simulator,
+  register its clocks and collectables, and collect values as simulated time
+  advances. This is ordinary SimDB app usage -- the lifecycle from <<part-v,Part V>>
+  (`registerApp`, `enableApp`, `createEnabledApps`, `createSchemas`, `postInit`,
+  `initializePipelines`, `openPipelines`, and `postSimLoopTeardown`) driving the
+  collector's three-stage pipeline underneath.
+. *Produce one database.* When the run ends, teardown flushes the pipeline and you
+  are left with a single `.db` file -- the whole run, and the only artifact.
+. *Open it in the viewer.* Point the viewer at that file and explore: create
+  widgets from the Quick Links, arrange them on the canvas, and scrub through
+  simulated time, as in the previous chapter.
+
+=== Instrumenting a run
+
+The collector-specific setup is small and sits inside the app lifecycle. Before
+the run you tell the collector how to read time (a pointer or function it can
+sample), register one or more clocks, set the heartbeat if you want something
+other than the default, and declare your collectables (scalars and containers,
+each on a clock). Then, as the simulation steps, you stage each object's current
+value; the collector seals a ledger whenever time advances and the pipeline does
+the rest. There is no separate "flush every tick" step and nothing on the hot path
+touches the database.
+
+[NOTE]
+====
+As emphasized in <<ch-32-argos-collector,Chapter 32>>, the heartbeat here is *only* a performance choice --
+how many deltas accumulate before a full snapshot rebases the chain. It changes
+the database's size and the viewer's replay effort, never which data you collect.
+The next section leans on exactly that property.
+====
+
+=== Testing the checkpointer logic and Python deserializers
+
+The authoritative end-to-end exercise lives in `test/argos/`, and it is more than
+a demo -- it is a regression test that runs as part of the suite, so the whole
+collect-encode-replay loop is continuously verified. It works by *replaying* the
+collected blobs the same way the viewer does -- walking the timeline, applying each
+snapshot and delta -- and reconstructing every object's value at every tick. It
+then compares those reconstructed values against the simulator's own record of
+what it collected. If the bytes on disk did not faithfully capture the run, the
+comparison fails.
+
+The most instructive part is how it treats the heartbeat. The test collects *the
+same simulation three times* -- at heartbeats of 1, 3, and 10 -- producing three
+databases of different sizes, and then confirms that the *reconstructed data is
+identical* across all three. That is the <<ch-32-argos-collector,Chapter 32>> claim made concrete and
+enforced: the heartbeat changes only how compactly the run is stored, not the
+information it contains. A smaller heartbeat writes more full snapshots and a
+larger file; a larger heartbeat leans on more deltas and a smaller file; the
+replayed result is the same either way.

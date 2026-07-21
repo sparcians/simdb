@@ -1,0 +1,660 @@
+[#part-v]
+= Part V: The App Framework
+
+Pipelines and schemas are composed inside _apps_. This part shows how SimDB apps
+are defined, registered, enabled, and run -- including many apps sharing one
+database.
+
+[#ch-22-simdb-app]
+== What Is a SimDB App?
+
+In <<part-iv,Part IV>> we built a pipeline, and it lived inside a class that derived from
+`simdb::App`. That wrapper was not incidental. An *app* is SimDB's unit of
+composition: a self-contained bundle of a schema, *one pipeline* (the typical
+case), and lifecycle logic, all writing into a shared database. When several
+simulation threads feed the same app, the usual pattern is *multiple pipeline
+heads* -- several unbound input ports on that single pipeline -- not multiple
+pipelines per app (which is uncommon and costs extra threads). This chapter
+explains what an app is and the hooks it provides; the next explains how apps
+are registered and run.
+
+=== One database, many apps
+
+The guiding paradigm is simple: your simulator has a *single output database*,
+and *one or more apps* write into it, each with its own tables and its own logic.
+One app might collect statistics, another might log events, another might capture
+a trace -- and all of their data lands in the same SQLite file, each in its own
+tables. This is the "one database to rule them all" idea from <<part-i,Part I>>, expressed
+at the level of features: you add a capability to your simulator by adding an
+app, not by standing up a new database or a new output format.
+
+=== The anatomy of an app
+
+You create an app by subclassing `simdb::App`. A typical app has four parts, all
+of which appeared in the `SimplePipeline` example:
+
+* *A constructor taking a `DatabaseManager*`.* Every app is handed the shared
+  database manager when it is created, and typically stores it:
++
+[source,cpp]
+----
+SimplePipeline(simdb::DatabaseManager* db_mgr) : db_mgr_(db_mgr) {}
+----
+
+* *A static `defineSchema`.* This declares the app's tables. It is `static`
+  because the framework calls it to assemble the combined schema _before_ any app
+  instance exists:
++
+[source,cpp]
+----
+static void defineSchema(simdb::Schema& schema)
+{
+    using dt = simdb::SqlDataType;
+    auto& tbl = schema.addTable("CompressedData");
+    tbl.addColumn("AppInstance", dt::int32_t);
+    tbl.addColumn("DataBlob", dt::blob_t);
+}
+----
+
+* *A `createPipeline` override.* This builds the app's *one* pipeline on the
+  manager it is given, using the <<part-iv,Part IV>> build protocol. Call
+  `createPipeline(name, app)` once; fan in multiple producers via multiple
+  pipeline heads (unbound input ports), not by creating a second pipeline.
+
+* *Whatever public methods your app needs.* `SimplePipeline::process` is an
+  example -- the app's own front door for receiving data. These are not framework
+  hooks; they are simply your app's interface to the rest of the simulator.
+
+=== The lifecycle hooks
+
+Beyond the schema and pipeline, `App` defines a small set of virtual hooks that
+the framework calls at well-defined points. You override the ones you need:
+
+[cols="1,3"]
+|===
+| Hook | When it runs
+
+| `defineSchema(Schema&)` (static) | Up front, to declare the app's tables.
+| `postInit(argc, argv)`           | After command-line/config parsing, before the simulation starts. All apps' `postInit` methods run inside one automatic `safeTransaction` -- the usual place for pre-sim metadata (settings, scaffolding tables, lookup seeds).
+| `createPipeline(PipelineManager*)` | To construct the app's single pipeline (multiple pipeline heads if needed).
+| `preTeardown()`                  | Just before teardown -- push any last pending data into your app's pipeline.
+| `postTeardown()`                 | After the simulation -- the place for post-sim metadata writes. All apps' `postTeardown` methods run inside one automatic `safeTransaction`.
+|===
+
+The `postInit` and `postTeardown` transaction details are worth dwelling on:
+because every app's `postInit` and `postTeardown` each run inside a single
+`safeTransaction` that SimDB opens for you, you can write pre-sim and post-sim
+metadata directly in those hooks without wrapping INSERTs yourself -- the
+batching, retry-on-lock, and safety are handled, exactly as they are on the
+database thread during the run.
+
+The value of fixed hooks is consistency: however many apps a simulator loads,
+each is initialized, run, and torn down in the same order. The `AppManager` --
+the next chapter -- is what drives them.
+
+=== Instance numbering
+
+An app can run as more than one *instance* against the same database -- several
+copies of the same collector, say, each responsible for a different part of the
+model. `getInstance()` returns an instance number to tell them apart: it is
+1-based, with `0` meaning a single-instance app. `SimplePipeline` used exactly
+this to tag each row with the instance that produced it, passing `getInstance()`
+into its database stage so the `AppInstance` column records the source.
+
+=== What apps are for
+
+The framework is deliberately open-ended. Apps make good homes for any
+self-contained data-producing capability, such as:
+
+* a *logger* that records simulation events,
+* a *profiler* that tracks performance metrics,
+* a *pipeline collector* that instruments CPU blocks in a performance model
+* a *converter* (for example, SQLite to another format),
+* or a *backend* for a live visualization GUI.
+
+Each is just a schema, one pipeline, and some lifecycle logic -- and each
+coexists with the others in one database. An app on its own, though, does
+nothing until something registers and enables it. That something is the
+`AppManager`.
+
+[#ch-23-app-manager]
+== The AppManager
+
+An app class on its own does nothing. Something has to register it, decide
+whether it is enabled for this run, construct it, and then call its lifecycle
+hooks in the right order. That something is the app manager, and it is what turns
+a set of app _types_ into running apps writing to a database.
+
+=== Two managers, two jobs
+
+SimDB splits the responsibility across two classes:
+
+* `simdb::AppManagers` (plural) is the top-level coordinator. You register your
+  app types with it, it owns the per-database managers, and it drives the whole
+  lifecycle across every app at once.
+* `simdb::AppManager` (singular) manages the enabled apps for *one database*.
+  Because a program can open more than one database file, there is one
+  `AppManager` per file.
+
+Most simulators have a single output database, so the common shape is one
+`AppManagers` coordinating one `AppManager`. The plural form is what makes the
+"one database, many apps" model -- and even "many databases" -- fall out
+naturally.
+
+=== Registering and enabling apps
+
+Two distinct steps decide which apps run. First you *register* an app type so the
+framework knows it exists; this happens before any manager is created:
+
+[source,cpp]
+----
+simdb::AppManagers app_mgrs;
+app_mgrs.registerApp<SimplePipeline>();
+----
+
+Then, for a given database, you *enable* the apps you actually want for this run:
+
+[source,cpp]
+----
+auto& app_mgr = app_mgrs.createAppManager("out.db");
+app_mgr.enableApp(SimplePipeline::NAME);          // enable one instance
+// app_mgr.enableApp(SimplePipeline::NAME, 4);    // or several instances
+----
+
+The split matters: registration is a fixed list of everything your simulator
+_could_ run, while enabling is the per-run decision driven by your configuration
+-- command-line flags, a config file, whatever your simulator uses. An app that
+is registered but not enabled costs nothing.
+
+=== The driven lifecycle
+
+With apps registered and enabled, `AppManagers` drives them through the hooks from
+the previous chapter in a fixed sequence. Each call fans out across every enabled
+app on every database:
+
+[source,cpp]
+----
+app_mgrs.createEnabledApps();     // construct the enabled app instances
+app_mgrs.createSchemas();         // call each app's static defineSchema()
+app_mgrs.postInit(argc, argv);    // run each app's postInit() hook
+app_mgrs.initializePipelines();   // build each app's pipeline (createPipeline())
+app_mgrs.openPipelines();         // start the pipeline threads running
+
+// ... run the simulation, feeding data to your app(s) ...
+auto app = app_mgr.getApp<SimplePipeline>();
+for (const auto& data : inputs)
+{
+    app->process(data);
+}
+
+app_mgrs.postSimLoopTeardown();   // preTeardown()/postTeardown(), stop threads
+----
+
+Reading top to bottom, that is the entire life of a SimDB program:
+
+. `createEnabledApps` constructs each enabled app (handing it the shared
+  `DatabaseManager`).
+. `createSchemas` invokes every app's `defineSchema`, assembling one combined
+  schema in the database.
+. `postInit` runs each app's post-initialization hook.
+. `initializePipelines` invokes each app's `createPipeline` once, building that
+  app's pipeline and its threads.
+. `openPipelines` starts those threads; from here the pipelines are live.
+. Your simulation runs, handing data to apps you retrieve with
+  `getApp<AppT>()`.
+. `postSimLoopTeardown` runs the teardown hooks, drains and stops the threads,
+  and closes things out.
+
+=== Reaching your apps and database
+
+Once things are running, a handful of accessors get you back to a specific app or
+database. Some throw when used in a situation that has no single unambiguous
+answer -- asking for "the" app manager when several databases are open, or for a
+single app instance when many were enabled. The table below summarizes them, and
+on which class each lives (`AppManager` is per-database; `AppManagers` is the
+top-level coordinator).
+
+[cols="2,1,2,2"]
+|===
+| Method | On | Returns / does | Throws when
+
+| `enabled<AppT>()`
+| `AppManager`
+| Whether `AppT` is enabled (it may not be instantiated yet).
+| Does not throw.
+
+| `getEnabledAppInstances<AppT>()`
+| `AppManager`
+| How many instances of `AppT` are enabled (`0` if none).
+| Does not throw.
+
+| `getApp<AppT>()`
+| `AppManager`
+| The single instance of `AppT`, or `nullptr` if it is not enabled.
+| `AppT` was enabled with more than one instance (use `getAppInstance`), or the stored app is not of type `AppT`.
+
+| `getAppInstance<AppT>(n)`
+| `AppManager`
+| Instance `n` (zero-based) of a multi-instance app, or `nullptr` if not enabled/absent.
+| The stored app is not of type `AppT`.
+
+| `getDatabaseManager()`
+| `AppManager`
+| The shared `DatabaseManager` for this database.
+| Does not throw.
+
+| `getAppManager()`
+| `AppManagers`
+| The sole `AppManager`.
+| There is not exactly one `AppManager`.
+
+| `getAppManager(db_file)`
+| `AppManagers`
+| The `AppManager` for `db_file`.
+| No `AppManager` exists for `db_file`.
+
+| `getDatabaseManager()`
+| `AppManagers`
+| The sole `DatabaseManager`.
+| There is not exactly one database open.
+
+| `getDatabaseManager(db_file)`
+| `AppManagers`
+| The `DatabaseManager` for `db_file`.
+| No database `db_file` exists.
+
+| `getAllManagers()`
+| `AppManagers`
+| Every `(AppManager*, DatabaseManager*)` pair; empty after teardown.
+| Does not throw.
+|===
+
+In the common single-database, single-instance case, the two you will reach for
+are `getApp<AppT>()` (to call your app's own methods, like `process`) and
+`getDatabaseManager()` (to access the database directly; never do this in the hot
+path / simulation loop -- use the `AsyncDatabaseAccessor` discussed in <<ch-29-async-db-access,Chapter 29>>).
+
+=== Consistency
+
+The reason to hand this sequence to a manager rather than wiring it by hand is
+consistency: every app, no matter how many you enable, is initialized, run, and
+torn down in exactly the same order. Adding a second app does not change the
+driver above at all -- you simply enable one more app, which is precisely the
+subject of the next chapter.
+
+=== Per-thread performance reports
+
+When the manager tears the pipelines down, each pipeline worker thread prints a
+short performance report. It lists which stage (or stages) the thread was
+running, how many times it ran, and -- most usefully -- how it split its time
+between doing work and sleeping:
+
+....
+Thread containing:
+    compressor
+
+    Performance report:
+        Num times run:      1000
+        Pct time sleeping:  4.2%
+        Pct time working:   95.8%
+....
+
+These percentages are your primary guide to *tuning stages*, and they connect
+directly to the performance levers from <<part-iv,Part IV>>:
+
+* A thread that is *mostly working* (near 100%) is *saturated* -- it is a
+  bottleneck holding back the pipeline. That stage is a candidate to split into
+  finer stages that can run in parallel, to optimize, or to feed with larger
+  batched payloads so it spends less time per item.
+* A thread that is *mostly sleeping* is *under-utilized* -- it wakes on its
+  polling interval, finds nothing, and goes back to sleep. Either it is starved
+  downstream of a bottleneck, or its polling interval is shorter than it needs to
+  be and can be lengthened to waste fewer wakeups.
+
+Balancing these numbers across stages -- no single stage pinned at 100% while
+others idle -- is how you turn the abstract advice about stage granularity and
+polling intervals into concrete adjustments for _your_ pipeline.
+
+For compression stages specifically, SimDB ships
+`simdb::pipeline::CompressionStage` (<<part-iv,Part IV>>, SimplePipeline) to apply the
+sleep-percent logic automatically: subclasses call `getBestCompressionLevel_()`
+inside `compressData`, and the base maps the thread's sleep percentage to a zlib
+level from `FASTEST` through `HIGHEST`. The table below remains the rationale --
+and the guide if you write a custom compression stage that does not use the
+helper.
+
+To make this concrete, take the `compressor` stage from our running example. Its
+per-item cost is the zlib compression, which you _would_ dial with the
+`compression_level` argument to `simdb::compressData` (from `CompressionLevel::
+FASTEST` through `HIGHEST`); with `CompressionStage`, SimDB dials it for you using
+the same reasoning. Its report tells you which way that automatic dial is turned:
+
+[cols="1,1,3"]
+|===
+| Active % | Sleep % | Design decision
+
+| Very high | ~0% (never sleeps)
+| The compressor is saturated and gating the pipeline. *Lower the compression
+  ratio* -- pass a faster level such as `CompressionLevel::FASTEST` -- so each
+  vector costs less CPU and the stage keeps up.
+
+| Very low | ~100% (always sleeps)
+| The compressor has capacity to spare. *Raise the compression ratio* (for
+  example `CompressionLevel::HIGHEST`) to shrink the database while the headroom
+  exists; or keep the ratio and *merge this stage into the previous or next one*
+  to save a thread and a queue hop.
+
+| Balanced | Balanced
+| The stage is well tuned -- leave it as is.
+|===
+
+[#ch-24-multiple-apps]
+== Running Multiple Apps Concurrently
+
+The payoff of the manager-driven lifecycle is that running many things at once is
+nearly free. Because the driver sequence from the previous chapter never changes,
+"one app" and "many apps" are the same code -- you just enable more. Concurrency
+comes in two forms: several _instances_ of one app, and several _different_ apps.
+Either way, they all share the one database.
+
+=== Many instances of one app
+
+To run several copies of the same app, pass an instance count to `enableApp`.
+Each instance is a full, independent app with its own pipeline and threads; they
+differ only in their instance number:
+
+[source,cpp]
+----
+simdb::AppManagers app_mgrs;
+app_mgrs.registerApp<SimplePipeline>();
+
+auto& app_mgr = app_mgrs.createAppManager("out.db");
+app_mgr.enableApp(SimplePipeline::NAME, 4);   // four instances
+
+app_mgrs.createEnabledApps();
+
+// Reach each instance by its zero-based index:
+auto app0 = app_mgr.getAppInstance<SimplePipeline>(0);
+auto app1 = app_mgr.getAppInstance<SimplePipeline>(1);
+// ...
+----
+
+With more than one instance configured, `getApp<AppT>()` throws (there is no
+single app to return) -- use `getAppInstance<AppT>(n)` instead. Inside each app,
+`getInstance()` returns its number, which is how the instances keep their data
+apart: `SimplePipeline` tags every row it writes with its instance, so all four
+instances can share the `CompressedData` table and you can still tell whose rows
+are whose.
+
+=== Many different apps
+
+Running different apps together is the same story: register each type, enable
+each one, and the lifecycle calls fan out to all of them. A statistics app, a
+logging app, and a trace collector can all be enabled on the same database, and
+the driver code is identical to the single-app case -- `createEnabledApps`,
+`createSchemas`, and the rest simply visit every enabled app. Each app
+contributes its own tables via its own `defineSchema`, so they coexist in one
+file without stepping on one another.
+
+=== The threading model, and multi-app scalability
+
+The one firm rule you already know holds no matter how many apps you run: there
+is *exactly one database thread*, shared by every database stage in the process.
+That is the permanent anchor of the model, and it is what keeps database access
+fast and contention-free regardless of how many apps are enabled.
+
+The non-database side is simpler than it will eventually be. Today, each pipeline
+stage runs on its own worker thread, and there is no sharing of those threads
+across apps. Enabling a second app adds that app's stages -- and therefore its
+threads -- on top of the first. Thread count grows roughly with the total number
+of stages across all enabled apps.
+
+[WARNING]
+====
+Running many apps at once is *not currently thread-scalable*. Each additional app
+adds its stages' worker threads with no pooling or sharing, so a process with a
+large number of apps will spin up a correspondingly large number of threads. In
+practice this is yet to be a problem: today a simulation typically runs one
+app at a time (or none), which stays comfortably within budget. Keep the
+limitation in mind before using many apps in a single simulation.
+====
+
+This is a known, temporary limitation. The planned direction is for SimDB to
+manage an unbounded worker-thread pool under the hood, automatically *creating,
+merging, and destroying* threads as needed to spread stages across the available
+threads and keep each thread's active/sleep balance healthy (the same balance you
+read off the per-thread performance reports in <<ch-23-app-manager,Chapter 23>>). When that lands,
+multi-app systems will scale on threads without any change to your app code -- the
+single database thread will remain the one fixed point.
+
+=== Coordinated teardown
+
+Just as startup is driven across all apps, so is shutdown. A single
+`postSimLoopTeardown` runs `preTeardown` and `postTeardown` for every app,
+drains and stops all the threads, and -- as noted earlier -- wraps all apps'
+`postTeardown` work in one `safeTransaction`, so their final metadata writes
+commit together efficiently. (`postInit` received the same automatic
+`safeTransaction` treatment at startup.) If the order in which apps are torn down
+(or initialized) matters, the manager lets you specify a hook ordering across apps;
+by default they run in a consistent internal order.
+
+[WARNING]
+====
+`postSimLoopTeardown` is what makes a database complete and readable -- so it
+*must* run even when the simulation ends badly. If your simulator throws an
+exception, calls `std::abort`/`std::terminate`, or otherwise exits without
+reaching teardown, skipping it leaves you with:
+
+* a *partial database* -- the final batched transactions were never committed;
+* *unreadable or unparseable blobs* -- compressed/serialized payloads that were
+  cut off mid-write; and
+* likely a *crash in `std::thread::~thread`* -- the pipeline's worker threads were
+  never joined, which terminates the process.
+
+Make sure `postSimLoopTeardown` is called on every exit path. Wrap your
+simulation loop so that it runs during unwinding (for example from a scope guard,
+a `try`/`catch` that rethrows after tearing down, or an equivalent
+last-resort handler) rather than relying on the happy path alone.
+====
+
+[NOTE]
+====
+Today, `postSimLoopTeardown` does *not* flush a `TinyStrings` map if your app
+uses one -- that flush is currently a separate step. A future design will fold it
+into teardown automatically, so that a single call to `postSimLoopTeardown` is
+the one and only API you need to guarantee a good database. Until then, flush any
+`TinyStrings` yourself before (or as part of) teardown.
+====
+
+Running many apps, then, adds no new machinery -- only more `enableApp` calls.
+The last wrinkle is apps whose constructors need more than the `DatabaseManager`,
+which is where app factories come in.
+
+[#ch-25-app-factories]
+== App Factories & Non-Default Constructors
+
+Every app you have seen so far has been constructed the same way: the manager
+hands it a `DatabaseManager*` and nothing else. That is the default, and it is
+handled for you by a factory you never had to write. This final chapter is about
+the case where that is not enough -- an app that needs additional constructor
+arguments -- and the small amount of machinery SimDB provides to support it.
+
+=== The default factory
+
+When you register an app with `registerApp<MyApp>()`, the manager needs two
+things from the type: a way to declare its schema, and a way to build an
+instance. For an ordinary app it gets both from a built-in template,
+`simdb::AppFactory<MyApp>`:
+
+[source,cpp]
+----
+template <typename AppT> class AppFactory : public AppFactoryBase
+{
+public:
+    App* createApp(DatabaseManager* db_mgr) override { return new AppT(db_mgr); }
+    void defineSchema(Schema& schema) const override { AppT::defineSchema(schema); }
+};
+----
+
+That is the whole story for a default app: `createApp` calls `new
+AppT(db_mgr)`, and `defineSchema` forwards to the app's static
+`defineSchema`. You never mention this class -- it is installed automatically at
+registration. The only requirement it places on your app is the one you have
+followed all along: a constructor taking a single `DatabaseManager*`, and a
+static `defineSchema(Schema&)`.
+
+=== When the default constructor is not enough
+
+Sometimes an app genuinely needs more than the database manager to do its job --
+a configuration struct, an ID, a tuning parameter, a handle to something in the
+host simulator. Its constructor then looks like:
+
+[source,cpp]
+----
+MyApp(simdb::DatabaseManager* db_mgr, int x, float y);
+----
+
+The default factory cannot build this -- it only knows how to call `new
+MyApp(db_mgr)`. To bridge the gap, you give the app its own *nested* factory: a
+public class literally named `AppFactory`, inheriting from
+`simdb::AppFactoryBase`, that knows how to store the extra arguments and pass
+them along.
+
+=== Writing a nested AppFactory
+
+A nested factory implements the two `AppFactoryBase` methods (`createApp` and
+`defineSchema`) and adds one method of its own -- `parameterize` -- whose
+signature is entirely up to you: give it exactly the arguments your constructor
+needs. It stashes them, and later `createApp` forwards them into the real
+constructor:
+
+[source,cpp]
+----
+class MyApp : public simdb::App
+{
+public:
+    static constexpr auto NAME = "my-app";
+
+    MyApp(simdb::DatabaseManager* db_mgr, int x, float y) :
+        db_mgr_(db_mgr), x_(x), y_(y)
+    {
+    }
+
+    static void defineSchema(simdb::Schema& schema) { /* ... */ }
+
+    class AppFactory : public simdb::AppFactoryBase
+    {
+    public:
+        // Signature is yours to choose -- match the app's constructor.
+        void parameterize(int x, float y)
+        {
+            ctor_args_ = std::make_pair(x, y);
+        }
+
+        simdb::App* createApp(simdb::DatabaseManager* db_mgr) override
+        {
+            const auto& [x, y] = ctor_args_;
+            return new MyApp(db_mgr, x, y);
+        }
+
+        void defineSchema(simdb::Schema& schema) const override
+        {
+            MyApp::defineSchema(schema);
+        }
+
+    private:
+        std::pair<int, float> ctor_args_;
+    };
+
+private:
+    simdb::DatabaseManager* db_mgr_ = nullptr;
+    const int x_;
+    const float y_;
+};
+----
+
+Nothing else about the app changes: it is still registered, enabled, and driven
+through its lifecycle exactly as in the previous two chapters. The factory only
+changes *how the instance is built*.
+
+=== How the manager finds your factory
+
+You never tell the manager which kind of factory to use -- it detects it at
+compile time. A small type trait checks whether your app has a nested type named
+`AppFactory`:
+
+[source,cpp]
+----
+template <typename, typename = void> struct has_nested_factory : std::false_type {};
+template <typename T> struct has_nested_factory<T, std::void_t<typename T::AppFactory>> : std::true_type {};
+----
+
+At registration the manager branches on that trait. If your app has *no* nested
+factory, it installs the default `AppFactory<AppT>` immediately -- the app is
+ready to build with no further action from you. If your app *does* have a nested
+factory, the manager installs nothing yet: it waits for you to *parameterize* the
+factory (that is when the extra arguments become available), and the factory
+object is created there. The practical consequence is a rule to remember:
+
+[IMPORTANT]
+====
+If your app defines a nested `AppFactory`, you *must* parameterize it after
+enabling the app and before `createEnabledApps()`. Because the manager defers
+factory creation for custom-factory apps, forgetting to parameterize means the
+factory never exists, and app creation will fail with an error naming the app.
+====
+
+=== Parameterizing: all instances, or one at a time
+
+You configure the factory through the manager, after `enableApp` and before
+`createEnabledApps`. There are two flavors:
+
+* `parameterizeAppFactory<MyApp>(x, y)` -- configure *every* instance of the app
+  with the same arguments.
+* `parameterizeAppFactoryInstance<MyApp>(instance_num, x, y)` -- configure a
+  *single* instance, using the same instance number you will later pass to
+  `getAppInstance`. Call it once per instance to give each its own arguments.
+
+The two interact in one way worth flagging: calling the "all instances"
+`parameterizeAppFactory` *discards* any per-instance configurations you set
+earlier and replaces them with one shared factory (the manager only warns about
+this). Pick one strategy per app rather than mixing them. Both flavors require
+that the app already be enabled -- calling them first throws.
+
+=== Putting it together
+
+The full sequence for a parameterized, multi-instance app is just the driver from
+<<ch-23-app-manager,Chapter 23>> with parameterize calls slotted in before creation:
+
+[source,cpp]
+----
+simdb::AppManagers app_mgrs;
+app_mgrs.registerApp<MyApp>();
+auto& app_mgr = app_mgrs.createAppManager("sim.db");
+
+app_mgr.enableApp(MyApp::NAME, 2);   // two instances
+
+// One parameterize call per instance, each with its own arguments.
+app_mgr.parameterizeAppFactoryInstance<MyApp>(0, 45, 7.77f);
+app_mgr.parameterizeAppFactoryInstance<MyApp>(1, 98, 3.14f);
+
+app_mgrs.createEnabledApps();        // constructors run here
+
+auto* a0 = app_mgr.getAppInstance<MyApp>(0);   // built with (45, 7.77)
+auto* a1 = app_mgr.getAppInstance<MyApp>(1);   // built with (98, 3.14)
+----
+
+Because the factory lives on the manager and construction is deferred until
+`createEnabledApps`, the same pattern extends naturally across databases: hand
+each `AppManager` (one per database) its own parameterized instances, then let a
+single `createEnabledApps` build them all. `examples/AppFactory/main.cpp` shows
+exactly this -- two `MyApp` instances in one database, and then one `MyApp`
+routed to each of two separate databases -- and is the authoritative worked
+example for everything in this chapter.
+
+That closes <<part-v,Part V>>. You can now define an app, register and enable it, drive it
+through its lifecycle with the manager, tear it down safely, and -- when its
+constructor needs more than a `DatabaseManager` -- give it a factory to build it.
+<<part-vi,Part VI>> returns to the pipeline layer for the advanced patterns we deferred:
+snoopers, watchdog stages, multi-port and elastic pipelines, and the multi-app
+techniques that build on the framework you have just learned.

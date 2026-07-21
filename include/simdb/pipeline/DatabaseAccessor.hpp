@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/AsyncDatabaseAccessor.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 #include "simdb/sqlite/PreparedINSERT.hpp"
@@ -58,10 +59,7 @@ public:
         }
 
         auto& inserter = inserters[tbl_name];
-        if (!inserter)
-        {
-            throw DBException("Table does not exist in schema for app: ") << App::NAME;
-        }
+        simdb_assert(inserter, "Table does not exist in schema for app: " << App::NAME);
 
         return inserter.get();
     }

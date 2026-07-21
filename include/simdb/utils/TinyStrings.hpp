@@ -2,34 +2,27 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
+#include "simdb/Exceptions.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
+#include "simdb/sqlite/PreparedINSERT.hpp"
 #include "simdb/utils/DeferredLock.hpp"
+#include "simdb/utils/TypeTraits.hpp"
 #include <mutex>
 
 namespace simdb {
 
 /// To keep SimDB collection as fast and small as possible, we serialize strings
 /// not as actual strings, but as ints. This class is used to map strings to
-/// ints, and is periodically serialized to a database table.
+/// ints in memory, and may be serialized to a database table at teardown.
 template <bool MutexProtect = false> class TinyStrings
 {
 public:
-    TinyStrings(DatabaseManager* db_mgr, const std::string& table_name = "TinyStringIDs") :
-        db_mgr_(db_mgr),
-        table_name_(table_name)
-    {
-        const auto& schema = db_mgr_->getSchema();
-        if (!schema.hasTable(table_name_))
-        {
-            Schema append_schema;
-            using dt = simdb::SqlDataType;
-            auto& tbl = append_schema.addTable(table_name_);
-            tbl.addColumn("StringValue", dt::string_t);
-            tbl.addColumn("StringID", dt::int32_t);
-            db_mgr->appendSchema(append_schema);
-        }
-    }
+    static inline constexpr uint32_t BAD_STRING_ID = 0;
 
+    TinyStrings() = default;
+
+    /// Add or get a string ID for the given string.
     std::pair<uint32_t, bool> insert(const std::string& s)
     {
         DeferredLock<std::mutex> lock(mutex_);
@@ -48,8 +41,14 @@ public:
         }
     }
 
+    /// Get a string ID for the given string
     uint32_t getStringID(const std::string& s)
     {
+        if (s.empty())
+        {
+            return BAD_STRING_ID;
+        }
+
         DeferredLock<std::mutex> lock(mutex_);
         if constexpr (MutexProtect)
         {
@@ -59,20 +58,60 @@ public:
         return getStringID_(s);
     }
 
-    /// Serialize the current string map to the database.
-    void serialize()
+    /// Get a string ID for the given string
+    uint32_t getStringID(const char* s)
     {
-        db_mgr_->safeTransaction([&]() {
+        assert(s != nullptr);
+        return getStringID(std::string(s));
+    }
+
+    /// Get a string ID for the given string (pointer)
+    template <typename S>
+    type_traits::enable_if_t<!type_traits::is_char_pointer_v<S> && type_traits::is_any_pointer_v<S>, uint32_t>
+    getStringID(const S& s)
+    {
+        if (s)
+        {
+            return getStringID(*s);
+        }
+        return BAD_STRING_ID;
+    }
+
+    /// Serialize newly seen string mappings to the database.
+    void serialize(DatabaseManager* db_mgr)
+    {
+        simdb_assert(db_mgr, "TinyStrings::serialize requires a DatabaseManager");
+
+        db_mgr->safeTransaction([&]() {
             DeferredLock<std::mutex> lock(mutex_);
             if constexpr (MutexProtect)
             {
                 lock.lock();
             }
 
+            if (allowed_db_ == nullptr)
+            {
+                allowed_db_ = db_mgr;
+            } else
+            {
+                simdb_assert(allowed_db_ == db_mgr, "TinyStrings::serialize may only target one DatabaseManager");
+            }
+
+            const auto& schema = db_mgr->getSchema();
+            if (!schema.hasTable("TinyStringIDs"))
+            {
+                Schema append_schema;
+                using dt = simdb::SqlDataType;
+                auto& tbl = append_schema.addTable("TinyStringIDs");
+                tbl.addColumn("StringValue", dt::string_t);
+                tbl.addColumn("StringID", dt::uint32_t);
+                db_mgr->appendSchema(append_schema);
+            }
+
+            auto inserter = db_mgr->prepareINSERT(SQL_TABLE("TinyStringIDs"));
             for (const auto& [string_id, string_val] : unserialized_map_)
             {
-                db_mgr_->INSERT(SQL_TABLE(table_name_), SQL_COLUMNS("StringValue", "StringID"),
-                                SQL_VALUES(string_val, string_id));
+                inserter->createRecordWithColValues(string_val, string_id);
             }
 
             unserialized_map_.clear();
@@ -85,7 +124,9 @@ private:
         auto iter = map_->find(s);
         if (iter == map_->end())
         {
-            uint32_t id = map_->size();
+            simdb_assert(map_->size() != UINT32_MAX, "Too many TinyStrings created. UINT32_MAX has been reached.");
+
+            uint32_t id = map_->size() + 1;
             map_->insert({s, id});
             unserialized_map_.insert({id, s});
             return id;
@@ -101,9 +142,8 @@ private:
     string_map_t map_ = std::make_shared<std::unordered_map<std::string, uint32_t>>();
     unserialized_string_map_t unserialized_map_;
 
-    DatabaseManager* db_mgr_;
-    std::string table_name_;
-    std::mutex mutex_;
+    DatabaseManager* allowed_db_ = nullptr;
+    mutable std::mutex mutex_;
 };
 
 } // namespace simdb

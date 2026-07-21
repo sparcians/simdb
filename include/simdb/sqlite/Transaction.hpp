@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/Exceptions.hpp"
 
 #include <chrono>
@@ -73,9 +74,9 @@ public:
         {
             sqlite3_finalize(stmt);
             throw SafeTransactionSilentException(rc);
-        } else if (!stmt)
+        } else
         {
-            throw DBException("Invalid prepared statement for cmd: ") << cmd;
+            simdb_assert(stmt, "Invalid prepared statement for cmd: " << cmd);
         }
 
         stmt_ = stmt;
@@ -233,9 +234,9 @@ private:
             if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED || rc == SQLITE_READONLY)
             {
                 throw SafeTransactionSilentException(rc);
-            } else if (rc)
+            } else
             {
-                throw DBException(sqlite3_errmsg(db_conn_));
+                simdb_assert(!rc, sqlite3_errmsg(db_conn_));
             }
         }
 

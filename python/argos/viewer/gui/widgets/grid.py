@@ -32,6 +32,9 @@ class Grid(wx.grid.Grid):
     def GetCellValue(self, row, col):
         return self.renderer.GetCellValue(row, col)
     
+    def SetCellAlignment(self, row, col, alignment):
+        self.renderer.SetCellAlignment(row, col, alignment)
+
     def SetCellBackgroundColour(self, row, col, color, immediate_refresh=False):
         self.renderer.SetCellBackgroundColour(row, col, color)
         if immediate_refresh:
@@ -102,6 +105,9 @@ class GridCellRenderer(wx.grid.GridCellRenderer):
     def GetCellValue(self, row, col):
         return self.cells[row][col].GetText()
 
+    def SetCellAlignment(self, row, col, alignment):
+        self.cells[row][col].AlignLabel(alignment)
+
     def SetCellBackgroundColour(self, row, col, color):
         self.cells[row][col].SetBackgroundColour(color)
 
@@ -144,6 +150,7 @@ class GridCellRenderer(wx.grid.GridCellRenderer):
 class GridCell:
     def __init__(self, font=None):
         self.text = ''
+        self.text_alignment = wx.ALIGN_CENTER
         self.font = font if font else wx.Font(12, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         self.background_colour = (255, 255, 255)
         self.border_width = 0
@@ -156,6 +163,9 @@ class GridCell:
     def GetText(self):
         return self.text
     
+    def AlignLabel(self, alignment):
+        self.text_alignment = alignment
+
     def SetFont(self, font):
         self.font = font
     
@@ -200,7 +210,7 @@ class GridCell:
 
         if self.text:
             dc.SetFont(self.font)
-            dc.DrawLabel(self.text, rect, wx.ALIGN_CENTER)
+            dc.DrawLabel(self.text, rect, self.text_alignment)
 
         if self.border_width:
             dc.SetPen(wx.Pen(wx.BLACK, self.border_width))

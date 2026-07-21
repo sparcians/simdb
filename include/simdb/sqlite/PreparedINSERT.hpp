@@ -1,5 +1,6 @@
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/schema/Blob.hpp"
 #include "simdb/schema/SchemaDef.hpp"
 #include "simdb/sqlite/Connection.hpp"
@@ -35,10 +36,7 @@ public:
     /// \param ival Value to set for the column.
     void setColumnValue(uint32_t col_idx, const int32_t ival)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::int32_t)
-        {
-            throw DBException("Column ") << col_idx + 1 << " is not an int32_t";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::int32_t, "Column " << col_idx + 1 << " is not an int32_t");
 
         sqlite3_bind_int(stmt_, (int32_t)col_idx + 1, ival);
     }
@@ -48,10 +46,8 @@ public:
     /// \param ival Value to set for the column.
     void setColumnValue(uint32_t col_idx, const uint32_t ival)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::uint32_t)
-        {
-            throw DBException("Column ") << col_idx + 1 << " is not a uint32_t";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::uint32_t,
+                     "Column " << col_idx + 1 << " is not a uint32_t");
 
         sqlite3_bind_int64(stmt_, (int32_t)col_idx + 1, static_cast<sqlite3_int64>(ival));
     }
@@ -61,10 +57,7 @@ public:
     /// \param ival Value to set for the column.
     void setColumnValue(uint32_t col_idx, const int64_t ival)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::int64_t)
-        {
-            throw DBException("Column ") << col_idx + 1 << " is not an int64_t";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::int64_t, "Column " << col_idx + 1 << " is not an int64_t");
 
         sqlite3_bind_int64(stmt_, (int32_t)col_idx + 1, ival);
     }
@@ -74,10 +67,8 @@ public:
     /// \param ival Value to set for the column.
     void setColumnValue(uint32_t col_idx, const uint64_t ival)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::uint64_t)
-        {
-            throw DBException("Column ") << col_idx + 1 << " is not a uint64_t";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::uint64_t,
+                     "Column " << col_idx + 1 << " is not a uint64_t");
 
         auto u16 = utils::uint64_to_utf16(ival);
         sqlite3_bind_text16(stmt_, (int32_t)col_idx + 1, u16.data(), 40, SQLITE_TRANSIENT);
@@ -91,10 +82,7 @@ public:
     typename std::enable_if<std::is_floating_point_v<ColumnT>, void>::type setColumnValue(uint32_t col_idx,
                                                                                           const ColumnT dval)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::double_t)
-        {
-            throw DBException("Column ") << col_idx + 1 << " is not a double";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::double_t, "Column " << col_idx + 1 << " is not a double");
 
         sqlite3_bind_double(stmt_, (int32_t)col_idx + 1, dval);
     }
@@ -105,10 +93,7 @@ public:
     /// \param blobval Value to set for the column.
     template <typename T> void setColumnValue(uint32_t col_idx, const std::vector<T>& blobval)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::blob_t)
-        {
-            throw DBException("Column ") << col_idx + 1 << " is not a BLOB";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::blob_t, "Column " << col_idx + 1 << " is not a BLOB");
 
         sqlite3_bind_blob(stmt_, (int32_t)col_idx + 1, blobval.data(), blobval.size() * sizeof(T), 0);
     }
@@ -118,10 +103,7 @@ public:
     /// \param blobval Value to set for the column.
     void setColumnValue(uint32_t col_idx, const SqlBlob& blobval)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::blob_t)
-        {
-            throw DBException("Column ") << col_idx << " is not a BLOB";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::blob_t, "Column " << col_idx << " is not a BLOB");
 
         sqlite3_bind_blob(stmt_, (int32_t)col_idx + 1, blobval.data_ptr, (int32_t)blobval.num_bytes, 0);
     }
@@ -131,10 +113,7 @@ public:
     /// \param strval Value to set for the column.
     void setColumnValue(uint32_t col_idx, const std::string& strval)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::string_t)
-        {
-            throw DBException("Column ") << col_idx << " is not a TEXT";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::string_t, "Column " << col_idx << " is not a TEXT");
 
         sqlite3_bind_text(stmt_, (int32_t)col_idx + 1, strval.c_str(), -1, SQLITE_TRANSIENT);
     }
@@ -144,10 +123,7 @@ public:
     /// \param strval Value to set for the column.
     void setColumnValue(uint32_t col_idx, const char* strval)
     {
-        if (col_dtypes_.at(col_idx) != SqlDataType::string_t)
-        {
-            throw DBException("Column ") << col_idx << " is not a TEXT";
-        }
+        simdb_assert(col_dtypes_.at(col_idx) == SqlDataType::string_t, "Column " << col_idx << " is not a TEXT");
 
         sqlite3_bind_text(stmt_, (int32_t)col_idx + 1, strval, -1, SQLITE_STATIC);
     }
@@ -160,10 +136,7 @@ public:
     int createRecord(bool clear_bindings = true)
     {
         auto rc = SQLiteReturnCode(sqlite3_step(stmt_));
-        if (rc != SQLITE_DONE)
-        {
-            throw DBException("Could not perform INSERT. Error: ") << sqlite3_errmsg(db_conn_->getDatabase());
-        }
+        simdb_assert(rc == SQLITE_DONE, "Could not perform INSERT. Error: " << sqlite3_errmsg(db_conn_->getDatabase()));
 
         sqlite3_reset(stmt_);
         if (clear_bindings)

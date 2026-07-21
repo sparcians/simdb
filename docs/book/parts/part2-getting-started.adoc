@@ -1,0 +1,322 @@
+[#part-ii]
+= Part II: Getting Started
+
+Move from concepts to a running program. By the end of this part the reader has
+SimDB installed, building in their project, and has written a first database.
+
+[#ch-05-installing-simdb]
+== Installing SimDB
+
+With the "why" behind us, it is time to get SimDB onto your machine and compile
+something. This chapter covers dependencies; the next covers wiring SimDB into
+your own build.
+
+=== What "header-only" means for you
+
+SimDB is a header-only C++17 library. There is no SimDB `.a` or `.so` to build
+and link against -- you point your compiler at SimDB's headers and that is the
+whole library. What SimDB _does_ need is a small set of ordinary dependencies at
+build time:
+
+* a C++17 compiler (GCC or Clang);
+* *SQLite3* (version 3.19 or newer), the database engine SimDB builds on;
+* *zlib*, used for compression;
+* a threads library (pthreads on Linux), for the pipeline machinery.
+
+You only need `clang-format` (specifically `clang-format-19`) if you intend to
+contribute changes back to SimDB; it is not required to use the library.
+
+=== System packages (Ubuntu / Debian)
+
+On a Debian-based system, install the dependencies with `apt`:
+
+[source,bash]
+----
+sudo apt-get update
+sudo apt-get install -y \
+    cmake \
+    libsqlite3-dev \
+    zlib1g-dev \
+    build-essential
+----
+
+(Add `clang-format-19` to that list if you plan to contribute.)
+
+=== Conda environments
+
+If you work in conda, you can pull the same toolchain into an environment
+instead. To add the dependencies to an environment you already have:
+
+[source,bash]
+----
+conda activate <your-env-name>
+conda install -y \
+    cmake \
+    sqlite \
+    zlib \
+    compilers
+----
+
+Or to create a fresh environment for SimDB from scratch:
+
+[source,bash]
+----
+conda create -n simdb -y \
+    cmake \
+    sqlite \
+    zlib \
+    compilers
+conda activate simdb
+----
+
+[NOTE]
+====
+Because SimDB is header-only, "installing" it can mean two different things:
+simply making its headers visible to your compiler, or running a formal install
+step so it can be found with CMake's `find_package`. Both are covered in the
+next chapter.
+====
+
+[#ch-06-building-cmake]
+== Building & CMake Integration
+
+SimDB uses CMake, and the smoothest way to consume it is from CMake too. This
+chapter shows how to install SimDB and then link it into your own project with a
+single target.
+
+=== Installing SimDB so CMake can find it
+
+From a clone of the SimDB repository, configure a build and install it. For a
+system-wide install:
+
+[source,bash]
+----
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local/ ..
+sudo make install
+----
+
+Or, if you are working inside a conda environment, install into that
+environment's prefix instead:
+
+[source,bash]
+----
+conda activate <your-env-name>
+cmake --install . --prefix $CONDA_PREFIX
+----
+
+Installing places SimDB's headers and a CMake package configuration where
+`find_package` can locate them.
+
+=== Linking SimDB into your project
+
+SimDB exports a single CMake target, `SimDB::simdb`. In your project's
+`CMakeLists.txt`:
+
+[source,cmake]
+----
+cmake_minimum_required(VERSION 3.19)
+project(my_simulator LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(SimDB REQUIRED)
+
+add_executable(my_simulator main.cpp)
+target_link_libraries(my_simulator PRIVATE SimDB::simdb)
+----
+
+That one `target_link_libraries` line is all you need. Because `SimDB::simdb` is
+an interface target, linking against it automatically pulls in SimDB's include
+directories and its transitive dependencies -- SQLite3, zlib, and the threads
+library -- so you do not list them yourself.
+
+[TIP]
+====
+SimDB requires C++17. Setting `CMAKE_CXX_STANDARD` to `17` (as above) is the
+portable way to guarantee it for your target.
+====
+
+=== Debug and Release builds
+
+Choose a build type with `CMAKE_BUILD_TYPE`, exactly as you would for any CMake
+project:
+
+[source,bash]
+----
+# An optimized build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# A debug build (no optimization, full debug info)
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+----
+
+Use Release for anything performance-sensitive -- which, given why you are
+reaching for SimDB, is most of the time. Keep a Debug build around for
+development. One thing worth knowing early: SimDB's own build treats warnings as
+errors (`-Wall -Wextra -Werror`), and Release builds surface issues -- such as
+unused variables -- that a Debug build may let slide. If a file compiles in
+Debug but fails in Release, an unused parameter or variable is the usual
+culprit.
+
+[#ch-07-first-program]
+== Your First Program
+
+Enough setup -- let us write something that runs. Here is a complete SimDB
+program that defines a table, creates a database, writes a handful of rows, and
+reads them back. It uses only SimDB's SQLite interface; there is no pipeline
+here at all, which is the point: SimDB is useful the moment you want a database,
+and the concurrency machinery is something you add later, when you need it.
+
+[source,cpp]
+----
+#include "simdb/sqlite/DatabaseManager.hpp"
+
+#include <iostream>
+
+int main()
+{
+    using dt = simdb::SqlDataType;
+
+    // 1. Describe the schema: one table with two columns.
+    simdb::Schema schema;
+    auto& tbl = schema.addTable("Stats");
+    tbl.addColumn("Cycle", dt::uint64_t);
+    tbl.addColumn("Value", dt::double_t);
+
+    // 2. Create the database file and apply the schema.
+    simdb::DatabaseManager db_mgr("first.db", true /* create a new database */);
+    db_mgr.appendSchema(schema);
+
+    // 3. Insert a few rows.
+    for (uint64_t cycle = 0; cycle < 5; ++cycle)
+    {
+        db_mgr.INSERT(
+            SQL_TABLE("Stats"),
+            SQL_COLUMNS("Cycle", "Value"),
+            SQL_VALUES(cycle, cycle * 1.5));
+    }
+
+    // 4. Read them back.
+    auto query = db_mgr.createQuery("Stats");
+
+    uint64_t cycle = 0;
+    double value = 0.0;
+    query->select("Cycle", cycle);
+    query->select("Value", value);
+
+    std::cout << "Stored " << query->count() << " rows:\n";
+    auto results = query->getResultSet();
+    while (results.getNextRecord())
+    {
+        std::cout << "  cycle " << cycle << " -> " << value << "\n";
+    }
+
+    return 0;
+}
+----
+
+=== What it does
+
+Walk through the program in the order it runs:
+
+. *Define the schema.* `Schema` and `addTable`/`addColumn` build an in-memory description of
+  your tables and columns; nothing touches disk yet. `SqlDataType` (aliased here
+  to `dt` for brevity) names the column types.
+. *Create the database.* Constructing a `simdb::DatabaseManager` on a file path
+  opens the connection; the second argument `true` asks for a fresh database.
+  `appendSchema` then creates the tables. (You can call `appendSchema` more than
+  once to add tables later.)
+. *Insert rows.* The `INSERT` macro-based API names a table, its columns, and the
+  matching values. It is the most direct way to write a row; <<part-iii,Part III>> introduces
+  prepared statements for high-volume inserts.
+. *Read them back.* `createQuery` targets a table; `select` binds each column to
+  a variable that is refreshed on every `getNextRecord()`; `count()` returns how
+  many rows match. Constraints, ordering, and limits come in <<part-iii,Part III>>.
+
+=== Building and running it
+
+Pair the program with the consumer `CMakeLists.txt` from the previous chapter,
+then configure, build, and run:
+
+[source,bash]
+----
+cmake -DCMAKE_BUILD_TYPE=Release -B build
+cmake --build build
+./build/my_simulator
+----
+
+You should see five rows printed, and a `first.db` file left behind -- an
+ordinary SQLite database you can open with any SQLite tool:
+
+[source,bash]
+----
+sqlite3 first.db "SELECT * FROM Stats;"
+----
+
+[TIP]
+====
+Run the program from a scratch or build directory rather than from inside a
+source tree. SimDB programs create their database file in the working directory,
+and you would rather not scatter these files across your source.
+====
+
+That is the whole SQLite interface in miniature. <<part-iii,Part III>> revisits each of these
+steps -- schemas, inserts, queries, transactions, and blobs -- in depth.
+
+[#ch-08-regression-tests]
+== Running the Regression Tests
+
+SimDB ships with a regression suite, and it doubles as a library of small,
+authoritative worked examples. Building it once up front is the best way to
+confirm your toolchain is healthy.
+
+=== Building the suite
+
+From a build directory, build the `simdb_regress` target to compile and run the
+tests:
+
+[source,bash]
+----
+# Release
+mkdir release
+cd release
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make simdb_regress
+----
+
+The same works for a Debug build (`mkdir debug`, `cmake -DCMAKE_BUILD_TYPE=Debug
+..`). Under the hood the suite is registered with CTest, so you can also run and
+filter individual tests with `ctest` once they are built.
+
+=== Worked examples for the SQLite interface
+
+Everything we have covered so far -- and everything in <<part-iii,Part III>> -- has a small,
+complete, runnable counterpart under `test/sqlite/`. These are the authoritative
+worked examples for SimDB's SQLite interface: each is a self-contained `main.cpp`
+that exercises exactly one area.
+
+* `test/sqlite/Schema/main.cpp` -- defining tables, columns, indexes, and default
+  values, and reconnecting to an existing schema.
+* `test/sqlite/Insert/main.cpp` -- the `INSERT` API and prepared inserts.
+* `test/sqlite/Query/main.cpp` -- queries: selecting columns, `WHERE`
+  constraints, ordering, limits, and compound clauses.
+* `test/sqlite/Delete/main.cpp` -- deleting records with constraints.
+* `test/sqlite/UInt64/main.cpp` -- full-range 64-bit unsigned handling.
+
+Because they are part of the regression suite, they are guaranteed to compile and
+pass, so they never drift from the current API. As you read <<part-iii,Part III>>, keep the
+matching program open alongside the chapter. (SimDB's higher-level pipeline
+programs live under `examples/`; we turn to those in <<part-iv,Part IV>>, once pipelines are
+on the table.)
+
+=== A note on where you run things
+
+SimDB programs write their database file into the current working directory. Run
+them from a build directory or a scratch directory, not from the root of a source
+tree, so these files do not litter your checkout. This is a small habit that
+saves a lot of `git status` noise later.
+
+With SimDB installed, building, and its test programs at your fingertips, you are
+ready for <<part-iii,Part III>>, where we return to the SQLite interface and cover it in
+full.

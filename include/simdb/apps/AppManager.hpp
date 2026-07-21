@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/apps/App.hpp"
 #include "simdb/pipeline/PipelineManager.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
@@ -141,11 +142,7 @@ public:
     {
         if constexpr (utils::has_nested_factory<AppT>::value)
         {
-            if (!enabled(AppT::NAME))
-            {
-                throw DBException("You need to call enableApp() before "
-                                  "parameterizing factories.");
-            }
+            simdb_assert(enabled(AppT::NAME), "You need to call enableApp() before parameterizing factories.");
 
             auto& app_factories = getDefaultAppFactories_();
 
@@ -176,11 +173,7 @@ public:
     {
         if constexpr (utils::has_nested_factory<AppT>::value)
         {
-            if (!enabled(AppT::NAME))
-            {
-                throw DBException("You need to call enableApp() before "
-                                  "parameterizing factories.");
-            }
+            simdb_assert(enabled(AppT::NAME), "You need to call enableApp() before parameterizing factories.");
 
             std::cout << "Parameterizing '" << AppT::NAME << "' app, instance " << instance_num << "\n";
             auto factory = getNestedAppFactory_<AppT>(instance_num);
@@ -188,6 +181,16 @@ public:
         } else
         {
             throw DBException("No nested class 'AppFactory' exists for app '") << AppT::NAME << "'.";
+        }
+    }
+
+    /// Enable verbose mode for all apps in this AppManager.
+    void setVerbose(bool verbose = true)
+    {
+        verbose_ = verbose;
+        for (auto app : getApps_())
+        {
+            app->verbose_ = verbose_;
         }
     }
 
@@ -257,12 +260,9 @@ public:
         }
 
         auto& enabled_apps = getEnabledApps_();
-        if (enabled_apps.at(AppT::NAME) > 1)
-        {
-            throw DBException("Need to call getAppInstance<AppT>(instance_num) since ")
-                << "the '" << AppT::NAME << "' app was configured to have " << enabled_apps.at(AppT::NAME)
-                << " instances.";
-        }
+        simdb_assert(enabled_apps.at(AppT::NAME) <= 1, "Need to call getAppInstance<AppT>(instance_num) since "
+                                                           << "the '" << AppT::NAME << "' app was configured to have "
+                                                           << enabled_apps.at(AppT::NAME) << " instances.");
 
         // Look for instance name
         std::string instance_name = AppT::NAME + std::string("-0");
@@ -270,10 +270,7 @@ public:
         if (it != apps_.end())
         {
             auto app = dynamic_cast<AppT*>(it->second.get());
-            if (!app)
-            {
-                throw DBException("App of type ") << AppT::NAME << " is not of type " << typeid(AppT).name();
-            }
+            simdb_assert(app, "App of type " << AppT::NAME << " is not of type " << typeid(AppT).name());
             return app;
         }
 
@@ -296,10 +293,7 @@ public:
         if (it != apps_.end())
         {
             auto app = dynamic_cast<AppT*>(it->second.get());
-            if (!app)
-            {
-                throw DBException("App of type ") << AppT::NAME << " is not of type " << typeid(AppT).name();
-            }
+            simdb_assert(app, "App of type " << AppT::NAME << " is not of type " << typeid(AppT).name());
             return app;
         }
 
@@ -314,11 +308,7 @@ public:
     /// app2, ...) but you cannot call both.
     void minimizeThreads()
     {
-        if (!pipeline_mgr_)
-        {
-            throw DBException("Pipeline manager not set - did you call "
-                              "initializePipelines()?");
-        }
+        simdb_assert(pipeline_mgr_, "Pipeline manager not set - did you call initializePipelines()?");
         pipeline_mgr_->minimizeThreads();
     }
 
@@ -327,11 +317,7 @@ public:
     /// threads across the given apps' pipelines.
     template <typename... Apps> void minimizeThreads(const App* app, Apps&&... rest)
     {
-        if (!pipeline_mgr_)
-        {
-            throw DBException("Pipeline manager not set - did you call "
-                              "initializePipelines()?");
-        }
+        simdb_assert(pipeline_mgr_, "Pipeline manager not set - did you call initializePipelines()?");
         pipeline_mgr_->minimizeThreads(app, std::forward<Apps>(rest)...);
     }
 
@@ -397,10 +383,8 @@ private:
         } else
         {
             auto& app_factories = getDefaultAppFactories_();
-            if (app_factories.find(AppT::NAME) != app_factories.end())
-            {
-                throw DBException("App already registered: ") << AppT::NAME;
-            }
+            simdb_assert(app_factories.find(AppT::NAME) == app_factories.end(),
+                         "App already registered: " << AppT::NAME);
 
             constexpr size_t global_instance_num = 0;
             auto& factory = app_factories[AppT::NAME][global_instance_num];
@@ -478,6 +462,7 @@ private:
                 App* app = factory->createApp(db_mgr_);
                 app->app_logger_ = app_logger_;
                 app->instance_ = instance_num;
+                app->verbose_ = verbose_;
                 std::string instance_name = app_name + std::string("-") + std::to_string(instance_num);
                 apps_[instance_name] = std::unique_ptr<App>(app);
             }
@@ -489,6 +474,12 @@ private:
     {
         PROFILE_APP_PHASE
 
+        // TODO cnyce: We are currently creating the apps first, then creating the schemas.
+        // There is no reason to do this in that order, and we should create the schemas
+        // first. The doc (book) was written assuming schemas come first; leave the doc
+        // that way and change the C++ code to match. Call out that you can freely write
+        // to your tables in defineSchema right in your App's constructor. Then ensure
+        // that the createEnabledApps call is inside a safeTransaction.
         db_mgr_->safeTransaction([&]() {
             for (const auto& [app_name, app] : apps_)
             {
@@ -501,6 +492,12 @@ private:
                 auto instance_num = static_cast<size_t>(std::stoull(tmp_substr));
                 AppFactoryBase* factory = getAppFactory_(user_app_name, instance_num);
 
+                // TODO cnyce: We should consider automatically prepending "<app name>$"
+                // before every table in the app schema. With a growing number of apps,
+                // and SimDB living in open source, this will eventually trip someone
+                // up from e.g. using a generic table like "SimMetadata" which collides.
+                // You will have to document that the app name might have restrictions
+                // that will match whatever restrictions SQLite puts on table names.
                 Schema app_schema;
                 factory->defineSchema(app_schema);
                 db_mgr_->appendSchema(app_schema);
@@ -527,10 +524,7 @@ private:
     {
         PROFILE_APP_PHASE
 
-        if (pipeline_mgr_)
-        {
-            throw DBException("Pipelines already open");
-        }
+        simdb_assert(!pipeline_mgr_, "Pipelines already open");
 
         pipeline_mgr_ = std::make_unique<pipeline::PipelineManager>(db_mgr_);
         for (const auto& [app_name, app] : apps_)
@@ -558,11 +552,7 @@ private:
     {
         PROFILE_APP_PHASE
 
-        if (!pipeline_mgr_)
-        {
-            throw DBException("Pipeline manager not set - did you call "
-                              "initializePipelines()?");
-        }
+        simdb_assert(pipeline_mgr_, "Pipeline manager not set - did you call initializePipelines()?");
         pipeline_mgr_->openPipelines();
     }
 
@@ -588,6 +578,12 @@ private:
             {
                 app->postTeardown();
             }
+
+            // TODO cnyce: We should associate the DatabaseManager and
+            // the TinyStrings so that it gets flushed automatically.
+            // This will let us document that postSimLoopTeardown()
+            // is the only thing you have to call in the event of
+            // an exception/abort/terminate during simulation.
         });
     }
 
@@ -635,10 +631,7 @@ private:
             }
 
             auto factory = dynamic_cast<typename AppT::AppFactory*>(it2->second.get());
-            if (!factory)
-            {
-                throw DBException("Failed to downcast app factory for '") << AppT::NAME << "'.";
-            }
+            simdb_assert(factory, "Failed to downcast app factory for '" << AppT::NAME << "'.");
 
             return factory;
         }
@@ -659,10 +652,7 @@ private:
         auto it = app_factories.find(app_name);
         if (it == app_factories.end())
         {
-            if (must_exist)
-            {
-                throw DBException("No factory exists for app: ") << app_name;
-            }
+            simdb_assert(!must_exist, "No factory exists for app: " << app_name);
             return nullptr;
         }
 
@@ -678,10 +668,7 @@ private:
                 return getAppFactory_(app_name, global_instance_num, must_exist);
             }
 
-            if (must_exist)
-            {
-                throw DBException("No factory exists for instance ") << instance_num << " for app: " << app_name;
-            }
+            simdb_assert(!must_exist, "No factory exists for instance " << instance_num << " for app: " << app_name);
             return nullptr;
         }
 
@@ -750,6 +737,9 @@ private:
 
     /// App logger (thread-safe). Owned by AppManagers.
     ThreadSafeLogger* app_logger_ = nullptr;
+
+    /// Verbose flag.
+    bool verbose_ = false;
 
     /// RAII timer to measure the performance of various app setup/teardown
     /// phases.
@@ -820,10 +810,8 @@ public:
     ///       longer call registerApp().
     template <typename AppT> void registerApp()
     {
-        if (app_registration_locked_)
-        {
-            throw DBException("No more apps can be registered since createAppManager() ") << "has already been called.";
-        }
+        simdb_assert(!app_registration_locked_,
+                     "No more apps can be registered since createAppManager() " << "has already been called.");
         app_registrations_.emplace_back(new AppRegistration<AppT>());
     }
 
@@ -833,10 +821,7 @@ public:
     /// Every line written to the logger will start with the given prefix.
     void useThreadSafeLogger(const std::string& prefix = "[simdb-log]")
     {
-        if (!accepting_logger_requests_)
-        {
-            throw DBException("No longer accepting thread-safe logger requests");
-        }
+        simdb_assert(accepting_logger_requests_, "No longer accepting thread-safe logger requests");
         app_logger_ = std::make_unique<ThreadSafeLogger>(prefix);
     }
 
@@ -846,11 +831,18 @@ public:
     /// Every line written to the logger will start with the given prefix.
     void useThreadSafeFileLogger(const std::string& filename)
     {
-        if (!accepting_logger_requests_)
-        {
-            throw DBException("No longer accepting thread-safe logger requests");
-        }
+        simdb_assert(accepting_logger_requests_, "No longer accepting thread-safe logger requests");
         app_logger_ = std::make_unique<ThreadSafeFileLogger>(filename);
+    }
+
+    /// Enable verbose mode for all apps in all AppManager's.
+    void setVerbose(bool verbose = true)
+    {
+        verbose_ = verbose;
+        for (auto& [app_mgr, _] : db_mgrs_by_app_mgr_)
+        {
+            app_mgr->setVerbose(verbose_);
+        }
     }
 
     /// Create a new AppManager with a new database.
@@ -864,18 +856,16 @@ public:
     {
         accepting_logger_requests_ = false;
 
-        if (app_mgrs_by_db_file_.find(db_file) != app_mgrs_by_db_file_.end())
-        {
-            throw DBException("AppManager already exists for database: ") << db_file;
-        }
+        simdb_assert(app_mgrs_by_db_file_.find(db_file) == app_mgrs_by_db_file_.end(),
+                     "AppManager already exists for database: " << db_file);
 
-        if (!new_db && !std::filesystem::exists(db_file))
-        {
-            throw DBException("Cannot reuse database since it doesn't exist: ") << db_file;
-        }
+        simdb_assert(new_db || std::filesystem::exists(db_file),
+                     "Cannot reuse database since it doesn't exist: " << db_file);
 
         std::shared_ptr<DatabaseManager> db_mgr(new DatabaseManager(db_file, new_db));
         std::shared_ptr<AppManager> app_mgr(new AppManager(db_mgr.get(), app_logger_.get()));
+
+        app_mgr->setVerbose(verbose_);
 
         db_mgrs_by_db_file_[db_file] = db_mgr;
         app_mgrs_by_db_file_[db_file] = app_mgr;
@@ -895,10 +885,8 @@ public:
     /// Throws if createAppManager() was never called with this database.
     AppManager& getAppManager(const std::string& db_file)
     {
-        if (app_mgrs_by_db_file_.find(db_file) == app_mgrs_by_db_file_.end())
-        {
-            throw DBException("AppManager does not exist for this database: ") << db_file;
-        }
+        simdb_assert(app_mgrs_by_db_file_.find(db_file) != app_mgrs_by_db_file_.end(),
+                     "AppManager does not exist for this database: " << db_file);
         return *app_mgrs_by_db_file_[db_file];
     }
 
@@ -931,10 +919,7 @@ public:
     DatabaseManager& getDatabaseManager(const std::string& db_file)
     {
         auto it = db_mgrs_by_db_file_.find(db_file);
-        if (it == db_mgrs_by_db_file_.end())
-        {
-            throw DBException("DatabaseManager does not exist for file '") << db_file << "'.";
-        }
+        simdb_assert(it != db_mgrs_by_db_file_.end(), "DatabaseManager does not exist for file '" << db_file << "'.");
         return *it->second;
     }
 
@@ -1056,6 +1041,7 @@ private:
 
     std::unique_ptr<ThreadSafeLogger> app_logger_;
     bool accepting_logger_requests_ = true;
+    bool verbose_ = false;
 };
 
 /*!

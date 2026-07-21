@@ -98,6 +98,9 @@ public:
             return nullptr;
         }
 
+        // TODO cnyce: we should not make users write this code
+        // so just have a class simdb::CustomAppFactory<MyApp>
+        // in between the users' AppFactory and AppFactoryBase.
         void defineSchema(simdb::Schema&) const override
         {
             EXPECT_TRUE(false); // Should never get hit

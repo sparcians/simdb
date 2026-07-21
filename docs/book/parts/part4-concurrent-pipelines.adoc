@@ -1,0 +1,750 @@
+[#part-iv]
+= Part IV: Concurrent Pipelines
+
+Here SimDB's second pillar appears: safe, high-throughput concurrent pipelines
+that feed SQLite without contention. This part builds a working pipeline from
+first principles.
+
+[#ch-16-pipeline-fundamentals]
+== Pipeline Fundamentals
+
+<<part-iii,Part III>> gave you a database. This part gives you the other half of SimDB: a way
+to move data _into_ that database without ever making your simulation wait on it.
+A *pipeline* is a chain of processing *stages*, each running on its own thread,
+passing data along through queues. The simulation hands work to the front of the
+pipeline and returns to what it was doing; the stages do the transforming,
+compressing, and writing behind the scenes. Before we build one, this chapter
+introduces the fundamental unit -- the stage -- and the small contract that
+governs how it runs.
+
+=== What a stage is
+
+A stage is a unit of work with typed input and output *ports*. You create one by
+subclassing `simdb::pipeline::Stage` and implementing a single method, `run_`.
+Every combination of ports is allowed: a stage may have multiple inputs, multiple
+outputs, or none at all -- a stage with no input port might generate data; one
+with no output port might be a sink that only writes.
+
+We cover how ports are declared and wired in the next two chapters. For now, the
+important thing is the shape of a stage and what its `run_` method promises.
+
+=== The greedy run loop
+
+SimDB runs each stage on its own thread and calls `run_` over and over. Your job
+in `run_` is to do _one unit_ of work if there is any, and to tell SimDB what
+happened by returning a `PipelineAction`:
+
+[source,cpp]
+----
+class MyStage : public simdb::pipeline::Stage
+{
+private:
+    simdb::pipeline::PipelineAction run_(bool force) override
+    {
+        Widget w;
+        if (input_queue_->try_pop(w))
+        {
+            // ... transform w, push results to an output port ...
+            return simdb::pipeline::PipelineAction::PROCEED;  // did work; call me again now
+        }
+
+        return simdb::pipeline::PipelineAction::SLEEP;        // nothing to do; let me nap
+    }
+};
+----
+
+The two return values drive everything:
+
+* `PROCEED` means "I did something, and there may be more." SimDB immediately
+  calls `run_` again, with no delay. A busy stage is therefore serviced
+  _greedily_ -- it drains its input as fast as it can.
+* `SLEEP` means "I had nothing to do." The stage's thread sleeps briefly (100 ms
+  by default), then wakes and tries again.
+
+This is the whole scheduling model. There is no manual thread management, no
+condition-variable bookkeeping -- you write a `run_` that processes one item and
+reports back, and SimDB handles the looping, waking, and sleeping.
+
+=== Tuning the polling interval
+
+That 100 ms nap is the stage's _polling interval_, and you can change it through
+the `Stage` constructor when a stage needs to react faster (a shorter interval)
+or can afford to idle longer (a longer one). It is a latency-versus-idle-CPU
+trade-off: shorter intervals notice new work sooner but wake more often when
+there is nothing to do.
+
+=== The `force` flag and flushing
+
+`run_` receives a `bool force`. Normally it is `false`. It becomes `true` during
+a *flush* -- when the pipeline is being drained to a synchronization point, or
+when the simulation is over and the pipeline is being torn down.
+
+The flag matters only for stages that buffer data internally. A stage that, say,
+accumulates values in a `std::vector` and forwards them a full batch at a time
+should, when `force` is `true`, also send whatever partial batch it is holding so
+that no data is stranded at shutdown. A stage with no internal buffering -- like
+the skeleton above, which forwards each item as it arrives -- can simply ignore
+`force`.
+
+=== Two kinds of stage: `Stage` and `DatabaseStage`
+
+Every stage you write derives from one of two bases, and the choice determines
+which thread it runs on:
+
+* A plain `simdb::pipeline::Stage` runs on *its own dedicated thread*. Use it for
+  transformation work -- compression, filtering, reshaping -- that does not touch
+  the database.
+* A `simdb::pipeline::DatabaseStage` runs on the *single, shared database thread*.
+  Every database stage, across every pipeline and every app in
+  the process, is placed on that one thread.
+
+That second point is the "one database thread to rule them all" principle from
+<<part-i,Part I>> made concrete. SimDB funnels all database writes through a single thread
+on purpose: multi-threaded access to a SQLite file never keeps up with a fast
+simulation, so instead of fighting for the file, all database work is serialized
+onto one thread and batched. A `DatabaseStage` accordingly gets what it needs to
+do that work -- `getDatabaseManager_()` for direct access and
+`getTableInserter_()` for fast prepared inserts -- and each call to its `run_`
+runs inside an implicit batch transaction. We devote a full chapter to database
+stages shortly.
+
+With the stage model and its run loop in hand, we can look at how stages are
+connected -- the ports and queues that carry data between them.
+
+[#ch-17-ports-concurrent-queue]
+== Ports & ConcurrentQueue
+
+If stages are the workers, *ports* are the doors through which data enters and
+leaves them, and a *queue* is the conveyor belt between one stage's output door
+and the next stage's input door. This chapter covers how you declare those ports
+and how you read and write the queues that connect them.
+
+=== Declaring ports
+
+A stage declares its ports in its constructor. Each port has a name, a data type,
+and a queue pointer that SimDB fills in for you. The pattern is always the same: a
+`ConcurrentQueue<T>*` member initialized to `nullptr`, registered with
+`addInPort_` or `addOutPort_`:
+
+[source,cpp]
+----
+class ZlibStage : public simdb::pipeline::Stage
+{
+private:
+    simdb::ConcurrentQueue<StatsValues>*     input_queue_  = nullptr;
+    simdb::ConcurrentQueue<ZlibStatsValues>* output_queue_ = nullptr;
+
+public:
+    ZlibStage()
+    {
+        addInPort_<StatsValues>("uncompressed_input", input_queue_);
+        addOutPort_<ZlibStatsValues>("compressed_output", output_queue_);
+    }
+
+    // ... run_() ...
+};
+----
+
+Note what you do _not_ do: you never allocate or free these queues. You declare
+the pointer, hand it to `addInPort_`/`addOutPort_`, and SimDB points it at the
+real queue when the pipeline is wired together (the next chapter). Until then the
+pointer is `nullptr`; by the time `run_` executes, it is valid. The type in the
+angle brackets is what makes a port typed -- an output port carrying
+`ZlibStatsValues` can only be bound to an input port that also expects
+`ZlibStatsValues`, and that match is enforced when you bind stages.
+
+=== The ConcurrentQueue API
+
+`simdb::ConcurrentQueue<T>` is a thread-safe FIFO -- a queue wrapped with a mutex
+-- and it is the only thing shared directly between two concurrently running
+stages. Its interface is deliberately small:
+
+[cols="1,3"]
+|===
+| Call | Meaning
+
+| `push(item)`       | Copy an item onto the back of the queue.
+| `emplace(item)`    | Move an item onto the back (or construct one in place).
+| `try_pop(out)`     | Pop the front into `out`; returns `false` if the queue was empty.
+| `size()`           | Number of queued items.
+| `empty()`          | Whether the queue has no items.
+| `snoop(cb)`        | Peek at items without removing them (used by snoopers).
+|===
+
+The workhorses are `try_pop` on the input side and `push`/`emplace` on the
+output side. `try_pop` returning `false` is precisely the "nothing to do" signal
+that a stage turns into a `SLEEP`. `snoop` -- inspecting in-flight items without
+consuming them -- underpins the snooping feature covered in the advanced part;
+you rarely call it directly.
+
+=== Ports in a run_ method
+
+Putting the pieces together, a typical transforming stage pops from its input,
+does its work, pushes to its output, and reports `PROCEED`; when the input is
+dry, it returns `SLEEP`:
+
+[source,cpp]
+----
+simdb::pipeline::PipelineAction run_(bool /*force*/) override
+{
+    StatsValues uncompressed;
+    if (input_queue_->try_pop(uncompressed))
+    {
+        ZlibStatsValues compressed;
+        compressed.uuid = uncompressed.uuid;
+        simdb::compressData(uncompressed.values, compressed.bytes);
+
+        output_queue_->emplace(std::move(compressed));   // hand off to the next stage
+        return simdb::pipeline::PipelineAction::PROCEED;
+    }
+
+    return simdb::pipeline::PipelineAction::SLEEP;
+}
+----
+
+Prefer `emplace` with `std::move` for anything non-trivial to copy -- a stage's
+whole purpose is to pass large payloads along, and moving hands off the buffer
+instead of duplicating it. (<<part-iv,Part IV>> closes with a chapter on exactly this kind of
+move-friendly, high-throughput style.)
+
+=== Any shape of stage
+
+Because ports are just declarations, a stage can have as many as it needs:
+
+* *Multiple input ports* let a stage act as a *mux*, combining items that arrive
+  on different queues -- for example, assembling a tuple whose pieces show up at
+  different times.
+* *Multiple output ports* let a stage fan data out to several downstream stages.
+* *Zero input ports* make a stage a *source* that generates data.
+* *Zero output ports* make it a *sink* -- most database stages are sinks that
+  only consume.
+
+With ports declared on each stage, we are ready to assemble stages into an actual
+pipeline and bind their ports together.
+
+[#ch-18-building-pipeline]
+== Building a Pipeline
+
+You have stages, and each stage has ports. Assembling them into a running
+pipeline is a short, ordered recipe: create the pipeline, add the stages, bind
+the ports, and grab the entry point. SimDB enforces that order -- each phase is
+sealed off before the next begins -- so the wiring is explicit and mistakes
+become compile-time or startup errors rather than silent misbehavior.
+
+Pipelines are built through a `PipelineManager`, which SimDB hands to your
+application in a `createPipeline` hook. The application framework itself is the
+subject of <<part-v,Part V>>; here we focus on the assembly API, which is the same wherever
+you call it.
+
+=== The build protocol
+
+[source,cpp]
+----
+void StatsCollector::createPipeline(simdb::pipeline::PipelineManager* pipeline_mgr)
+{
+    // 1. Create a named pipeline, owned by this app.
+    auto pipeline = pipeline_mgr->createPipeline("stats-collector-pipeline", this);
+
+    // 2. Add stages (each with a name), then seal the stage list.
+    pipeline->addStage<ZlibStage>("compressor");
+    pipeline->addStage<DatabaseStage>("db_writer");
+    pipeline->noMoreStages();
+
+    // 3. Bind one stage's output port to the next stage's input port,
+    //    then seal the bindings.
+    pipeline->bind("compressor.compressed_output", "db_writer.compressed_input");
+    pipeline->noMoreBindings();
+
+    // 4. Grab the still-unbound input port -- the head of the pipeline.
+    pipeline_head_ = pipeline->getInPortQueue<StatsValues>("compressor.uncompressed_input");
+}
+----
+
+The four phases, and the rules that bind them:
+
+. *Create.* `createPipeline` takes a name and the owning app. The name is how
+  stages and ports are addressed afterward.
+. *Add stages.* `addStage<T>("name")` constructs a stage of type `T` and gives it
+  a name; it returns a pointer to the stage, which you keep when you later attach
+  a flusher or snooper to it. Once every stage is added, `noMoreStages()` seals
+  the list -- you cannot add stages after this.
+. *Bind ports.* `bind` connects an output port to an input port, each addressed as
+  `"stagename.portname"`. The two ports' types must match. `noMoreBindings()`
+  then finalizes the wiring and actually creates the `ConcurrentQueue` objects
+  behind every port.
+. *Grab the head.* Only after `noMoreBindings()` can you ask for a port's queue.
+  The one input port you deliberately left _unbound_ -- here
+  `compressor.uncompressed_input` -- is the pipeline's entry point. Store its
+  queue; that is where you will push data in.
+
+Calling these out of order is an error: SimDB throws if you try to `bind` before
+`noMoreStages()`, or to fetch a port queue before `noMoreBindings()`. This
+"build, then seal" protocol is what lets SimDB validate the whole graph -- every
+binding, every type -- before a single thread starts running.
+
+The binding above connects the two stages like so:
+
+....
+  compressor
+     uncompressed_input   <- pipeline head (left unbound)
+     compressed_output ---+
+                          |  bind
+  db_writer               |
+     compressed_input  <--+
+....
+
+=== Feeding data into the pipeline
+
+The head you captured is just a `ConcurrentQueue`, so you send work in with the
+same `push`/`emplace` calls from the previous chapter. An app typically wraps
+this in a small method:
+
+[source,cpp]
+----
+void StatsCollector::process(StatsValues&& stats)
+{
+    pipeline_head_->emplace(std::move(stats));   // move the payload in
+}
+
+void StatsCollector::process(const StatsValues& stats)
+{
+    pipeline_head_->push(stats);                 // or copy it in
+}
+----
+
+Once an item lands in the head queue, it flows through the stages on their own
+threads -- compressed by `compressor`, written by `db_writer` -- with no further
+involvement from the caller, which returns immediately. That is the entire point:
+the simulation deposits data at the head and gets back to simulating, while the
+pipeline does the slow work elsewhere.
+
+A pipeline can have more than one unbound input -- *multiple pipeline heads* on
+the same pipeline -- when a first stage muxes several streams. That is the usual
+way to fan in several producers without building a second pipeline (which is
+uncommon per app and adds threads). Less commonly, a pipeline may leave outputs
+unbound so you read from the tail. The single-input, single-database-output
+shape above is the common case, and it is exactly what the `SimplePipeline`
+example builds.
+
+Our example pipeline ends in a `DatabaseStage`. That stage is where data actually
+reaches SQLite, and it plays by special rules -- the single database thread and
+implicit batch transactions from <<part-i,Part I>>. The next chapter is devoted to it.
+
+[#ch-19-database-stages]
+== Database Stages
+
+A database stage is where pipeline data finally reaches SQLite. It is a stage
+like any other -- it has input ports and a `run_` method -- but it is special in
+two ways we met back in <<part-i,Part I>>: it runs on the *single, shared database thread*,
+and its writes are automatically *batched into transactions*. This chapter shows
+how to write one and why those two properties give you high-throughput
+persistence for free.
+
+=== Declaring a database stage
+
+Instead of `simdb::pipeline::Stage`, derive from
+`simdb::pipeline::DatabaseStage<YourApp>`. The template argument is your
+application type, which is how the stage knows your schema and can hand you
+prepared inserters for its tables:
+
+[source,cpp]
+----
+class DatabaseStage : public simdb::pipeline::DatabaseStage<StatsCollector>
+{
+private:
+    simdb::ConcurrentQueue<ZlibStatsValues>* input_queue_ = nullptr;
+
+public:
+    DatabaseStage()
+    {
+        addInPort_<ZlibStatsValues>("compressed_input", input_queue_);
+    }
+
+    // ... run_() ...
+};
+----
+
+Ports are declared exactly as before. Most database stages are *sinks* -- they
+have input ports and no output -- because their job is to consume data and write
+it out.
+
+=== Writing with prepared inserters
+
+The fast path for inserting is `getTableInserter_`, which returns a prepared
+statement for one of your app's tables. You set column values by position and
+call `createRecord`, just like the prepared inserts from <<part-iii,Part III>>:
+
+[source,cpp]
+----
+simdb::pipeline::PipelineAction run_(bool /*force*/) override
+{
+    ZlibStatsValues compressed;
+    if (input_queue_->try_pop(compressed))
+    {
+        auto inserter = getTableInserter_("CompressedStats");
+        inserter->setColumnValue(0, compressed.uuid);
+        inserter->setColumnValue(1, compressed.bytes);
+        inserter->createRecord();
+        return simdb::pipeline::PipelineAction::PROCEED;
+    }
+
+    return simdb::pipeline::PipelineAction::SLEEP;
+}
+----
+
+This is the recommended way to write from a database stage: prepared statements
+are compiled once and reused, which is what you want on a path that runs millions
+of times.
+
+=== Direct database access
+
+A database stage can also reach the `DatabaseManager` directly with
+`getDatabaseManager_()`. You would not normally use it for plain inserts -- the
+inserter above is faster -- but it is there for everything else a stage might
+need to do: run a query, delete records, or issue any other operation. The full
+<<part-iii,Part III>> query and record API is available through it.
+
+[source,cpp]
+----
+auto db_mgr = getDatabaseManager_();
+auto query = db_mgr->createQuery("CompressedStats");
+// ... constrain, count, iterate, delete ...
+----
+
+=== Automatic batch transactions
+
+Here is the property that makes database stages fast: *every* call to a database
+stage's `run_` executes inside a batched `BEGIN`/`COMMIT TRANSACTION` block that
+SimDB manages for you. You never call `safeTransaction` here -- the batching is
+automatic.
+
+And it is not just your stage. That single transaction is *shared across every
+database stage on the database thread* -- other database stages in the same app,
+and database stages belonging to other apps running concurrently. All of their
+writes accumulate into one transaction and commit together. This is the
+throughput technique from the transactions chapter, applied globally and
+invisibly: because everyone shares one database thread, everyone can also share
+one big, efficient transaction.
+
+=== The single database thread, restated
+
+This is the concrete payoff of the "one database thread to rule them all" design.
+Plain stages each get their own thread and run truly in parallel; all database
+stages, in contrast, are multiplexed onto one thread so that nothing ever
+contends for the SQLite file. You do not create or manage that thread -- adding a
+`DatabaseStage` to any pipeline brings it into existence, and every subsequent
+database stage joins it.
+
+One consequence worth stating: a database stage cannot use the asynchronous
+database accessor (`getAsyncDatabaseAccessor_()` throws if called from one). It
+does not need it -- it already _is_ on the database thread. That accessor exists
+for the opposite situation, a non-database stage that occasionally needs to reach
+the database, which we return to later.
+
+=== Database stages with outputs
+
+Although sinks are the common case, a database stage may have output ports when
+the design calls for it. A typical example is a cache-and-evict pipeline, where a
+database stage signals that a record has been persisted so an upstream cache can
+drop its copy:
+
+....
+  Sim -> Cache a copy -> Process -> Database -----+
+               ^                                  |
+               |                                  |
+               +------------- Evict --------------+
+....
+
+The cache holds originals for fast access and evicts them once the database stage
+confirms the write. Whether you need this is a design choice; the mechanism is
+just an ordinary output port on the database stage.
+
+With persistence handled, the last piece of the pipeline story is performance:
+how to keep data moving with minimal copying. That is the next chapter.
+
+[#ch-20-move-semantics]
+== Move Semantics & Performance
+
+Most of SimDB's performance you get for free: contention-free writes, one database
+thread, automatic batch transactions. But a pipeline is only as fast as the data
+you push through it, and a few good habits keep it moving.
+
+=== Move data, do not copy it
+
+The single most important habit is to *move* payloads through the pipeline rather
+than copy them. On a queue, that is the difference between `emplace` and `push`:
+
+[source,cpp]
+----
+output_queue_->emplace(std::move(payload));  // hand off the buffer -- cheap, O(1)
+output_queue_->push(payload);                // copy the whole payload -- O(n)
+----
+
+Pipeline payloads are frequently large -- a vector of samples, a compressed byte
+buffer. Copying one duplicates every byte; moving one hands the existing buffer
+to the next stage in O(1). On a path that runs millions of times, that difference
+dominates.
+
+SimDB embraces this: it *supports move-only payloads*. A payload type may hold a
+`std::unique_ptr` or any other non-copyable member and still flow through a
+pipeline, as long as you `emplace`/`std::move` it rather than `push` it. Copying
+remains available -- `push` is there when you genuinely need to keep the original
+(say, to tee the same payload to two pipeline heads, or duplicate in software
+before enqueue) or when the payload is small enough that copying is free. But
+move is the default you should reach for.
+
+=== Let SimDB batch the writes
+
+The other half of throughput is transaction batching, and you have already seen
+it: every database stage's writes are folded into one shared transaction on the
+database thread. You do not size those transactions by hand. The main way you
+influence them is by *how often you flush* -- forcing a synchronization point
+commits the current batch, so flushing on every item would defeat the batching
+entirely. Flush when you actually need a consistency point, not reflexively.
+
+=== Threads and stage granularity
+
+Each stage runs on its own worker thread, and there is only ever one database
+thread. Two design choices affect how well a pipeline scales:
+
+* *Stage granularity.* Splitting an expensive transform into its own stage lets
+  it run in parallel with the stages around it -- genuine pipeline parallelism.
+  But every stage costs a thread and a queue hop, so a stage that does almost no
+  work can cost more in hand-off overhead than it saves. Make a stage when it
+  does real, separable work; do not shatter a cheap operation into many tiny
+  stages.
+* *Payload sizing.* Each hand-off through a queue takes a lock. For very small
+  items, that per-item overhead can dwarf the work, so it often pays to batch
+  many small items into one payload (a vector, say) and move the batch. Do not
+  overcorrect into enormous payloads, though -- oversized batches delay the
+  moment a downstream stage can start and inflate memory use. Aim for a
+  middle ground.
+
+The polling interval from earlier in this part is the third knob: shorten it for
+lower latency, lengthen it to waste fewer wakeups when a stage is usually idle.
+
+[WARNING]
+====
+SimDB's throughput assumes it effectively owns the process's path to disk. If the
+surrounding simulator does its *own* unrelated filesystem work -- a separate
+logging system writing heavily to disk, for instance -- that activity contends
+with SimDB's database thread for the same I/O path and can badly degrade pipeline
+performance. Until SimDB offers a first-class way to coordinate such traffic,
+treat unrelated heavy disk I/O as a known performance-failure mode: keep it off
+the critical path where you can, or route that output through SimDB so it shares
+the same batched, single-threaded database access.
+====
+
+That completes the conceptual core of the pipeline: stages and their run loop,
+ports and queues, assembling a pipeline, the database stage, and the performance
+habits that keep it fast. The final chapter of this part puts it all in front of
+you as runnable code, touring the shipped pipeline examples.
+
+[#ch-21-pipeline-examples]
+== Running the Pipeline Examples
+
+Everything in this part now comes together in real, runnable code. SimDB ships a
+set of pipeline examples under `examples/`, and this chapter walks through the
+first of them -- `SimplePipeline` -- in full, then points you at the rest.
+
+=== The example catalog
+
+The examples are meant to be read roughly in this order. Each one isolates a
+concept:
+
+* *SimplePipeline* -- the "hello world" of pipelines: a single-input/
+  single-output compression stage feeding a database stage. Shown in full below.
+* *ConcurrentApps* -- several apps running at once, sharing the one database.
+* *DatabaseWatchdog* -- a stage with no I/O ports that reaches the database thread
+  from outside it.
+* *PipelineSnoopers* -- inspecting data while it is still in flight between
+  stages.
+* *AppFactory* -- apps that need non-default constructor arguments.
+
+`SimplePipeline` uses only the concepts from this part, so we present its code
+here. The others lean on the application framework and more advanced pipeline
+features; rather than show that code out of context, we cover each in the part
+where it belongs -- the application framework in <<part-v,Part V>>, and snooping, watchdogs,
+and multi-app patterns in the advanced part. The catalog in `examples/README.md`
+maps every example to the feature it showcases.
+
+=== SimplePipeline, in full
+
+`SimplePipeline` is a two-stage pipeline: a `CompressionStage` compresses each
+incoming vector on its own thread, and a `DatabaseStage` writes the compressed
+bytes to SQLite on the database thread. It is packaged as a `simdb::App`; the
+application framework is <<part-v,Part V>>'s subject, so for now focus on the pipeline parts
+you already recognize -- the stages, their ports, and the `createPipeline`
+wiring.
+
+The app declares its schema and holds the pipeline's entry point:
+
+[source,cpp]
+----
+class SimplePipeline : public simdb::App
+{
+public:
+    static constexpr auto NAME = "simple-pipeline";
+
+    SimplePipeline(simdb::DatabaseManager* db_mgr) :
+        db_mgr_(db_mgr)
+    {
+    }
+
+    static void defineSchema(simdb::Schema& schema)
+    {
+        using dt = simdb::SqlDataType;
+
+        auto& tbl = schema.addTable("CompressedData");
+        tbl.addColumn("AppInstance", dt::int32_t);
+        tbl.addColumn("DataBlob", dt::blob_t);
+    }
+
+    // ... createPipeline() and process() shown below ...
+
+protected:
+    simdb::DatabaseManager* db_mgr_ = nullptr;
+    simdb::ConcurrentQueue<std::vector<double>>* pipeline_head_ = nullptr;
+};
+----
+
+The compression stage derives from `simdb::pipeline::CompressionStage`, SimDB's
+optional helper base for zlib compression stages. It still runs on its own worker
+thread like any `Stage`; the base class adds one protected API,
+`getBestCompressionLevel_()`, which maps the thread's sleep percentage to a zlib
+level from `CompressionLevel::FASTEST` (when the thread is busy) through
+`HIGHEST` (when it is idle). Pass that level as the third argument to
+`compressData`. The constructor accepts `force_compress_regardless` (default
+`true`): when set to `false`, a saturated thread can receive level
+`CompressionLevel::DISABLED` (skip compression) instead of always compressing at
+least at `FASTEST`. The sleep percentage comes from the per-thread performance
+report printed at teardown (<<part-v,Part V>>).
+
+Its `run_` is the pop / transform / emplace / `PROCEED` pattern from earlier,
+falling back to `SLEEP` when there is nothing to compress:
+
+[source,cpp]
+----
+class CompressionStage : public simdb::pipeline::CompressionStage
+{
+public:
+    CompressionStage()
+    {
+        addInPort_<std::vector<double>>("input_data", input_queue_);
+        addOutPort_<std::vector<char>>("compressed_data", output_queue_);
+    }
+
+private:
+    simdb::pipeline::PipelineAction run_(bool) override
+    {
+        std::vector<double> data;
+        if (input_queue_->try_pop(data))
+        {
+            std::vector<char> compressed_data;
+            simdb::compressData(data, compressed_data, getBestCompressionLevel_());
+            output_queue_->emplace(std::move(compressed_data));
+            return simdb::pipeline::PROCEED;
+        }
+
+        return simdb::pipeline::SLEEP;
+    }
+
+    simdb::ConcurrentQueue<std::vector<double>>* input_queue_ = nullptr;
+    simdb::ConcurrentQueue<std::vector<char>>* output_queue_ = nullptr;
+};
+----
+
+The database stage derives from `DatabaseStage<SimplePipeline>`, takes the
+compressed bytes on its input port, and writes them with a prepared inserter. It
+also carries an app-instance number, passed to its constructor, so multiple
+instances can tag their rows:
+
+[source,cpp]
+----
+class DatabaseStage : public simdb::pipeline::DatabaseStage<SimplePipeline>
+{
+public:
+    DatabaseStage(size_t app_instance_num) :
+        app_instance_num_(app_instance_num)
+    {
+        addInPort_<std::vector<char>>("data_to_write", input_queue_);
+    }
+
+private:
+    simdb::pipeline::PipelineAction run_(bool) override
+    {
+        std::vector<char> data;
+        if (input_queue_->try_pop(data))
+        {
+            auto inserter = getTableInserter_("CompressedData");
+            inserter->setColumnValue(0, (int)app_instance_num_);
+            inserter->setColumnValue(1, data);
+            inserter->createRecord();
+            return simdb::pipeline::PROCEED;
+        }
+
+        return simdb::pipeline::SLEEP;
+    }
+
+    size_t app_instance_num_ = 0;
+    simdb::ConcurrentQueue<std::vector<char>>* input_queue_ = nullptr;
+};
+----
+
+Finally, `createPipeline` wires the two stages together following the build
+protocol from earlier -- add stages, bind ports, then capture the pipeline
+head. `process` is the app's front door: it pushes a vector into that head
+queue.
+
+[source,cpp]
+----
+void createPipeline(simdb::pipeline::PipelineManager* pipeline_mgr) override
+{
+    auto pipeline = pipeline_mgr->createPipeline(NAME, this);
+
+    pipeline->addStage<CompressionStage>("compressor");
+    pipeline->addStage<DatabaseStage>("db_writer", getInstance());
+    pipeline->noMoreStages();
+
+    pipeline->bind("compressor.compressed_data", "db_writer.data_to_write");
+    pipeline->noMoreBindings();
+
+    pipeline_head_ = pipeline->getInPortQueue<std::vector<double>>("compressor.input_data");
+}
+
+void process(const std::vector<double>& data)
+{
+    pipeline_head_->push(data);
+}
+----
+
+That is a complete pipeline. Data enters through `process`, is compressed on the
+compressor's thread, and is written to SQLite on the database thread -- and the
+caller of `process` never waits on any of it.
+
+[NOTE]
+====
+The shipped `examples/SimplePipeline.hpp` includes a few test-only assertions and
+a stored flusher that we have omitted here for clarity. The pipeline logic above
+is otherwise the real example verbatim.
+====
+
+=== Building and running the examples
+
+The examples build with the regression target from <<part-ii,Part II>>:
+
+[source,bash]
+----
+cd release
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make simdb_regress
+----
+
+Run the resulting binaries from a build or scratch directory so their `.db`
+output does not litter a source tree. `examples/README.md` is the authoritative
+map of which example demonstrates which feature.
+
+This is the end of <<part-iv,Part IV>>. You can now build a concurrent pipeline from stages
+and ports, persist through a database stage, and reason about its performance.
+What we have deferred -- how an app is defined, enabled, and driven through its
+lifecycle -- is exactly what <<part-v,Part V>> takes up next.

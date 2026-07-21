@@ -239,6 +239,31 @@ int main()
     EXPECT_THROW(db_mgr.prepareINSERT(SQL_TABLE("internal$SchemaTables")));
     EXPECT_THROW(db_mgr.EXECUTE("INSERT INTO internal$SchemaTables (TableName) VALUES (\"blah\")"));
 
+    // Negative test: misuse ensureUnique
+    simdb::Schema schema3;
+    auto& students_tbl = schema3.addTable("Students");
+    students_tbl.addColumn("FirstName", dt::string_t);
+    students_tbl.addColumn("LastName", dt::string_t);
+    students_tbl.addColumn("StudentID", dt::int32_t);
+    students_tbl.unsetPrimaryKey();
+    students_tbl.ensureUnique("StudentID");
+
+    db_mgr.appendSchema(schema3);
+    db_mgr.INSERT(SQL_TABLE("Students"), SQL_VALUES("Bob", "Thompson", 123));
+    db_mgr.INSERT(SQL_TABLE("Students"), SQL_VALUES("Alice", "Smith", 456));
+    EXPECT_THROW(db_mgr.INSERT(SQL_TABLE("Students"), SQL_VALUES("Chris", "Jackson", 456))); // dup: 456
+
+    // Negative test: misuse INSERT
+    EXPECT_THROW(db_mgr.INSERT(
+        SQL_TABLE("Students"),
+        SQL_COLUMNS("FirstName", "LastName", "StudentID"),
+        SQL_VALUES("Jane", "Myers"))); // Values do not match columns
+
+    EXPECT_THROW(db_mgr.INSERT(
+        SQL_TABLE("Students"),
+        SQL_COLUMNS("FirstName", "LastName"),
+        SQL_VALUES("Jane", "Myers", 888))); // Values do not match columns
+
     REPORT_ERROR;
     return ERROR_CODE;
 }

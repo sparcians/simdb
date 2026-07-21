@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/schema/SchemaDef.hpp"
 #include "simdb/sqlite/Constraints.hpp"
 #include "simdb/sqlite/Transaction.hpp"
@@ -23,10 +24,8 @@ inline void fuzzyMatch(sqlite3_context* context, int, sqlite3_value** argv)
     const int constraint = sqlite3_value_int(argv[2]);
     static constexpr double tolerance = std::numeric_limits<double>::epsilon();
 
-    if (constraint >= static_cast<int>(SetConstraints::IN_SET))
-    {
-        throw DBException("Invalid constraint in fuzzyMatch(). Should be Constraints enum.");
-    }
+    simdb_assert(constraint < static_cast<int>(SetConstraints::IN_SET),
+                 "Invalid constraint in fuzzyMatch(). Should be Constraints enum.");
 
     const Constraints e_constraint = static_cast<Constraints>(constraint);
 
@@ -148,10 +147,7 @@ public:
     void executeCommand(const std::string_view command)
     {
         auto rc = SQLiteReturnCode(sqlite3_exec(db_conn_, command.data(), nullptr, nullptr, nullptr));
-        if (rc)
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!rc, sqlite3_errmsg(db_conn_));
     }
 
     /// Turn the given command into an SQL prepared statement.
@@ -183,10 +179,7 @@ private:
         sqlite3* sqlite_conn = nullptr;
         auto err_code = sqlite3_open_v2(db_filepath_.c_str(), &sqlite_conn, db_open_flags, 0);
 
-        if (err_code != SQLITE_OK)
-        {
-            throw DBException("Unable to connect to the database file: ") << db_file;
-        }
+        simdb_assert(err_code == SQLITE_OK, "Unable to connect to the database file: " << db_file);
 
         if (!validateConnectionIsSQLite_(sqlite_conn))
         {
@@ -233,6 +226,10 @@ private:
             if (column->hasDefaultValue())
             {
                 oss << " DEFAULT " << column->getDefaultValueAsString();
+            }
+            if (column->isUnique() && column->getName() != pkey)
+            {
+                oss << " UNIQUE";
             }
             if (idx != columns.size() - 1)
             {

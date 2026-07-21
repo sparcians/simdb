@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/AsyncDatabaseAccessor.hpp"
 #include "simdb/pipeline/PollingThread.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
@@ -180,17 +181,11 @@ private:
             if (timeout_seconds > 0)
             {
                 auto status = fut.wait_for(std::chrono::duration<double>(timeout_seconds));
-                if (status == std::future_status::timeout)
-                {
-                    throw DBException("Timed out waiting for async DB task to complete");
-                }
+                simdb_assert(status != std::future_status::timeout, "Timed out waiting for async DB task to complete");
             }
 
             auto exception_reason = fut.get();
-            if (!exception_reason.empty())
-            {
-                throw DBException(exception_reason);
-            }
+            simdb_assert(exception_reason.empty(), exception_reason);
         }
 
         /// \brief Return true if there are pending async DB tasks in the queue.

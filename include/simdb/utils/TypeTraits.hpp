@@ -1,5 +1,10 @@
 // <TypeTraits.hpp> -*- C++ -*-
 
+/**
+ * \file TypeTraits.hpp
+ * \brief Contains various helpers that are useful for template meta-programming.
+ */
+
 #pragma once
 
 #include <array>
@@ -18,7 +23,197 @@
 #include <vector>
 
 namespace simdb::type_traits {
+// If compiler is C++11 compliant, then use explicit aliases.
+#if __cplusplus == 201103L
 
+/**
+ * \brief This templated struct takes a parameter pack and
+ * return a nested value to be true, if all the elements in
+ * the pack are unsigned types.
+ *
+ * This is the generic template struct.
+ */
+template <typename...> struct all_unsigned;
+
+/**
+ * \brief This is the empty template specialization.
+ */
+template <> struct all_unsigned<> : public std::true_type
+{
+};
+
+/**
+ * \brief This is the template specialization with one or more
+ * elements in the pack.
+ */
+template <typename Head, typename... Tail> struct all_unsigned<Head, Tail...>
+{
+    static constexpr bool value{std::is_unsigned<typename std::decay<Head>::type>::value and
+                                all_unsigned<Tail...>::value};
+};
+
+/**
+ * \brief This templated struct takes a parameter pack and
+ * return a nested value to be true, if all the elements in
+ * the pack are signed types.
+ *
+ * This is the generic template struct.
+ */
+template <typename...> struct all_signed;
+
+/**
+ * \brief This is the empty template specialization.
+ */
+template <> struct all_signed<> : public std::true_type
+{
+};
+
+/**
+ * \brief This is the template specialization with one or more
+ * elements in the pack.
+ */
+template <typename Head, typename... Tail> struct all_signed<Head, Tail...>
+{
+    static constexpr bool value{std::is_signed<typename std::decay<Head>::type>::value and all_signed<Tail...>::value};
+};
+
+/**
+ * \brief This templated struct takes a parameter pack and
+ * return a nested value to be true, if all the elements in
+ * the pack are of the same sign.
+ */
+template <typename... Args> struct all_same_sign
+{
+    static constexpr bool value{all_signed<Args...>::value or all_unsigned<Args...>::value};
+};
+
+/**
+ * \brief This templated struct takes a parameter pack and
+ * return a nested value to be true, if all the elements in
+ * the pack are integral types.
+ *
+ * This is the generic template struct.
+ */
+template <typename...> struct all_are_integral;
+
+/**
+ * \brief This is the empty template specialization.
+ */
+template <> struct all_are_integral<> : public std::true_type
+{
+};
+
+/**
+ * \brief This is the template specialization with one or more
+ * elements in the pack.
+ */
+template <typename Head, typename... Tail> struct all_are_integral<Head, Tail...>
+{
+    static constexpr bool value{std::is_integral<typename std::decay<Head>::type>::value and
+                                all_are_integral<Tail...>::value};
+};
+
+/** \brief Alias Template for std::enable_if.
+ */
+template <bool B, typename T = void> using enable_if_t = typename std::enable_if<B, T>::type;
+
+/** \brief Alias Template for std::decay
+ */
+template <typename T> using decay_t = typename std::decay<T>::type;
+
+/** \brief Alias Template for std::underlying_type
+ */
+template <typename T> using underlying_type_t = typename std::underlying_type<T>::type;
+
+// If compiler is C++14/17 compliant, then use standard aliases.
+#elif __cplusplus > 201103L
+/** \brief Alias Template for std::enable_if.
+ */
+template <bool B, typename T = void> using enable_if_t = typename std::enable_if_t<B, T>;
+
+/** \brief Alias Template for std::decay
+ */
+template <typename T> using decay_t = typename std::decay_t<T>;
+
+/** \brief Alias Template for std::underlying_type
+ */
+template <typename T> using underlying_type_t = typename std::underlying_type_t<T>;
+#endif
+
+/**
+ * \brief This templated struct takes a target type and another
+ * parameter pack of types and returns a nested boolean value
+ * of true, if the target type matches any one of the types in
+ * the parameter pack.
+ */
+template <typename...> struct matches_any;
+
+/**
+ * \brief This templated struct takes a target type and another
+ * parameter pack of types and returns a nested boolean value
+ * of true, if the target type matches any one of the types in
+ * the parameter pack.
+ *
+ * This is template specialization when there are no types left
+ * in the parameter pack.
+ */
+template <typename T> struct matches_any<T> : public std::true_type
+{
+};
+
+/**
+ * \brief This templated struct takes a target type and another
+ * parameter pack of types and returns a nested boolean value
+ * of true, if the target type matches any one of the types in
+ * the parameter pack.
+ *
+ * This is template specialization when there are one or more types
+ * left in the parameter pack.
+ */
+template <typename T, typename Head, typename... Tail> struct matches_any<T, Head, Tail...>
+{
+    static constexpr bool value{std::is_same<T, Head>::value or matches_any<T, Tail...>::value};
+};
+
+/**
+ * \brief This templated struct takes a type and gives
+ *  back a nested typedef of a pointer to that type.
+ */
+template <typename T> struct add_pointer
+{
+    using type = T*;
+};
+
+template <typename T> struct add_pointer<T*>
+{
+    using type = T;
+};
+
+template <typename T> struct add_pointer<const T*>
+{
+    using type = T;
+};
+
+template <typename T> struct add_pointer<T* const>
+{
+    using type = T;
+};
+
+template <typename T> struct add_pointer<const T* const>
+{
+    using type = T;
+};
+
+/** \brief Alias Template for add_pointer.
+ */
+template <typename T> using add_pointer_t = typename add_pointer<T>::type;
+
+/**
+ * \brief This templated struct lets us know about
+ *  whether the datatype is actually an ordinary object or
+ *  pointer to that object. This is specialized for
+ *  a couple different signatures.
+ */
 template <typename> struct is_any_pointer : public std::false_type
 {
 };
@@ -87,6 +282,20 @@ template <typename T> struct is_any_pointer<std::weak_ptr<T> const&> : public st
 {
 };
 
+template <typename T> inline constexpr bool is_any_pointer_v = is_any_pointer<T>::value;
+
+/*!
+ * \brief Template type helper that removes any pointer.
+ * A modeler may call certain APIs with shared pointers to the
+ * actual Collectable classes, or templatize Collectables with
+ * pointers to collectable objects.
+ * To make our API have a single interface and still work when passed
+ * pointers, we will remove the pointer and then do all the decision
+ * making work, by default.
+ * It is harmless if the modeler passes a non pointer type as
+ * removing a pointer from something which is not a pointer
+ * results in itself.
+ */
 template <typename T> struct remove_any_pointer
 {
     using type = T;
@@ -172,32 +381,474 @@ template <typename T> struct remove_any_pointer<std::weak_ptr<T> const&>
     using type = T;
 };
 
+/** \brief Alias Template for remove_pointer.
+ */
 template <typename T> using remove_any_pointer_t = typename remove_any_pointer<T>::type;
 
-template <typename T> struct is_contiguous : std::false_type
+/**
+ * \brief This templated struct takes a type and tells
+ *  us whether that type is a STL container.
+ */
+template <typename> struct is_stl_container : std::false_type
 {
 };
 
-template <typename T> struct is_contiguous<std::vector<T>> : std::true_type
+template <typename T, std::size_t N> struct is_stl_container<std::array<T, N>> : public std::true_type
 {
 };
 
-template <typename T, size_t N> struct is_contiguous<std::array<T, N>> : std::true_type
+template <typename... Args> struct is_stl_container<std::vector<Args...>> : public std::true_type
 {
 };
 
-// TypeAt<N, Ts...> gets the N-th type in the parameter pack Ts...
-template <std::size_t N, typename... Ts> struct TypeAt;
+template <typename... Args> struct is_stl_container<std::deque<Args...>> : public std::true_type
+{
+};
 
-template <typename T, typename... Ts> struct TypeAt<0, T, Ts...>
+template <typename... Args> struct is_stl_container<std::list<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::forward_list<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::set<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::multiset<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::map<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::multimap<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::unordered_set<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::unordered_multiset<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::unordered_map<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::unordered_multimap<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::stack<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::queue<Args...>> : public std::true_type
+{
+};
+
+template <typename... Args> struct is_stl_container<std::priority_queue<Args...>> : public std::true_type
+{
+};
+
+template <typename T> struct is_stl
+{
+    static constexpr bool value = is_stl_container<typename std::decay<T>::type>::value;
+};
+
+template <typename T> inline constexpr bool is_stl_v = is_stl<T>::value;
+
+/**
+ * \brief This Variadic templated struct contains a nested value
+ *  which stores the length of any parameter pack it gets templatized on.
+ */
+template <typename... Args> struct parameter_pack_length
+{
+    static constexpr std::size_t value = sizeof...(Args);
+};
+
+template <typename...> struct peek_last_type;
+
+template <typename Head, typename... Tail> struct peek_last_type<Head, Tail...> : public peek_last_type<Tail...>
+{
+};
+
+template <typename Tail> struct peek_last_type<Tail>
+{
+    using type = Tail;
+};
+
+template <typename... Args> using peek_last_type_t = typename peek_last_type<Args...>::type;
+/**
+ * \brief This Variadic templated struct helps us know about the
+ *  type of the very last or tail item in a parameter pack.
+ *  It works by peeling of one parameter at a time from the pack
+ *  and when it hits the last item, it specializes the struct by
+ *  typedefing the template parameter T in its namespace.
+ */
+template <std::size_t, typename...> struct last_index_type
+{
+};
+
+/**
+ * \brief Base case when we have just the last item of the
+ *  parameter pack.
+ */
+template <typename T> struct last_index_type<0, T>
 {
     using type = T;
 };
 
-template <std::size_t N, typename T, typename... Ts> struct TypeAt<N, T, Ts...>
+/**
+ * \brief Recursive case when we recursively peel off items
+ *  from the front of the pack until we hit the last item.
+ */
+template <std::size_t N, typename T, typename... Args>
+struct last_index_type<N, T, Args...> : public last_index_type<N - 1, Args...>
 {
-    static_assert(N < sizeof...(Ts) + 1, "Index out of bounds");
-    using type = typename TypeAt<N - 1, Ts...>::type;
 };
+
+/** \brief Alias Template for last_index_type.
+ */
+template <std::size_t N, typename... Args> using last_index_type_t = typename last_index_type<N, Args...>::type;
+
+/**
+ * \brief This Variadic templated struct basically works much like
+ *  std::integer_sequence. It represents a compile-time sequence of
+ *  integers. This is used as a parameter to the Collection function template
+ *  and helps in type deduction, unpacking and transforming our tuple of
+ *  random parameters back into a variadic template.
+ *
+ *  Given a tuple, this Indices Sequence Generator takes that tuple and
+ *  transforms it back to a variadic template argument.
+ */
+template <std::size_t...> struct sequence_generator
+{
+};
+
+/**
+ * \brief This is the generic template.
+ */
+template <int N, std::size_t... S> struct generate_sequence : generate_sequence<N - 1, N - 1, S...>
+{
+};
+
+/**
+ * \brief This is the specialization which kicks in when the first
+ *  template parameter is 0.
+ */
+template <std::size_t... S> struct generate_sequence<0, S...>
+{
+    using type = sequence_generator<S...>;
+};
+
+/** \brief Alias Template for generate_sequence.
+ */
+template <std::size_t... Args> using generate_sequence_t = typename generate_sequence<Args...>::type;
+
+/**
+ * \brief This templated struct lets us know about
+ *  the return type from any random function pointer. This is
+ *  specialized for a couple different signatures.
+ */
+template <typename T> struct return_type
+{
+    using type = T;
+};
+
+template <typename R, typename... Ts> struct return_type<std::function<R(Ts...)>>
+{
+    using type = R;
+};
+
+template <typename R, typename... Ts> struct return_type<std::function<R(Ts...)> const>
+{
+    using type = R;
+};
+
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> T::*>
+{
+    using type = R;
+};
+
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> const T::*>
+{
+    using type = R;
+};
+
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> T::* const&>
+{
+    using type = R;
+};
+
+template <typename R, typename T, typename... Ts> struct return_type<std::function<R(Ts...)> const T::* const>
+{
+    using type = R;
+};
+
+template <typename R, typename... Ts> struct return_type<R (*)(Ts...)>
+{
+    using type = R;
+};
+
+template <typename R, typename... Ts> struct return_type<R& (*)(Ts...)>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<R (T::*)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<R& (T::*)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<std::shared_ptr<R> (T::*)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<std::shared_ptr<R>& (T::*)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<R (T::* const)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<R& (T::* const)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<std::shared_ptr<R> (T::* const)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<std::shared_ptr<R>& (T::* const)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<R (T::* const&)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<R& (T::* const&)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<std::shared_ptr<R> (T::* const&)() const>
+{
+    using type = R;
+};
+
+template <typename R, typename T> struct return_type<std::shared_ptr<R>& (T::* const&)() const>
+{
+    using type = R;
+};
+
+/** \brief Alias Template for return_type.
+ */
+template <typename T> using return_type_t = typename return_type<T>::type;
+
+/** \brief Replacement for std::is_pod (deprecated in C++20)
+ */
+template <typename T>
+struct is_pod : std::integral_constant<bool, std::is_trivial<T>::value && std::is_standard_layout<T>::value>
+{
+};
+
+template <typename T> inline constexpr bool is_pod_v = is_pod<T>::value;
+
+/**
+ * \brief Templated struct for detecting Boolean Type.
+ */
+template <typename> struct is_bool : public std::false_type
+{
+};
+
+template <> struct is_bool<bool> : public std::true_type
+{
+};
+
+template <> struct is_bool<bool&> : public std::true_type
+{
+};
+
+template <> struct is_bool<bool const&> : public std::true_type
+{
+};
+
+template <> struct is_bool<bool const> : public std::true_type
+{
+};
+
+template <typename T> inline constexpr bool is_bool_v = is_bool<T>::value;
+
+/**
+ * \brief This templated struct lets us know about
+ * whether the datatype is actually an std::pair object.
+ * This is specialized for a couple different signatures.
+ * The collection procedure for a pair object is broken down
+ * into first collecting the first member and then, the second.
+ */
+template <typename> struct is_pair : public std::false_type
+{
+};
+
+template <typename T, typename U> struct is_pair<std::pair<T, U>> : public std::true_type
+{
+};
+
+template <typename T, typename U> struct is_pair<std::pair<T, U>&> : public std::true_type
+{
+};
+
+template <typename T, typename U> struct is_pair<std::pair<T, U> const&> : public std::true_type
+{
+};
+
+template <typename T, typename U> struct is_pair<std::pair<T, U> const> : public std::true_type
+{
+};
+
+template <typename T> inline constexpr bool is_pair_v = is_pair<T>::value;
+
+/**
+ * \brief Templated struct for detecting String Type.
+ */
+template <typename> struct is_string : public std::false_type
+{
+};
+
+template <> struct is_string<std::string> : public std::true_type
+{
+};
+
+template <> struct is_string<std::string&> : public std::true_type
+{
+};
+
+template <> struct is_string<std::string const&> : public std::true_type
+{
+};
+
+template <> struct is_string<std::string const> : public std::true_type
+{
+};
+
+template <typename T> inline constexpr bool is_string_v = is_string<T>::value;
+
+/**
+ * \brief Templated struct for detecting char pointer type.
+ */
+template <typename> struct is_char_pointer : public std::false_type
+{
+};
+
+template <> struct is_char_pointer<char*> : public std::true_type
+{
+};
+
+template <> struct is_char_pointer<const char*> : public std::true_type
+{
+};
+
+template <> struct is_char_pointer<char* const> : public std::true_type
+{
+};
+
+template <> struct is_char_pointer<const char* const> : public std::true_type
+{
+};
+
+template <typename T> inline constexpr bool is_char_pointer_v = is_char_pointer<T>::value;
+
+/**
+ * \brief Templated struct for detecting "operator POD() const"
+ *
+ * Unlike a std::is_convertible_v cascade, this reports the *exact* return type
+ * of the class' conversion operator. Conversion to the operator's real return
+ * type uses an identity second standard conversion (Exact Match), which strictly
+ * outranks any chained conversion (e.g. operator uint32_t() also makes the class
+ * convertible to bool, but uint32_t wins). Resolves to void for non-class types,
+ * classes with no cast operator, and classes with more than one cast operator
+ * (an ambiguous probe that fails via SFINAE).
+ */
+template <typename T> struct pod_convertible
+{
+private:
+    using U = std::decay_t<T>;
+
+    template <typename P> struct tag
+    {
+        using type = P;
+    };
+
+    static tag<bool> pick(bool);
+    static tag<int8_t> pick(int8_t);
+    static tag<uint8_t> pick(uint8_t);
+    static tag<int16_t> pick(int16_t);
+    static tag<uint16_t> pick(uint16_t);
+    static tag<int32_t> pick(int32_t);
+    static tag<uint32_t> pick(uint32_t);
+    static tag<int64_t> pick(int64_t);
+    static tag<uint64_t> pick(uint64_t);
+    static tag<double> pick(double);
+    static tag<float> pick(float);
+    static tag<void> pick(...);
+
+    template <typename V, std::enable_if_t<std::is_class_v<V>, int> = 0>
+    static auto detect(int) -> typename decltype(pick(std::declval<V>()))::type;
+
+    template <typename V> static auto detect(...) -> void;
+
+public:
+    using type = decltype(detect<U>(0));
+};
+
+template <typename T> using pod_convertible_t = typename pod_convertible<T>::type;
+
+template <typename T> constexpr bool is_pod_convertible_v = !std::is_same_v<pod_convertible_t<T>, void>;
+
+// TODO cnyce: reuse Sparta's has_ostream_operator utility once it gets moved to SimDB.
+template <typename T, typename = void> struct has_ostream_operator : std::false_type
+{
+};
+
+template <typename T>
+struct has_ostream_operator<T, std::void_t<decltype(std::declval<std::ostringstream&>() << std::declval<const T&>())>>
+    : std::true_type
+{
+};
+
+template <typename T> inline constexpr bool has_ostream_operator_v = has_ostream_operator<T>::value;
+
+template <typename T, typename = void> struct has_sparta_pair_definition_type : std::false_type
+{
+};
+
+template <typename T>
+struct has_sparta_pair_definition_type<T, std::void_t<typename T::SpartaPairDefinitionType>> : std::true_type
+{
+};
+
+template <typename T>
+inline constexpr bool has_sparta_pair_definition_type_v = has_sparta_pair_definition_type<T>::value;
 
 } // namespace simdb::type_traits

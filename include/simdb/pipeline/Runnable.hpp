@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
 #include <iostream>
@@ -64,10 +64,20 @@ public:
     /// \param enable true to enable, false to disable.
     void enable(bool enable = true) { enabled_ = enable; }
 
+protected:
+    const PollingThread* getThread_() const
+    {
+        simdb_assert(thread_, "PollingThread never set");
+        return thread_;
+    }
+
 private:
     virtual std::string getDescription_() const = 0;
     std::string description_;
     bool enabled_ = true;
+
+    const PollingThread* thread_ = nullptr;
+    friend class PollingThread;
 };
 
 /*!

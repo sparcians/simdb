@@ -1,0 +1,735 @@
+[#part-iii]
+= Part III: The SQLite Interface
+
+SimDB's SQLite layer is useful on its own, with no pipelines involved. This part
+is a complete tour of the data layer: schema, inserts, queries, transactions,
+blobs, and inspection.
+
+[#ch-09-defining-schema]
+== Defining a Schema
+
+Every SimDB database begins with a schema: a description of the tables you want
+and the columns each one holds. In SimDB you write that description in ordinary
+C++ -- there are no SQL `CREATE TABLE` strings to compose, and no chance of a
+typo in a keyword surviving until runtime. A `simdb::Schema` is a plain in-memory
+object; defining one touches no files and opens no connections. It becomes a real
+database only when you hand it to a `DatabaseManager`, which is the subject of the
+next chapter.
+
+=== A first schema
+
+Here is a small schema with a single table:
+
+[source,cpp]
+----
+#include "simdb/sqlite/DatabaseManager.hpp"
+
+simdb::Schema schema;
+using dt = simdb::SqlDataType;
+
+auto& tbl = schema.addTable("Instructions");
+tbl.addColumn("PC", dt::uint64_t);
+tbl.addColumn("Mnemonic", dt::string_t);
+tbl.addColumn("Latency", dt::uint32_t);
+----
+
+`addTable` returns a reference to the new `Table`, and `addColumn` names a column
+and gives it a type. That is the entire required vocabulary; everything else in
+this chapter is optional refinement.
+
+=== Column data types
+
+Column types come from the `simdb::SqlDataType` enumeration. Aliasing it to `dt`
+(as above) keeps definitions readable. The available types are:
+
+[cols="1,3"]
+|===
+| Type | Use it for
+
+| `int32_t`, `uint32_t` | 32-bit signed / unsigned integers
+| `int64_t`, `uint64_t` | 64-bit signed / unsigned integers (ticks, cycles, addresses)
+| `double_t`            | Floating-point values
+| `string_t`            | Text
+| `blob_t`              | Arbitrary binary payloads (covered later in this part)
+|===
+
+SimDB maps these onto SQLite's storage classes for you and preserves full
+integer width -- including the entire range of `uint64_t`, which raw SQLite does
+not handle gracefully.
+
+=== The implicit `Id` primary key
+
+By default, every table you create is given an auto-incrementing 64-bit integer
+primary key named `Id`. You do not declare it, and in fact you cannot add a
+column named `Id` yourself -- SimDB manages it. This `Id` is what lets you fetch
+a row directly later (for example with `findRecord`), and it is why a freshly
+inserted record already has a stable identity.
+
+If you want a different column to be the primary key, say so:
+
+[source,cpp]
+----
+tbl.setPrimaryKey("PC");   // use PC as the primary key instead of Id
+----
+
+And if a table needs no primary key at all, remove it:
+
+[source,cpp]
+----
+tbl.unsetPrimaryKey();
+----
+
+=== Default values
+
+A column can carry a default that is used whenever an insert omits it:
+
+[source,cpp]
+----
+auto& reports = schema.addTable("Reports");
+reports.addColumn("Name", dt::string_t);
+reports.addColumn("StartTick", dt::uint64_t);
+reports.addColumn("EndTick", dt::uint64_t);
+reports.setColumnDefaultValue("StartTick", 0);
+reports.setColumnDefaultValue("Name", "unnamed");
+----
+
+The default's type must match the column's type. Blob columns cannot have
+defaults -- there is no meaningful literal for arbitrary binary data.
+
+=== Indexes
+
+If you will query a table by a particular column (or combination of columns), add
+an index so those lookups stay fast as the table grows:
+
+[source,cpp]
+----
+reports.createIndexOn("StartTick");                       // single-column index
+reports.createCompoundIndexOn({"StartTick", "EndTick"});  // multi-column index
+----
+
+Indexes speed up reads at a small cost to writes and file size, so add them for
+the columns you actually filter or sort on -- not reflexively for every column.
+
+=== Uniqueness
+
+To reject duplicate values in a column, mark it unique:
+
+[source,cpp]
+----
+reports.ensureUnique("Name");
+----
+
+=== A fluent style
+
+Because the `Table`-returning methods all return the table, you can chain a
+definition into a single expression when that reads more clearly:
+
+[source,cpp]
+----
+schema.addTable("Events")
+    .addColumn("Tick", dt::uint64_t)
+    .addColumn("Kind", dt::string_t)
+    .setColumnDefaultValue("Kind", "generic");
+----
+
+=== Composing and growing a schema
+
+Schemas are composable. `appendSchema` merges one schema's tables into another,
+which is handy when different modules each contribute their own tables:
+
+[source,cpp]
+----
+simdb::Schema combined;
+combined.appendSchema(schema_from_module_a);
+combined.appendSchema(schema_from_module_b);
+----
+
+Appending fails if it would create two tables with the same name but different columns.
+And, as the next chapter shows, you are not limited to defining everything up front: a
+`DatabaseManager` accepts `appendSchema` too, so you can add tables to a live
+database as your program discovers it needs them.
+
+With a schema in hand, the next step is to turn it into an actual database file.
+
+[#ch-10-database-manager]
+== The DatabaseManager
+
+A schema only describes tables; the `simdb::DatabaseManager` turns that
+description into a real database file and is your entry point for everything you
+do with it afterward. It owns the underlying database connection, applies
+schemas, and is the object you call to insert, query, and manage records. In a
+typical program there is one `DatabaseManager` per database file, and it stays
+alive for as long as you need that database open.
+
+=== Opening a database
+
+The constructor takes a file name and a flag that controls what happens if the
+file already exists:
+
+[source,cpp]
+----
+// Create a brand-new database, replacing any file of the same name.
+simdb::DatabaseManager db_mgr("sim.db", true /* force_new_file */);
+----
+
+There are three cases worth knowing:
+
+* *Create fresh (`force_new_file == true`).* If the file exists it is replaced,
+  and you start from an empty database. This is what you want for a program that
+  produces a database on each run.
+* *Open existing (`force_new_file == false`, the default).* If the file already
+  exists, the manager reconnects to it and rebuilds the schema from the file
+  itself. If the file does _not_ exist, a new empty database is created.
+* *Default name.* Both arguments are optional; a bare `simdb::DatabaseManager
+  db_mgr;` opens (or creates) a file named `sim.db`.
+
+[IMPORTANT]
+====
+When you open a database file that *already existed* without forcing a new file,
+its schema is *fixed*: you can read and write records, but you cannot
+`appendSchema` new tables onto it. Schema changes belong to the program that
+creates the database. Reach for `force_new_file == true` when you intend to
+define (or redefine) the schema.
+====
+
+=== Applying a schema
+
+With a manager in hand, `appendSchema` creates the tables described by a schema:
+
+[source,cpp]
+----
+simdb::Schema schema;
+// ... define tables ...
+
+simdb::DatabaseManager db_mgr("sim.db", true);
+db_mgr.appendSchema(schema);
+----
+
+Unlike `Schema::appendSchema` (which only merges descriptions in memory),
+`DatabaseManager::appendSchema` immediately realizes the tables in the database
+file. You may call it more than once on a database you created, which is how you
+add tables partway through a run as your program discovers it needs them.
+
+=== The schema is persisted for you
+
+SimDB records the schema inside the database itself, in a pair of internal
+bookkeeping tables. That is why *reconnecting to an existing file just works*:
+the manager reads those tables back and reconstructs an equivalent `Schema`
+automatically, with no need to redeclare it in code:
+
+[source,cpp]
+----
+simdb::Schema orig_schema;
+// ... define tables ...
+
+simdb::DatabaseManager orig_db_mgr("orig.db", true);  // Create new DB
+orig_db_mgr.appendSchema(orig_schema);
+
+simdb::DatabaseManager diff_db_mgr("orig.db", false); // Connect to same DB
+assert(orig_schema == diff_db_mgr.getSchema());
+----
+
+=== The manager is the hub
+
+Nearly everything else in this part goes through the `DatabaseManager`. From it
+you:
+
+* insert rows with `INSERT` and `prepareINSERT` (next chapter);
+* read rows with `createQuery`, and fetch a single row by its `Id` with
+  `findRecord` (the querying chapter);
+* group operations atomically with `safeTransaction` (the transactions chapter).
+
+=== Lifecycle
+
+The connection is opened in the constructor and closed automatically when the
+`DatabaseManager` is destroyed -- ordinary RAII, so there is no explicit "close"
+call to remember. The database file itself, of course, persists on disk after
+the program exits, ready to be reopened later or inspected with other tools.
+
+With a live database in hand, we can start putting data into it.
+
+[#ch-11-inserting-data]
+== Inserting Data
+
+SimDB gives you two ways to write rows: a one-shot `INSERT` that is convenient
+for occasional writes, and a _prepared_ insert that you set up once and reuse for
+high-volume writing. Both go through the `DatabaseManager`, and both are typed --
+you hand SimDB C++ values, not SQL strings.
+
+=== One-shot inserts
+
+The `INSERT` API names a table, the columns you are setting, and the matching
+values:
+
+[source,cpp]
+----
+auto record = db_mgr.INSERT(
+    SQL_TABLE("Instructions"),
+    SQL_COLUMNS("PC", "Mnemonic", "Latency"),
+    SQL_VALUES(0x400100ull, "addi", 1u));
+----
+
+=== The record handle
+
+`INSERT` returns a handle to the row it created -- a `SqlRecord`. From it you can
+read back typed properties, and you can modify the row in place; a `setProperty`
+call writes straight through to the database:
+
+[source,cpp]
+----
+int32_t id = record->getId();                            // the auto-assigned Id
+uint32_t latency = record->getPropertyUInt32("Latency");
+
+record->setPropertyUInt32("Latency", 2u);                // updates the stored row
+----
+
+There is an accessor per column type -- `getPropertyInt32`, `getPropertyUInt64`,
+`getPropertyDouble`, `getPropertyString`, and so on -- along with a matching
+`setProperty` for each. Blob columns use the templated
+`getPropertyBlob<T>("col")`, covered in the blobs chapter.
+
+=== Insert shorthands
+
+Two shorter forms of `INSERT` are handy in the right situation:
+
+[source,cpp]
+----
+// Supply every column, in the table's schema order (no SQL_COLUMNS needed).
+db_mgr.INSERT(SQL_TABLE("Instructions"), SQL_VALUES(0x400104ull, "sub", 1u));
+
+// Insert a row that takes each column's default value.
+db_mgr.INSERT(SQL_TABLE("Instructions"));
+----
+
+The values-only form is terser but positional -- the values must line up with
+the columns exactly as the schema declares them -- so prefer the explicit
+`SQL_COLUMNS` form when clarity matters, or to future-proof your code against
+schema changes e.g. added/reordered columns.
+
+=== Prepared inserts for high volume
+
+When you are writing many rows -- the common case in a simulation -- preparing
+the statement once and reusing it is far faster than issuing a fresh `INSERT`
+each time. `prepareINSERT` compiles the statement up front; you then set column
+values by position and call `createRecord` for each row:
+
+[source,cpp]
+----
+auto inserter = db_mgr.prepareINSERT(
+    SQL_TABLE("Instructions"),
+    SQL_COLUMNS("PC", "Mnemonic", "Latency"));
+
+for (const auto& inst : instructions)
+{
+    inserter->setColumnValue(0, inst.pc);        // column 0 == "PC"
+    inserter->setColumnValue(1, inst.mnemonic);  // column 1 == "Mnemonic"
+    inserter->setColumnValue(2, inst.latency);   // column 2 == "Latency"
+    inserter->createRecord();
+}
+----
+
+`setColumnValue` takes a zero-based index into the column list you passed to
+`prepareINSERT`, and `createRecord` returns the new row's `Id`. If you prefer to
+set every column in one call, `createRecordWithColValues` does exactly that:
+
+[source,cpp]
+----
+int32_t id = inserter->createRecordWithColValues(0x400108ull, "xor", 1u);
+----
+
+As with `INSERT`, there is a `prepareINSERT(SQL_TABLE("..."))` overload that binds
+every column in schema order when you do not want to spell out `SQL_COLUMNS`.
+
+=== Choosing between them
+
+Reach for one-shot `INSERT` for setup rows, configuration, and any place you are
+writing a handful of records. Reach for `prepareINSERT` in the hot path, where
+the same statement runs thousands or millions of times. To push bulk-insert
+throughput even higher, wrap the loop in a single transaction -- the subject of
+the transactions chapter.
+
+[NOTE]
+====
+SimDB owns a couple of internal bookkeeping tables (their names begin with
+`internal$`). It deliberately refuses inserts into them, so you cannot corrupt
+the schema information it relies on.
+====
+
+[#ch-12-querying-data]
+== Querying Data
+
+Reading data back is where SimDB's typed, string-free style pays off most. You
+build a query against a table, bind C++ variables to the columns you want, add
+any constraints, and iterate the results -- all without composing a `SELECT`
+statement by hand.
+
+=== Selecting columns and iterating
+
+`createQuery` targets a table. You then call `select` once per column, binding
+each to a variable of the matching type. The trick to the model is that those
+variables are _bound once_ and refreshed on every step of the iteration:
+
+[source,cpp]
+----
+auto query = db_mgr.createQuery("Instructions");
+
+uint64_t pc = 0;
+query->select("PC", pc);
+
+std::string mnemonic;
+query->select("Mnemonic", mnemonic);
+
+uint32_t latency = 0;
+query->select("Latency", latency);
+
+auto results = query->getResultSet();
+while (results.getNextRecord())
+{
+    // pc, mnemonic, and latency now hold this row's values.
+    std::cout << "0x" << std::hex << pc << ": " << mnemonic
+              << " (latency " << std::dec << latency << ")\n";
+}
+----
+
+Each successful `getNextRecord()` populates the bound variables with the next
+row; the loop ends when it returns `false`. If you only need a tally rather than
+the rows themselves, `count()` returns how many records match:
+
+[source,cpp]
+----
+const int n = query->count();
+----
+
+=== Constraints (the `WHERE` clause)
+
+Narrow a query by adding typed constraints. There is a method per column type --
+`addConstraintForInt`, `addConstraintForUInt32`, `addConstraintForUInt64`,
+`addConstraintForDouble`, `addConstraintForString` -- each taking a column, a
+comparison operator, and a value:
+
+[source,cpp]
+----
+query->addConstraintForUInt32("Latency", simdb::Constraints::GREATER, 1);
+query->addConstraintForString("Mnemonic", simdb::Constraints::EQUAL, "addi");
+----
+
+The `simdb::Constraints` operators are `EQUAL`, `NOT_EQUAL`, `LESS`,
+`LESS_EQUAL`, `GREATER`, and `GREATER_EQUAL`. Multiple constraints combine with
+`AND`. To clear them and reuse the query, call `resetConstraints()`.
+
+=== Set membership
+
+To match against a set of values, use `simdb::SetConstraints::IN_SET` or
+`NOT_IN_SET` with a brace-enclosed list:
+
+[source,cpp]
+----
+query->addConstraintForString(
+    "Mnemonic", simdb::SetConstraints::IN_SET, {"addi", "sub", "xor"});
+----
+
+=== Matching doubles
+
+Floating-point equality is treated with care. `addConstraintForDouble` takes an
+extra boolean that enables _fuzzy_ matching, so you can compare against a stored
+`double` without being defeated by machine-precision rounding:
+
+[source,cpp]
+----
+auto samples = db_mgr.createQuery("Samples");
+samples->addConstraintForDouble("Value", simdb::Constraints::EQUAL, 3.14, /* fuzzy */ true);
+
+// Query will now return rows where the Value is within machine epsilon of 3.14
+----
+
+=== Ordering and limits
+
+Sort results with `orderBy` (call it more than once for tie-breakers), and cap
+the number of rows with `setLimit`:
+
+[source,cpp]
+----
+query->orderBy("Latency", simdb::QueryOrder::DESC);
+query->orderBy("PC", simdb::QueryOrder::ASC);
+query->setLimit(100);
+----
+
+`resetOrderBy()` and `resetLimit()` undo these, mirroring `resetConstraints()`.
+
+=== Combining clauses with OR
+
+Constraints are `AND`-ed by default. When you need `OR`, build each group of
+constraints, release it as a clause, and combine the clauses explicitly:
+
+[source,cpp]
+----
+query->addConstraintForUInt32("Latency", simdb::Constraints::EQUAL, 1);
+query->addConstraintForString("Mnemonic", simdb::Constraints::EQUAL, "addi");
+auto clause_a = query->releaseConstraintClauses();
+
+query->addConstraintForString("Mnemonic", simdb::Constraints::EQUAL, "sub");
+auto clause_b = query->releaseConstraintClauses();
+
+// (Latency == 1 AND Mnemonic == "addi") OR (Mnemonic == "sub")
+query->addCompoundConstraint(clause_a, simdb::QueryOperator::OR, clause_b);
+----
+
+=== Fetching a single row by Id
+
+When you already know a row's `Id` -- for example one returned by `createRecord`
+-- you do not need a query at all. Ask the `DatabaseManager` for it directly:
+
+[source,cpp]
+----
+auto record = db_mgr.findRecord("Instructions", id);
+----
+
+This hands back the same `SqlRecord` handle described in the previous chapter,
+with its typed `getProperty*` accessors.
+
+=== Deleting matching rows
+
+A query can also delete the rows it selects. Constrain it to the rows you want
+gone, then call `deleteResultSet()`:
+
+[source,cpp]
+----
+auto stale = db_mgr.createQuery("Instructions");
+stale->addConstraintForUInt32("Latency", simdb::Constraints::EQUAL, 0);
+stale->deleteResultSet();
+----
+
+With no constraints, that would empty the table -- so double-check your
+constraints before deleting.
+
+=== Reusing a query
+
+A query object is reusable. Reset whichever parts you want to change --
+constraints, ordering, or limit -- and run it again; and within a single run,
+`getResultSet()` can be iterated, then `reset()` and iterated again from the top.
+
+[#ch-13-transactions]
+== Transactions
+
+By default, each write you make to a SQLite database is its own committed
+transaction. That is fine for the occasional row, but it is ruinous for
+throughput when you are writing thousands or millions of them: the per-commit
+overhead dominates. Grouping many operations into a single transaction is the
+single most effective thing you can do for write performance, and SimDB makes it
+both easy and safe with `safeTransaction`.
+
+=== Grouping work with safeTransaction
+
+`safeTransaction` takes a function (typically a lambda) and runs everything
+inside it within one `BEGIN`/`COMMIT`:
+
+[source,cpp]
+----
+auto inserter = db_mgr.prepareINSERT(
+    SQL_TABLE("Instructions"),
+    SQL_COLUMNS("PC", "Mnemonic", "Latency"));
+
+db_mgr.safeTransaction(
+    [&]()
+    {
+        for (const auto& inst : instructions)
+        {
+            inserter->setColumnValue(0, inst.pc);
+            inserter->setColumnValue(1, inst.mnemonic);
+            inserter->setColumnValue(2, inst.latency);
+            inserter->createRecord();
+        }
+    });
+----
+
+Here every `createRecord` in the loop is folded into a single commit. The same
+loop without a transaction would commit once per row; wrapping it as above can be
+orders of magnitude faster for large batches.
+
+=== What makes it "safe"
+
+The name is not decoration -- `safeTransaction` handles the awkward parts of real
+concurrent database access for you:
+
+* *Automatic retry on contention.* If the database is momentarily busy or locked
+  (for instance, another thread is mid-write), SimDB does not fail the call and
+  hand you a "database is locked" error to cope with. It waits briefly and
+  retries the whole transaction until it succeeds. Transient contention becomes
+  invisible.
+* *Safe to nest.* Calling `safeTransaction` while already inside one does _not_
+  start a second, illegal nested transaction; the inner call simply joins the
+  outer one, and the commit happens once when the outermost call finishes. This
+  means helper functions can each wrap their work in `safeTransaction` without
+  worrying about who called whom.
+* *Serialized access.* An internal lock guards the connection, so transactions
+  from different threads are applied one at a time rather than colliding.
+
+Together these mean you get batching and correctness without writing any retry
+loops, lock handling, or nesting bookkeeping yourself -- the same
+"easy to use, hard to misuse" bargain SimDB makes everywhere.
+
+=== A note on pipelines
+
+When you move to the concurrent pipeline in <<part-iv,Part IV>>, you will rarely call
+`safeTransaction` by hand on the hot path. SimDB's database pipeline stages
+already batch the rows flowing through them into transactions on the dedicated
+database thread, applying exactly this technique for you. `safeTransaction`
+remains the right tool whenever you are writing to the database directly, outside
+of a pipeline.
+
+[#ch-14-blobs-compression]
+== Blobs, Compression & Serialization
+
+Not everything worth storing is a scalar. Simulations routinely produce
+_bulk_ data -- an array of samples, a packed snapshot of some structure, a run of
+values captured over a window of time. A `blob_t` column stores that kind of
+payload as raw bytes, and it is how SimDB keeps large, structured data compact
+inside an ordinary database file.
+
+=== Storing and reading a vector
+
+The simplest blob is a `std::vector`. Pass one straight into `SQL_VALUES`, and
+SimDB stores its bytes:
+
+[source,cpp]
+----
+std::vector<int> samples = collect_samples();
+
+db_mgr.INSERT(
+    SQL_TABLE("Waveforms"),
+    SQL_COLUMNS("Samples"),
+    SQL_VALUES(samples));
+----
+
+Reading it back is symmetric: `getPropertyBlob<T>` returns a `std::vector<T>` of
+the element type you ask for:
+
+[source,cpp]
+----
+auto record = db_mgr.findRecord("Waveforms", id);
+std::vector<int> samples = record->getPropertyBlob<int>("Samples");
+----
+
+You read with the *same element type* you wrote. A blob is just bytes; SimDB does
+not record what those bytes meant, so asking for the wrong `T` gives you back
+nonsense (or throws, if the byte count does not divide evenly). Store
+trivially-copyable data -- plain values or POD structs -- and never store
+pointers, whose addresses are meaningless once reloaded.
+
+=== Raw bytes with SqlBlob
+
+When your data is not already a vector -- a packed struct, or an existing buffer
+-- describe it with a `simdb::SqlBlob`, which is just a pointer and a byte count:
+
+[source,cpp]
+----
+simdb::SqlBlob blob(samples);   // from a vector...
+db_mgr.INSERT(SQL_TABLE("Waveforms"), SQL_COLUMNS("Samples"), SQL_VALUES(blob));
+----
+
+The same is available on an existing record through `setPropertyBlob`, either
+from a vector or from a raw pointer and length:
+
+[source,cpp]
+----
+record->setPropertyBlob("Samples", other_vector);              // from a vector
+record->setPropertyBlob("Samples", data_ptr, num_bytes);       // from raw bytes
+----
+
+Because large payloads are expensive to copy, you can `std::move` a vector into
+`SQL_VALUES` to hand its buffer to SimDB directly rather than duplicating it:
+
+[source,cpp]
+----
+db_mgr.INSERT(SQL_TABLE("Waveforms"), SQL_COLUMNS("Samples"), SQL_VALUES(std::move(samples)));
+----
+
+=== Compression
+
+For genuinely large payloads, SimDB ships zlib-based helpers so you can shrink
+the data before it lands on disk. Compress into a `std::vector<char>`, store that,
+and decompress on the way back out:
+
+[source,cpp]
+----
+// Writing: compress, then store the compressed bytes.
+std::vector<double> series = collect_series();
+std::vector<char> packed;
+simdb::compressData(series, packed);
+
+db_mgr.INSERT(SQL_TABLE("Series"), SQL_COLUMNS("Data"), SQL_VALUES(packed));
+----
+
+[source,cpp]
+----
+// Reading: pull the compressed bytes back, then decompress into the original type.
+auto record = db_mgr.findRecord("Series", id);
+std::vector<char> packed = record->getPropertyBlob<char>("Data");
+
+std::vector<double> series;
+simdb::decompressData(packed, series);
+----
+
+`compressData` takes an optional level -- `simdb::CompressionLevel::FASTEST`,
+`DEFAULT`, `HIGHEST`, or `DISABLED` -- letting you trade CPU time against file
+size. Compression is entirely your choice: SimDB provides the tools, and you
+decide when a payload is big enough to be worth compressing.
+
+This blob-plus-compression pattern is the foundation for storing high-volume
+simulation data efficiently, and it is exactly what SimDB's higher layers build
+on to keep large captures small.
+
+[#ch-15-inspecting-dumping]
+== Inspecting & Dumping Databases
+
+When something looks wrong -- a table that should have rows but does not, a value
+that is not what you expected -- you want to look inside the database quickly.
+
+=== Reading the database at the command line
+
+Because a SimDB database is a standard SQLite file, you are never locked into C++
+for inspection. The `sqlite3` command-line tool queries it directly:
+
+[source,bash]
+----
+sqlite3 sim.db "SELECT * FROM Instructions LIMIT 10;"
+----
+
+And any language with a SQLite binding -- Python included -- can open the same
+file to analyze or cross-check its contents. This openness is what lets separate
+tooling, such as a visualization front-end, read a database that a C++ simulation
+produced.
+
+=== Third-party SQLite viewers
+
+For interactive browsing -- clicking through tables, running ad-hoc `SELECT`s,
+sorting and filtering by hand -- a graphical SQLite viewer is often the best
+way to get oriented. These are all third-party tools, not part of SimDB, but
+because a SimDB database is a plain SQLite file they open it without any special
+handling. A few worth knowing:
+
+* *DB Browser for SQLite* (also called "DB4S" or `sqlitebrowser`) -- a free,
+  open-source, cross-platform desktop application. A good default: browse and
+  edit tables, run queries, and view schema in one window.
+* *SQLiteStudio* -- free, open-source, and cross-platform, with a tabbed UI for
+  working across several tables and databases at once.
+* *DBeaver* -- a cross-platform database tool (free Community Edition) that
+  handles SQLite alongside many other databases; handy if you already use it for
+  other work.
+* *DataGrip* -- JetBrains' commercial database IDE, with strong query editing and
+  navigation, if you work in that ecosystem.
+* *Datasette* -- an open-source tool that serves a SQLite file as a browsable web
+  application, convenient for read-only exploration and quick sharing.
+
+[TIP]
+====
+If you just want a quick look and prefer not to install anything, the `sqlite3`
+command-line tool shown above is already enough. Reach for a GUI when you want to
+explore an unfamiliar database interactively.
+====
+
+This closes our tour of the standalone SQLite interface. You can now define
+schemas, open databases, write and read records, batch work into transactions,
+store bulk payloads, and inspect the result -- all without a single pipeline. In
+<<part-iv,Part IV>> we add the other half of SimDB: the concurrent pipeline that moves this
+data off the critical path and onto its own threads.

@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/DatabaseThread.hpp"
 #include "simdb/pipeline/Pipeline.hpp"
 #include "simdb/pipeline/PollingThread.hpp"
@@ -37,22 +37,13 @@ public:
     /// \throws DBException if already finalized or if mergeAllAppThreads() was used.
     void addAppForMerging(const App* app)
     {
-        if (!accepting_apps_)
-        {
-            throw DBException("ThreadMerger already finalized merge");
-        }
+        simdb_assert(accepting_apps_, "ThreadMerger already finalized merge");
 
-        if (merge_all_apps_)
-        {
-            throw DBException("Can either call addAppForMerging() or "
-                              "mergeAllAppThreads(), not both");
-        }
+        simdb_assert(!merge_all_apps_, "Can either call addAppForMerging() or "
+                                       "mergeAllAppThreads(), not both");
 
         auto it = std::find(apps_to_merge_.begin(), apps_to_merge_.end(), app);
-        if (it != apps_to_merge_.end())
-        {
-            throw DBException("Already tracking app for thread merging");
-        }
+        simdb_assert(it == apps_to_merge_.end(), "Already tracking app for thread merging");
         apps_to_merge_.push_back(app);
     }
 
@@ -87,11 +78,8 @@ public:
             }
         }
 
-        if (num_db_threads > 1)
-        {
-            throw DBException("Internal error - we ended up creating ")
-                << num_db_threads << " database threads! Only one is allowed.";
-        }
+        simdb_assert(num_db_threads <= 1, "Internal error - we ended up creating "
+                                              << num_db_threads << " database threads! Only one is allowed.");
 
         // Sanity check that every runnable (stage) exists only on one thread.
         std::map<Runnable*, std::vector<PollingThread*>> threads_by_runnable;
@@ -105,11 +93,8 @@ public:
 
         for (const auto& [runnable, threads] : threads_by_runnable)
         {
-            if (threads.size() != 1)
-            {
-                throw DBException("Internal error - assigned pipeline stage to "
-                                  "more than one thread");
-            }
+            simdb_assert(threads.size() == 1, "Internal error - assigned pipeline stage to "
+                                              "more than one thread");
         }
 
         // Reorder stages in polling threads to ensure that the relative
@@ -172,11 +157,8 @@ private:
             }
         }
 
-        if (intervals.size() != 1)
-        {
-            throw DBException("In order to merge threads, all must agree on "
-                              "their polling interval.");
-        }
+        simdb_assert(intervals.size() == 1, "In order to merge threads, all must agree on "
+                                            "their polling interval.");
 
         // Find the maximum number of polling threads needed for all apps.
         size_t max_polling_threads = 0;

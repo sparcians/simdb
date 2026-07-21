@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/sqlite/Constraints.hpp"
 #include "simdb/sqlite/Iterator.hpp"
 #include <iomanip>
@@ -72,10 +73,7 @@ public:
     /// Add a GROUP BY clause. Only one allowed.
     void groupBy(const char* col_name)
     {
-        if (!group_by_column_.empty())
-        {
-            throw DBException("Only one GROUP BY clause allowed");
-        }
+        simdb_assert(group_by_column_.empty(), "Only one GROUP BY clause allowed");
         group_by_column_ = col_name;
     }
 
@@ -410,6 +408,9 @@ public:
     /// Reset the query constraints.
     void resetConstraints() { constraint_clauses_.clear(); }
 
+    /// Non-optional scalar SELECT overloads throw if a column value is SQL NULL.
+    /// Use the std::optional overloads when a column may be unset.
+    ///
     /// SELECT column values and write to the local variable on each iteration
     /// (int32_t).
     ///
@@ -420,11 +421,23 @@ public:
         result_writers_.emplace_back(new ResultWriterInt32(col_name, &user_var));
     }
 
+    /// Use std::optional overload to query record values that may be NULL/unset
+    void select(const char* col_name, std::optional<int32_t>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterInt32<std::optional<int32_t>>(col_name, &user_var));
+    }
+
     /// SELECT column values and write to the local variable on each iteration
     /// (uint32_t).
     void select(const char* col_name, uint32_t& user_var)
     {
         result_writers_.emplace_back(new ResultWriterUInt32(col_name, &user_var));
+    }
+
+    /// Use std::optional overload to query record values that may be NULL/unset
+    void select(const char* col_name, std::optional<uint32_t>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterUInt32<std::optional<uint32_t>>(col_name, &user_var));
     }
 
     /// SELECT column values and write to the local variable on each iteration
@@ -437,6 +450,12 @@ public:
         result_writers_.emplace_back(new ResultWriterInt64(col_name, &user_var));
     }
 
+    /// Use std::optional overload to query record values that may be NULL/unset
+    void select(const char* col_name, std::optional<int64_t>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterInt64<std::optional<int64_t>>(col_name, &user_var));
+    }
+
     /// SELECT column values and write to the local variable on each iteration
     /// (uint64_t).
     ///
@@ -445,6 +464,12 @@ public:
     void select(const char* col_name, uint64_t& user_var)
     {
         result_writers_.emplace_back(new ResultWriterUInt64(col_name, &user_var));
+    }
+
+    /// Use std::optional overload to query record values that may be NULL/unset
+    void select(const char* col_name, std::optional<uint64_t>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterUInt64<std::optional<uint64_t>>(col_name, &user_var));
     }
 
     /// SELECT column values and write to the local variable on each iteration
@@ -457,14 +482,29 @@ public:
         result_writers_.emplace_back(new ResultWriterDouble(col_name, &user_var));
     }
 
+    /// Use std::optional overload to query record values that may be NULL/unset
+    void select(const char* col_name, std::optional<double>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterDouble<std::optional<double>>(col_name, &user_var));
+    }
+
     /// SELECT column values and write to the local variable on each iteration
     /// (string).
     ///
     ///     std::string val;
     ///     query->select("Col", val);
+    ///
+    /// NULL columns are written as the empty string. Use the std::optional overload
+    /// to distinguish SQL NULL from an explicitly stored empty string.
     void select(const char* col_name, std::string& user_var)
     {
         result_writers_.emplace_back(new ResultWriterString(col_name, &user_var));
+    }
+
+    /// Use std::optional overload to distinguish SQL NULL from "".
+    void select(const char* col_name, std::optional<std::string>& user_var)
+    {
+        result_writers_.emplace_back(new ResultWriterString<std::optional<std::string>>(col_name, &user_var));
     }
 
     /// SELECT column values and write to the local variable on each iteration
@@ -472,6 +512,9 @@ public:
     ///
     ///     std::vector<int> val;
     ///     query->select("Col", val);
+    ///
+    /// Note that this does not have a std::optional overload since std::vector::empty()
+    /// makes NULL obvious.
     template <typename T> void select(const char* col_name, std::vector<T>& user_var)
     {
         result_writers_.emplace_back(new ResultWriterBlob<T>(col_name, &user_var));
@@ -514,10 +557,7 @@ public:
 
         const auto cmd = oss.str();
         auto stmt = SQLitePreparedStatement(db_conn_, cmd);
-        if (SQLiteReturnCode(sqlite3_step(stmt) != SQLITE_DONE))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(sqlite3_step(stmt) == SQLITE_DONE, sqlite3_errmsg(db_conn_));
     }
 
     /// Execute the query. Returns an iterator to walk the result set

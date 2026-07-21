@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/sqlite/Query.hpp"
 #include "simdb/sqlite/Transaction.hpp"
 #include "simdb/sqlite/ValueContainer.hpp"
@@ -150,10 +151,7 @@ public:
         for (auto& val : col_vals_)
         {
             auto rc = SQLiteReturnCode(val->bind(stmt, idx++));
-            if (rc)
-            {
-                throw DBException(sqlite3_errmsg(sqlite3_db_handle(stmt)));
-            }
+            simdb_assert(!rc, sqlite3_errmsg(sqlite3_db_handle(stmt)));
         }
     }
 
@@ -267,9 +265,9 @@ private:
                 return oss.str();
             };
 
-            throw DBException("Unexpected sqlite3_step() return code:\n")
-                << "\tActual: " << rc << "\tExpected: " << stringify_ret_codes()
-                << "\tError: " << sqlite3_errmsg(db_conn_);
+            simdb_assert(false, "Unexpected sqlite3_step() return code:\n"
+                                    << "\tActual: " << rc << "\tExpected: " << stringify_ret_codes()
+                                    << "\tError: " << sqlite3_errmsg(db_conn_));
         }
     }
 
@@ -299,10 +297,7 @@ inline T queryPropertyValue(const char* table_name, const char* col_name, const 
     query.addConstraintForInt("Id", Constraints::EQUAL, db_id);
 
     auto result_set = query.getResultSet();
-    if (!result_set.getNextRecord())
-    {
-        throw DBException("Record not found");
-    }
+    simdb_assert(result_set.getNextRecord(), "Record not found");
 
     return val;
 }
@@ -346,10 +341,7 @@ inline void SqlRecord::setPropertyInt32(const char* col_name, const int32_t val)
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_int(stmt, 1, val)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_int(stmt, 1, val)), sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -358,10 +350,8 @@ inline void SqlRecord::setPropertyUInt32(const char* col_name, const uint32_t va
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(val))))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(val))),
+                     sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -370,10 +360,7 @@ inline void SqlRecord::setPropertyInt64(const char* col_name, const int64_t val)
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_int64(stmt, 1, val)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_int64(stmt, 1, val)), sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -383,10 +370,7 @@ inline void SqlRecord::setPropertyUInt64(const char* col_name, const uint64_t va
     transaction_->safeTransaction([&]() {
         auto utf16 = utils::uint64_to_utf16(val);
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_text16(stmt, 1, utf16.data(), 40, 0)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_text16(stmt, 1, utf16.data(), 40, 0)), sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -395,10 +379,7 @@ inline void SqlRecord::setPropertyDouble(const char* col_name, const double val)
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_double(stmt, 1, val)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_double(stmt, 1, val)), sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
 
         return true;
@@ -409,10 +390,7 @@ inline void SqlRecord::setPropertyString(const char* col_name, const std::string
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_text(stmt, 1, val.c_str(), -1, 0)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_text(stmt, 1, val.c_str(), -1, 0)), sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -421,10 +399,8 @@ template <typename T> inline void SqlRecord::setPropertyBlob(const char* col_nam
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_blob(stmt, 1, val.data(), val.size() * sizeof(T), 0)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_blob(stmt, 1, val.data(), val.size() * sizeof(T), 0)),
+                     sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -433,10 +409,7 @@ inline void SqlRecord::setPropertyBlob(const char* col_name, const void* data, c
 {
     transaction_->safeTransaction([&]() {
         auto stmt = createSetPropertyStmt_(col_name);
-        if (SQLiteReturnCode(sqlite3_bind_blob(stmt, 1, data, bytes, 0)))
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!SQLiteReturnCode(sqlite3_bind_blob(stmt, 1, data, bytes, 0)), sqlite3_errmsg(db_conn_));
         stepStatement_(stmt, {SQLITE_DONE});
     });
 }
@@ -449,10 +422,7 @@ inline bool SqlRecord::removeFromTable()
         const auto cmd = oss.str();
 
         auto rc = SQLiteReturnCode(sqlite3_exec(db_conn_, cmd.c_str(), nullptr, nullptr, nullptr));
-        if (rc)
-        {
-            throw DBException(sqlite3_errmsg(db_conn_));
-        }
+        simdb_assert(!rc, sqlite3_errmsg(db_conn_));
     });
 
     return sqlite3_changes(db_conn_) == 1;

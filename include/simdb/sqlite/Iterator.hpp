@@ -2,16 +2,61 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/sqlite/Transaction.hpp"
 #include "simdb/utils/utf16.hpp"
 
 #include <memory>
+#include <optional>
 #include <sqlite3.h>
 #include <string.h>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace simdb {
+
+namespace detail {
+template <typename T> struct unrolled_type
+{
+    using type = T;
+};
+
+template <typename T> struct unrolled_type<std::optional<T>>
+{
+    using type = T;
+};
+
+template <typename T> using unrolled_type_t = typename unrolled_type<T>::type;
+
+template <typename T1, typename T2>
+struct unrolled_is_same
+    : std::conditional_t<std::is_same_v<unrolled_type_t<T1>, unrolled_type_t<T2>>, std::true_type, std::false_type>
+{
+};
+
+template <typename T1, typename T2> inline constexpr bool unrolled_is_same_v = unrolled_is_same<T1, T2>::value;
+
+template <typename T> struct is_optional : std::false_type
+{
+};
+
+template <typename T> struct is_optional<std::optional<T>> : std::true_type
+{
+};
+
+template <typename T> inline constexpr bool is_optional_v = is_optional<T>::value;
+
+inline bool columnIsNull(sqlite3_stmt* stmt, const int idx)
+{
+    return sqlite3_column_type(stmt, idx) == SQLITE_NULL;
+}
+
+inline void requireNonNullColumn(sqlite3_stmt* stmt, const int idx, const std::string& col_name)
+{
+    simdb_assert(!columnIsNull(stmt, idx), "Column '" << col_name << "' is NULL; use std::optional overload");
+}
+} // namespace detail
 
 /*!
  * \class ResultWriterBase
@@ -55,14 +100,16 @@ private:
  * \brief Responsible for writing int32 record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterInt32 : public ResultWriterBase
+template <typename IntT = int32_t> class ResultWriterInt32 : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<IntT, int32_t>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterInt32(const char* col_name, int32_t* user_var) :
+    ResultWriterInt32(const char* col_name, IntT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -72,14 +119,26 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
+        if constexpr (detail::is_optional_v<IntT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
+        }
+
         *user_var_ = sqlite3_column_int(stmt, idx);
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterInt32(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override { return new ResultWriterInt32<IntT>(getColName().c_str(), user_var_); }
 
 private:
-    int32_t* user_var_;
+    IntT* user_var_;
 };
 
 /*!
@@ -88,14 +147,16 @@ private:
  * \brief Responsible for writing uint32 record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterUInt32 : public ResultWriterBase
+template <typename UIntT = uint32_t> class ResultWriterUInt32 : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<UIntT, uint32_t>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterUInt32(const char* col_name, uint32_t* user_var) :
+    ResultWriterUInt32(const char* col_name, UIntT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -105,21 +166,30 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
+        if constexpr (detail::is_optional_v<UIntT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
+        }
+
         sqlite3_int64 tmp = sqlite3_column_int64(stmt, idx);
 
-        if (tmp < 0 || tmp > UINT32_MAX)
-        {
-            throw DBException("Value out of range for uint32_t");
-        }
+        simdb_assert(tmp >= 0 && tmp <= UINT32_MAX, "Value out of range for uint32_t");
 
         *user_var_ = static_cast<uint32_t>(tmp);
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterUInt32(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override { return new ResultWriterUInt32<UIntT>(getColName().c_str(), user_var_); }
 
 private:
-    uint32_t* user_var_;
+    UIntT* user_var_;
 };
 
 /*!
@@ -128,14 +198,16 @@ private:
  * \brief Responsible for writing int64 record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterInt64 : public ResultWriterBase
+template <typename IntT = int64_t> class ResultWriterInt64 : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<IntT, int64_t>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterInt64(const char* col_name, int64_t* user_var) :
+    ResultWriterInt64(const char* col_name, IntT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -145,14 +217,26 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
+        if constexpr (detail::is_optional_v<IntT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
+        }
+
         *user_var_ = sqlite3_column_int64(stmt, idx);
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterInt64(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override { return new ResultWriterInt64<IntT>(getColName().c_str(), user_var_); }
 
 private:
-    int64_t* user_var_;
+    IntT* user_var_;
 };
 
 /*!
@@ -161,14 +245,16 @@ private:
  * \brief Responsible for writing uint64 record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterUInt64 : public ResultWriterBase
+template <typename UIntT = uint64_t> class ResultWriterUInt64 : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<UIntT, uint64_t>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterUInt64(const char* col_name, uint64_t* user_var) :
+    ResultWriterUInt64(const char* col_name, UIntT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -178,6 +264,18 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
+        if constexpr (detail::is_optional_v<UIntT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
+        }
+
         const void* blob = sqlite3_column_text16(stmt, idx);
         if (sqlite3_column_type(stmt, idx) == SQLITE_TEXT && blob != nullptr)
         {
@@ -190,10 +288,10 @@ public:
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterUInt64(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override { return new ResultWriterUInt64<UIntT>(getColName().c_str(), user_var_); }
 
 private:
-    uint64_t* user_var_;
+    UIntT* user_var_;
 };
 
 /*!
@@ -202,14 +300,16 @@ private:
  * \brief Responsible for writing double record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterDouble : public ResultWriterBase
+template <typename DoubleT = double> class ResultWriterDouble : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<DoubleT, double>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterDouble(const char* col_name, double* user_var) :
+    ResultWriterDouble(const char* col_name, DoubleT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -219,14 +319,29 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
+        if constexpr (detail::is_optional_v<DoubleT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else
+        {
+            detail::requireNonNullColumn(stmt, idx, getColName());
+        }
+
         *user_var_ = sqlite3_column_double(stmt, idx);
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterDouble(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override
+    {
+        return new ResultWriterDouble<DoubleT>(getColName().c_str(), user_var_);
+    }
 
 private:
-    double* user_var_;
+    DoubleT* user_var_;
 };
 
 /*!
@@ -235,14 +350,16 @@ private:
  * \brief Responsible for writing text record values to the user's local
  *        variables whenever a query's result set iterator is advanced.
  */
-class ResultWriterString : public ResultWriterBase
+template <typename StringT = std::string> class ResultWriterString : public ResultWriterBase
 {
+    static_assert(detail::unrolled_is_same_v<StringT, std::string>);
+
 public:
     /// \brief Construction
     /// \param col_name Name of the selected column
     /// \param user_var Pointer to the local variable where result values are
     /// written to
-    ResultWriterString(const char* col_name, std::string* user_var) :
+    ResultWriterString(const char* col_name, StringT* user_var) :
         ResultWriterBase(col_name),
         user_var_(user_var)
     {
@@ -252,14 +369,31 @@ public:
     /// and copy it to the user's local variable.
     void writeToUserVar(sqlite3_stmt* stmt, const int idx) const override
     {
-        *user_var_ = (const char*)sqlite3_column_text(stmt, idx);
+        if constexpr (detail::is_optional_v<StringT>)
+        {
+            if (detail::columnIsNull(stmt, idx))
+            {
+                *user_var_ = std::nullopt;
+                return;
+            }
+        } else if (detail::columnIsNull(stmt, idx))
+        {
+            *user_var_ = "";
+            return;
+        }
+
+        const char* text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, idx));
+        *user_var_ = text ? text : "";
     }
 
     /// Return a new copy of this writer.
-    ResultWriterBase* clone() const override { return new ResultWriterString(getColName().c_str(), user_var_); }
+    ResultWriterBase* clone() const override
+    {
+        return new ResultWriterString<StringT>(getColName().c_str(), user_var_);
+    }
 
 private:
-    std::string* user_var_;
+    StringT* user_var_;
 };
 
 /*!
@@ -337,9 +471,9 @@ public:
                 result_writers_[idx]->writeToUserVar(stmt_, (int)idx);
             }
             return true;
-        } else if (rc != SQLITE_DONE)
+        } else
         {
-            throw DBException(sqlite3_errmsg(sqlite3_db_handle(stmt_)));
+            simdb_assert(rc == SQLITE_DONE, sqlite3_errmsg(sqlite3_db_handle(stmt_)));
         }
 
         return false;
@@ -347,13 +481,7 @@ public:
 
     /// Go back to the beginning of the result set if you need
     /// to iterate over it again.
-    void reset()
-    {
-        if (SQLiteReturnCode(sqlite3_reset(stmt_)))
-        {
-            throw DBException(sqlite3_errmsg(sqlite3_db_handle(stmt_)));
-        }
-    }
+    void reset() { simdb_assert(!SQLiteReturnCode(sqlite3_reset(stmt_)), sqlite3_errmsg(sqlite3_db_handle(stmt_))); }
 
 private:
     /// Prepared statement

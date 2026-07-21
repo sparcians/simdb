@@ -5,6 +5,8 @@
 #include "TestSchema.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
+#include <optional>
+
 TEST_INIT;
 
 /// This test covers basic SELECT functionality for SimDB.
@@ -811,6 +813,177 @@ int main()
     EXPECT_TRUE(result_set.getNextRecord());
     EXPECT_EQUAL(customer_first_name, "Jane");
     EXPECT_FALSE(result_set.getNextRecord());
+
+    // Test std::optional SELECT overloads for NULL/unset column values.
+    {
+        simdb::Schema optional_schema;
+        auto& optional_tbl = optional_schema.addTable("OptionalTypes");
+        optional_tbl.addColumn("SomeInt32", dt::int32_t);
+        optional_tbl.addColumn("SomeUInt32", dt::uint32_t);
+        optional_tbl.addColumn("SomeInt64", dt::int64_t);
+        optional_tbl.addColumn("SomeUInt64", dt::uint64_t);
+        optional_tbl.addColumn("SomeDouble", dt::double_t);
+        db_mgr.appendSchema(optional_schema);
+
+        db_mgr.INSERT(SQL_TABLE("OptionalTypes"), SQL_COLUMNS("SomeInt32"), SQL_VALUES((int32_t)42));
+
+        db_mgr.INSERT(
+            SQL_TABLE("OptionalTypes"),
+            SQL_COLUMNS("SomeInt32", "SomeUInt32", "SomeInt64", "SomeUInt64", "SomeDouble"),
+            SQL_VALUES((int32_t)100, (uint32_t)200, (int64_t)300, (uint64_t)400, TEST_DOUBLE_PI));
+
+        db_mgr.INSERT(SQL_TABLE("OptionalTypes"), SQL_COLUMNS("SomeUInt64"), SQL_VALUES((uint64_t)UINT64_MAX));
+
+        auto optional_query = db_mgr.createQuery("OptionalTypes");
+
+        std::optional<int32_t> opt_i32;
+        std::optional<uint32_t> opt_u32;
+        std::optional<int64_t> opt_i64;
+        std::optional<uint64_t> opt_u64;
+        std::optional<double> opt_dbl;
+
+        optional_query->select("SomeInt32", opt_i32);
+        optional_query->select("SomeUInt32", opt_u32);
+        optional_query->select("SomeInt64", opt_i64);
+        optional_query->select("SomeUInt64", opt_u64);
+        optional_query->select("SomeDouble", opt_dbl);
+        optional_query->orderBy("Id", simdb::QueryOrder::ASC);
+
+        EXPECT_EQUAL(optional_query->count(), 3);
+        {
+            auto result_set = optional_query->getResultSet();
+
+            // Row 1: only SomeInt32 is set.
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_TRUE(opt_i32.has_value());
+            EXPECT_EQUAL(opt_i32.value(), 42);
+            EXPECT_FALSE(opt_u32.has_value());
+            EXPECT_FALSE(opt_i64.has_value());
+            EXPECT_FALSE(opt_u64.has_value());
+            EXPECT_FALSE(opt_dbl.has_value());
+
+            // Row 2: all columns set.
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_TRUE(opt_i32.has_value());
+            EXPECT_EQUAL(opt_i32.value(), 100);
+            EXPECT_TRUE(opt_u32.has_value());
+            EXPECT_EQUAL(opt_u32.value(), 200u);
+            EXPECT_TRUE(opt_i64.has_value());
+            EXPECT_EQUAL(opt_i64.value(), 300);
+            EXPECT_TRUE(opt_u64.has_value());
+            EXPECT_EQUAL(opt_u64.value(), 400u);
+            EXPECT_TRUE(opt_dbl.has_value());
+            const double actual_dbl = opt_dbl.value();
+            EXPECT_WITHIN_EPSILON(actual_dbl, TEST_DOUBLE_PI);
+
+            // Row 3: only SomeUInt64 is set (NULL columns must not throw).
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_FALSE(opt_i32.has_value());
+            EXPECT_FALSE(opt_u32.has_value());
+            EXPECT_FALSE(opt_i64.has_value());
+            EXPECT_TRUE(opt_u64.has_value());
+            EXPECT_EQUAL(opt_u64.value(), UINT64_MAX);
+            EXPECT_FALSE(opt_dbl.has_value());
+
+            EXPECT_FALSE(result_set.getNextRecord());
+
+            // Verify reset() reuses optional writers via clone().
+            result_set.reset();
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_TRUE(opt_i32.has_value());
+            EXPECT_EQUAL(opt_i32.value(), 42);
+            EXPECT_FALSE(opt_u64.has_value());
+        }
+
+        // Non-optional SELECT throws on NULL columns instead of coercing to zero.
+        {
+            auto plain_query = db_mgr.createQuery("OptionalTypes");
+            uint32_t u32 = 999;
+            plain_query->select("SomeUInt32", u32);
+            plain_query->addConstraintForInt("SomeInt32", simdb::Constraints::EQUAL, 42);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_THROW(result_set.getNextRecord());
+        }
+        {
+            auto plain_query = db_mgr.createQuery("OptionalTypes");
+            uint64_t u64 = 999;
+            plain_query->select("SomeUInt64", u64);
+            plain_query->addConstraintForInt("SomeInt32", simdb::Constraints::EQUAL, 42);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_THROW(result_set.getNextRecord());
+        }
+        {
+            auto plain_query = db_mgr.createQuery("OptionalTypes");
+            uint32_t u32 = 0;
+            plain_query->select("SomeUInt32", u32);
+            plain_query->addConstraintForInt("SomeInt32", simdb::Constraints::EQUAL, 100);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(u32, 200u);
+            EXPECT_FALSE(result_set.getNextRecord());
+        }
+    }
+
+    // Test std::optional<std::string> to distinguish SQL NULL from "".
+    {
+        simdb::Schema optional_string_schema;
+        optional_string_schema.addTable("OptionalStrings")
+            .addColumn("Label", dt::int32_t)
+            .addColumn("SomeString", dt::string_t);
+        db_mgr.appendSchema(optional_string_schema);
+
+        db_mgr.INSERT(SQL_TABLE("OptionalStrings"), SQL_COLUMNS("Label"), SQL_VALUES((int32_t)1));
+        db_mgr.INSERT(SQL_TABLE("OptionalStrings"), SQL_COLUMNS("Label", "SomeString"), SQL_VALUES((int32_t)2, ""));
+        db_mgr.INSERT(SQL_TABLE("OptionalStrings"), SQL_COLUMNS("Label", "SomeString"), SQL_VALUES((int32_t)3, "hello"));
+
+        int32_t label = 0;
+
+        // NULL columns are written as "" for plain std::string.
+        {
+            auto plain_query = db_mgr.createQuery("OptionalStrings");
+            std::string str;
+            plain_query->select("Label", label);
+            plain_query->select("SomeString", str);
+            plain_query->addConstraintForInt("Label", simdb::Constraints::EQUAL, 1);
+
+            auto result_set = plain_query->getResultSet();
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 1);
+            EXPECT_EQUAL(str, "");
+            EXPECT_FALSE(result_set.getNextRecord());
+        }
+
+        // std::optional distinguishes SQL NULL from "".
+        {
+            auto opt_query = db_mgr.createQuery("OptionalStrings");
+            std::optional<std::string> opt_str;
+            opt_query->select("Label", label);
+            opt_query->select("SomeString", opt_str);
+            opt_query->orderBy("Label", simdb::QueryOrder::ASC);
+
+            EXPECT_EQUAL(opt_query->count(), 3);
+            auto result_set = opt_query->getResultSet();
+
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 1);
+            EXPECT_FALSE(opt_str.has_value());
+
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 2);
+            EXPECT_TRUE(opt_str.has_value());
+            EXPECT_EQUAL(opt_str.value(), "");
+
+            EXPECT_TRUE(result_set.getNextRecord());
+            EXPECT_EQUAL(label, 3);
+            EXPECT_TRUE(opt_str.has_value());
+            EXPECT_EQUAL(opt_str.value(), "hello");
+
+            EXPECT_FALSE(result_set.getNextRecord());
+        }
+    }
 
     REPORT_ERROR;
     return ERROR_CODE;

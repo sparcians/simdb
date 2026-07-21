@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include "simdb/pipeline/Stage.hpp"
 #include "simdb/sqlite/DatabaseManager.hpp"
 
@@ -21,10 +22,7 @@ protected:
     Flusher(const std::vector<Stage*>& stages) :
         stages_(stages)
     {
-        if (stages_.empty())
-        {
-            throw DBException("No stages given to Flusher");
-        }
+        simdb_assert(!stages_.empty(), "No stages given to Flusher");
     }
 
     friend class Pipeline;
@@ -84,11 +82,8 @@ private:
             }
         }
 
-        if (!has_db_stage)
-        {
-            throw DBException("Cannot use FlusherWithTransaction - there are "
-                              "no database stages!");
-        }
+        simdb_assert(has_db_stage, "Cannot use FlusherWithTransaction - there are "
+                                   "no database stages!");
     }
 
     friend class Pipeline;
