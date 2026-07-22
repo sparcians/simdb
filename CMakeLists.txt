@@ -15,6 +15,9 @@ message(STATUS "Using zlib ${ZLIB_VERSION_STRING}")
 
 find_package(Threads REQUIRED)
 
+find_package(Boost REQUIRED)
+message(STATUS "Using Boost ${Boost_VERSION}")
+
 set(SIMDB_BASE ${CMAKE_CURRENT_SOURCE_DIR})
 option(SIMDB_PEDANTIC "Enable build with -Wall -Wextra -Werror" ON)
 
@@ -34,6 +37,7 @@ target_link_libraries(simdb INTERFACE
     SQLite::SQLite3
     ZLIB::ZLIB
     Threads::Threads
+    Boost::headers
 )
 
 include(CTest)
