@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <sqlite3.h>
+#include <type_traits>
 #include <vector>
 
 namespace simdb {
@@ -203,28 +204,41 @@ private:
 
 using ValueContainerBasePtr = std::shared_ptr<ValueContainerBase>;
 
+// Handles any integral type (int/unsigned, char/short/long/long long, size_t, enums'
+// underlying types, etc.) by dispatching on signedness and size rather than requiring
+// an exact fixed-width type match. This is important for portability: e.g. on macOS
+// size_t is 'unsigned long' which is a distinct type from uint64_t ('unsigned long long'),
+// so an exact std::is_same match against uint64_t would fail there even though both are
+// 64-bit. Note bool is excluded and handled by its own overload below.
 template <typename T>
-inline typename std::enable_if<std::is_same_v<T, int32_t>, ValueContainerBasePtr>::type createValueContainer(T val)
+inline typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, ValueContainerBasePtr>::type
+createValueContainer(T val)
 {
-    return ValueContainerBasePtr(new Integral32ValueContainer(val));
+    if constexpr (std::is_signed<T>::value)
+    {
+        if constexpr (sizeof(T) <= sizeof(int32_t))
+        {
+            return ValueContainerBasePtr(new Integral32ValueContainer(static_cast<int32_t>(val)));
+        } else
+        {
+            return ValueContainerBasePtr(new Integral64ValueContainer(static_cast<int64_t>(val)));
+        }
+    } else
+    {
+        if constexpr (sizeof(T) <= sizeof(uint32_t))
+        {
+            return ValueContainerBasePtr(new IntegralU32ValueContainer(static_cast<uint32_t>(val)));
+        } else
+        {
+            return ValueContainerBasePtr(new IntegralU64ValueContainer(static_cast<uint64_t>(val)));
+        }
+    }
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_same_v<T, uint32_t>, ValueContainerBasePtr>::type createValueContainer(T val)
+inline typename std::enable_if<std::is_same<T, bool>::value, ValueContainerBasePtr>::type createValueContainer(T val)
 {
-    return ValueContainerBasePtr(new IntegralU32ValueContainer(val));
-}
-
-template <typename T>
-inline typename std::enable_if<std::is_same_v<T, int64_t>, ValueContainerBasePtr>::type createValueContainer(T val)
-{
-    return ValueContainerBasePtr(new Integral64ValueContainer(val));
-}
-
-template <typename T>
-inline typename std::enable_if<std::is_same_v<T, uint64_t>, ValueContainerBasePtr>::type createValueContainer(T val)
-{
-    return ValueContainerBasePtr(new IntegralU64ValueContainer(val));
+    return ValueContainerBasePtr(new Integral32ValueContainer(val ? 1 : 0));
 }
 
 template <typename T>
