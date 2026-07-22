@@ -43,8 +43,8 @@ target_link_libraries(simdb INTERFACE
 include(CTest)
 add_custom_target(simdb_regress)
 add_custom_command(
-    TARGET simdb_regress 
-    POST_BUILD COMMAND ctest -LE --test-action test)
+    TARGET simdb_regress
+    POST_BUILD COMMAND ctest --output-on-failure)
 
 macro(simdb_test target file)
     project(${target})
