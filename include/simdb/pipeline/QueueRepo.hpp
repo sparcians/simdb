@@ -157,34 +157,31 @@ public:
                          "'. Can only set the stage name once.");
         stage_name_ = stage_name;
 
-        std::vector<std::string> keys_to_delete;
-        for (auto& [key, placeholder] : input_placeholders_)
-        {
-            auto new_key = stage_name_ + "." + key;
-            keys_to_delete.push_back(key);
-            input_placeholders_[new_key] = std::move(placeholder);
-        }
-
-        for (const auto& key : keys_to_delete)
-        {
-            input_placeholders_.erase(key);
-        }
-
-        keys_to_delete.clear();
-        for (auto& [key, placeholder] : output_placeholders_)
-        {
-            auto new_key = stage_name_ + "." + key;
-            keys_to_delete.push_back(key);
-            output_placeholders_[new_key] = std::move(placeholder);
-        }
-
-        for (const auto& key : keys_to_delete)
-        {
-            output_placeholders_.erase(key);
-        }
+        rekeyPlaceholders_(input_placeholders_);
+        rekeyPlaceholders_(output_placeholders_);
     }
 
 private:
+    /// \brief Rekey every placeholder to "stage_name.port_name" without invalidating the
+    ///        map while iterating. We extract each node, mutate its key in place, and
+    ///        reinsert it, which moves the node (and its unique_ptr) rather than copying.
+    void rekeyPlaceholders_(std::unordered_map<std::string, std::unique_ptr<QueuePlaceholder>>& placeholders)
+    {
+        std::vector<std::string> old_keys;
+        old_keys.reserve(placeholders.size());
+        for (const auto& [key, placeholder] : placeholders)
+        {
+            old_keys.push_back(key);
+        }
+
+        for (const auto& old_key : old_keys)
+        {
+            auto node = placeholders.extract(old_key);
+            node.key() = stage_name_ + "." + old_key;
+            placeholders.insert(std::move(node));
+        }
+    }
+
     std::unordered_map<std::string, std::unique_ptr<QueuePlaceholder>> input_placeholders_;
     std::unordered_map<std::string, std::unique_ptr<QueuePlaceholder>> output_placeholders_;
     std::string stage_name_;
