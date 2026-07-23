@@ -171,6 +171,7 @@ private:
         old_keys.reserve(placeholders.size());
         for (const auto& [key, placeholder] : placeholders)
         {
+            (void)placeholder;
             old_keys.push_back(key);
         }
 
