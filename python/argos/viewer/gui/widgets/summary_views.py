@@ -237,7 +237,7 @@ class SummaryGrid(wx.Panel):
                     summary_handler = SummaryGrid.ContainerSummary(self, frame, capacity)
                 else:
                     dtype_name = frame.dtype_inspector.GetDataTypeForCollectionID(leaf_cid)
-                    if dtype_name in ('char', 'unsigned char', 'short', 'unsigned short', 'int', 'unsigned int', 'long', 'unsigned long'):
+                    if dtype_name in ('char', 'unsigned char', 'short', 'unsigned short', 'int', 'unsigned int', 'long', 'unsigned long', 'long long', 'unsigned long long'):
                         summary_handler = SummaryGrid.IntegerSummary(self, frame)
                     elif isinstance(frame.dtype_inspector.GetDeserializer(dtype_name), StructDeserializer):
                         summary_handler = SummaryGrid.StructSummary(self, frame, summary_views)
