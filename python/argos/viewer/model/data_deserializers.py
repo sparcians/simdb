@@ -45,18 +45,20 @@ def _make_simple_output_formatter(dtype_name, special_formatter):
 
 
 UNPACK_FORMATS = {
-    'char':           'b',
-    'signed char':    'b',
-    'unsigned char':  'B',
-    'short':          'h',
-    'unsigned short': 'H',
-    'int':            'i',
-    'unsigned int':   'I',
-    'long':           'q',
-    'unsigned long':  'Q',
-    'double':         'd',
-    'float':          'f',
-    'bool':           'B'
+    'char':               'b',
+    'signed char':        'b',
+    'unsigned char':      'B',
+    'short':              'h',
+    'unsigned short':     'H',
+    'int':                'i',
+    'unsigned int':       'I',
+    'long':               'q',
+    'unsigned long':      'Q',
+    'long long':          'q',
+    'unsigned long long': 'Q',
+    'double':             'd',
+    'float':              'f',
+    'bool':               'B'
 }
 
 # Helper class used to minimize the number of byte array copies
@@ -167,33 +169,37 @@ def CreateDeserializer(inspector, dtype_name, tiny_strings=None):
 # This class deserializes non-enum POD types.
 class SimpleDeserializer:
     CONVERTERS = {
-        'char':           lambda x: str(x),
-        'signed char':    lambda x: int(x),
-        'unsigned char':  lambda x: int(x),
-        'short':          lambda x: int(x),
-        'unsigned short': lambda x: int(x),
-        'int':            lambda x: int(x),
-        'unsigned int':   lambda x: int(x),
-        'long':           lambda x: int(x),
-        'unsigned long':  lambda x: int(x),
-        'double':         lambda x: float(x),
-        'float':          lambda x: float(x),
-        'bool':           lambda x: bool(x)
+        'char':               lambda x: str(x),
+        'signed char':        lambda x: int(x),
+        'unsigned char':      lambda x: int(x),
+        'short':              lambda x: int(x),
+        'unsigned short':     lambda x: int(x),
+        'int':                lambda x: int(x),
+        'unsigned int':       lambda x: int(x),
+        'long':               lambda x: int(x),
+        'unsigned long':      lambda x: int(x),
+        'long long':          lambda x: int(x),
+        'unsigned long long': lambda x: int(x),
+        'double':             lambda x: float(x),
+        'float':              lambda x: float(x),
+        'bool':               lambda x: bool(x)
     }
 
     NUM_BYTES = {
-        'char':           1,
-        'signed char':    1,
-        'unsigned char':  1,
-        'short':          2,
-        'unsigned short': 2,
-        'int':            4,
-        'unsigned int':   4,
-        'long':           8,
-        'unsigned long':  8,
-        'double':         8,
-        'float':          4,
-        'bool':           1
+        'char':               1,
+        'signed char':        1,
+        'unsigned char':      1,
+        'short':              2,
+        'unsigned short':     2,
+        'int':                4,
+        'unsigned int':       4,
+        'long':               8,
+        'unsigned long':      8,
+        'long long':          8,
+        'unsigned long long': 8,
+        'double':             8,
+        'float':              4,
+        'bool':               1
     }
 
     def __init__(self, dtype_name, special_formatter=""):
