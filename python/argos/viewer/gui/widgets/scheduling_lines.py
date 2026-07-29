@@ -398,6 +398,7 @@ class SchedulingLinesWidget(wx.Panel):
                 return ' '.join(parts)
 
             labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
+            labels = [label.replace('\t', ' ') for label in labels]
             labels_by_dtype = {}
             for row, dtype in self._struct_dtypes_by_row.items():
                 if dtype not in labels_by_dtype:
