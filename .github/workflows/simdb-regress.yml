@@ -97,3 +97,64 @@ jobs:
         with:
           name: ErrorLogs-${{matrix.BUILD_TYPE}}-${{matrix.COMPILER}}
           path: ${{matrix.BUILD_TYPE}}/
+
+  build_test_job_macos:
+    strategy:
+      matrix:
+        os: [macos-15]
+        BUILD_TYPE: [Debug,Release]
+        COMPILER: [clang]
+
+    name: Regress SimDB on MacOS (${{ matrix.BUILD_TYPE }}-${{matrix.COMPILER}})
+    runs-on: ${{ matrix.os }}
+
+    # Set up a global environment variable for build scripts
+    env:
+      SIMDB_BUILD_TYPE: ${{ matrix.BUILD_TYPE }}
+      COMPILER:         ${{ matrix.COMPILER }}
+      CCACHE_DIR:       /Users/runner/.ccache
+
+    steps:
+      - name: Setup Git Identity
+        run: |
+          git config --global user.email "runner@github.com"
+          git config --global user.name "Github Runner"
+
+      # Get SimDB
+      - name: Clone SimDB
+        uses: actions/checkout@v4
+
+      # Install missing packages to make everything build
+      - name: Install packages needed for SimDB
+        run: |
+          brew update
+          brew install boost sqlite3 zlib
+
+      # Setup CCache to cache builds
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.BUILD_TYPE }}-${{ matrix.COMPILER }}-ccache-${{ github.ref_name }}
+          restore-keys: |
+            ${{ matrix.os }}-${{ matrix.BUILD_TYPE }}-${{ matrix.COMPILER }}-ccache-main
+            ${{ matrix.os }}-${{ matrix.BUILD_TYPE }}-${{ matrix.COMPILER }}-ccache
+
+      # Setup fix CCache directory permissions
+      - name: ccache macOS permission fix
+        run: ./.github/actions/macos_perms.sh
+
+      # Invoke CMake
+      - name: CMake
+        run: ./.github/actions/cmake.sh
+
+      # Regress
+      - name: Regress
+        run: ./.github/actions/regress.sh
+
+      # Save error logs, etc
+      - name: Save artifacts
+        if: failure()
+        uses: actions/upload-artifact@main
+        with:
+          name: ErrorLogs-macos-${{matrix.BUILD_TYPE}}-${{matrix.COMPILER}}
+          path: ${{matrix.BUILD_TYPE}}/

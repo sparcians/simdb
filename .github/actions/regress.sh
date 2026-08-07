@@ -10,7 +10,8 @@ echo "PWD:" `pwd`
 
 cd ${GITHUB_WORKSPACE}
 cd $SIMDB_BUILD_TYPE
-make -j$(nproc --all) simdb_regress
+NUM_CORES=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+make -j${NUM_CORES} simdb_regress
 REGRESS_SIMDB=$?
 if [ ${REGRESS_SIMDB} -ne 0 ]; then
     echo "ERROR: regress of SimDB FAILED!!!"
