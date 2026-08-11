@@ -83,7 +83,7 @@ install(
 
 install(
     DIRECTORY include/simdb
-    DESTINATION include/simdb
+    DESTINATION include
 )
 
 install(TARGETS simdb
