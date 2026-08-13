@@ -120,8 +120,7 @@ public:
         // still nearly 70% smaller than legacy collection.
         // See GitHub issue #198.
         std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
-                  << "). Defaulting to 1. This is a temporary workaround while a bug fix is implemented."
-                  << std::endl;
+                  << "). Defaulting to 1. This is a temporary workaround while a bug fix is implemented." << std::endl;
     }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
