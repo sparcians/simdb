@@ -109,6 +109,19 @@ public:
     void setHeartbeat(size_t heartbeat)
     {
         simdb_assert(heartbeat != 0, "Cannot use 0 for Argos collector heartbeat");
+#ifdef __APPLE__
+        if (heartbeat > 1)
+        {
+            // TODO cnyce: Fix byte alignment issue seen only on Mac. Disabling the checkpointers
+            // on Mac results in a DB size roughly 30% larger than using the default heartbeat of 10.
+            // But even the larger DB is still nearly 70% smaller than legacy collection.
+            std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
+                      << "). Defaulting to 1. Heartbeat values are honored on Linux only."
+                      << std::endl;
+            heartbeat_ = 1;
+            return;
+        }
+#endif
         heartbeat_ = heartbeat;
     }
 
@@ -433,8 +446,8 @@ private:
                 {
                     auto cid = contig.cid;
                     auto data = std::move(contig.contig_bin_bytes);
-                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                     updateContainerMaxSize_(cid, detail::getContainerSize(data));
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                 }
 
                 auto sparses = ledger->releaseSparseEntries();
@@ -442,8 +455,8 @@ private:
                 {
                     auto cid = sparse.cid;
                     auto data = std::move(sparse.sparse_bin_bytes);
-                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                     updateContainerMaxSize_(cid, detail::getContainerSize(data));
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                 }
 
                 for (const auto cid : ledger->getClosedCIDs())

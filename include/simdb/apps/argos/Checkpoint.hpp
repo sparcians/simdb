@@ -51,7 +51,14 @@ public:
     uint64_t getWindowID() const { return window_id_; }
 
     /// Drops the link to the previous checkpoint.
-    void detachPrev() { prev_.reset(); }
+    void detachPrev()
+    {
+        if (prev_)
+        {
+            prev_->next_ = nullptr;
+        }
+        prev_.reset();
+    }
 
     /// Returns the shared_ptr to the previous checkpoint, if any.
     const std::shared_ptr<CollectableCheckpoint>& getPrevShared() const { return prev_; }
