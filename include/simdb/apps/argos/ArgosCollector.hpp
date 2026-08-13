@@ -17,7 +17,12 @@
 
 namespace simdb::argos {
 
-inline constexpr size_t DEFAULT_HEARTBEAT = 10;
+// TODO cnyce: Fix byte alignment issue surfaced on Mac. While Linux doesn't complain,
+// we have a potential wrong answer bug. Disabling the checkpointers results in a DB size
+// roughly 30% larger than using the default heartbeat of 10. But even the larger DB is
+// still nearly 70% smaller than legacy collection.
+// See GitHub issue #198.
+inline constexpr size_t DEFAULT_HEARTBEAT = 1;
 
 //! \class ArgosCollector
 //! \brief Main entry point into the Argos collection system.
@@ -109,7 +114,18 @@ public:
     void setHeartbeat(size_t heartbeat)
     {
         simdb_assert(heartbeat != 0, "Cannot use 0 for Argos collector heartbeat");
-        heartbeat_ = heartbeat;
+
+        if (heartbeat > 1)
+        {
+            // TODO cnyce: Fix byte alignment issue surfaced on Mac. While Linux doesn't complain,
+            // we have a potential wrong answer bug. Disabling the checkpointers results in a DB size
+            // roughly 30% larger than using the default heartbeat of 10. But even the larger DB is
+            // still nearly 70% smaller than legacy collection.
+            // See GitHub issue #198.
+            std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
+                      << "). Defaulting to 1. This is a temporary workaround while a bug fix is implemented.";
+            std::cout << std::endl;
+        }
     }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
@@ -433,8 +449,8 @@ private:
                 {
                     auto cid = contig.cid;
                     auto data = std::move(contig.contig_bin_bytes);
-                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                     updateContainerMaxSize_(cid, detail::getContainerSize(data));
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                 }
 
                 auto sparses = ledger->releaseSparseEntries();
@@ -442,8 +458,8 @@ private:
                 {
                     auto cid = sparse.cid;
                     auto data = std::move(sparse.sparse_bin_bytes);
-                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                     updateContainerMaxSize_(cid, detail::getContainerSize(data));
+                    checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
                 }
 
                 for (const auto cid : ledger->getClosedCIDs())
