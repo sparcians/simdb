@@ -17,7 +17,12 @@
 
 namespace simdb::argos {
 
-inline constexpr size_t DEFAULT_HEARTBEAT = 10;
+// TODO cnyce: Fix byte alignment issue surfaced on Mac. While Linux doesn't complain,
+// we have a potential wrong answer bug. Disabling the checkpointers results in a DB size
+// roughly 30% larger than using the default heartbeat of 10. But even the larger DB is
+// still nearly 70% smaller than legacy collection.
+// See GitHub issue #198.
+inline constexpr size_t DEFAULT_HEARTBEAT = 1;
 
 //! \class ArgosCollector
 //! \brief Main entry point into the Argos collection system.
@@ -109,20 +114,14 @@ public:
     void setHeartbeat(size_t heartbeat)
     {
         simdb_assert(heartbeat != 0, "Cannot use 0 for Argos collector heartbeat");
-#ifdef __APPLE__
-        if (heartbeat > 1)
-        {
-            // TODO cnyce: Fix byte alignment issue seen only on Mac. Disabling the checkpointers
-            // on Mac results in a DB size roughly 30% larger than using the default heartbeat of 10.
-            // But even the larger DB is still nearly 70% smaller than legacy collection.
-            // See GitHub issue #198.
-            std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
-                      << "). Defaulting to 1. Heartbeat values are honored on Linux only." << std::endl;
-            heartbeat_ = 1;
-            return;
-        }
-#endif
-        heartbeat_ = heartbeat;
+        // TODO cnyce: Fix byte alignment issue surfaced on Mac. While Linux doesn't complain,
+        // we have a potential wrong answer bug. Disabling the checkpointers results in a DB size
+        // roughly 30% larger than using the default heartbeat of 10. But even the larger DB is
+        // still nearly 70% smaller than legacy collection.
+        // See GitHub issue #198.
+        std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
+                  << "). Defaulting to 1. This is a temporary workaround while a bug fix is implemented."
+                  << std::endl;
     }
 
     void addClock(const std::string& clk_name, size_t period) { addClock(clk_name, period, 0, 0); }
