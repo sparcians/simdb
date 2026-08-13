@@ -116,8 +116,7 @@ public:
             // on Mac results in a DB size roughly 30% larger than using the default heartbeat of 10.
             // But even the larger DB is still nearly 70% smaller than legacy collection.
             std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
-                      << "). Defaulting to 1. Heartbeat values are honored on Linux only."
-                      << std::endl;
+                      << "). Defaulting to 1. Heartbeat values are honored on Linux only." << std::endl;
             heartbeat_ = 1;
             return;
         }
