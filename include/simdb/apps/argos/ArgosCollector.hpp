@@ -115,6 +115,7 @@ public:
             // TODO cnyce: Fix byte alignment issue seen only on Mac. Disabling the checkpointers
             // on Mac results in a DB size roughly 30% larger than using the default heartbeat of 10.
             // But even the larger DB is still nearly 70% smaller than legacy collection.
+            // See GitHub issue #198.
             std::cout << "Ignoring Argos collection heartbeat (" << heartbeat
                       << "). Defaulting to 1. Heartbeat values are honored on Linux only." << std::endl;
             heartbeat_ = 1;
