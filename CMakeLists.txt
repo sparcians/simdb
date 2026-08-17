@@ -86,6 +86,18 @@ install(
     DESTINATION include
 )
 
+install(
+    DIRECTORY python/argos/
+    DESTINATION bin/argos_runtime
+    FILES_MATCHING
+    PATTERN "*.py"
+)
+
+install(
+    PROGRAMS python/argos/argos
+    DESTINATION bin
+)
+
 install(TARGETS simdb
     EXPORT SimDBTargets
 )
