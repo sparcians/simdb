@@ -1,18 +1,67 @@
 import wx
 from functools import partial
 
+class ClockPopup(wx.ComboPopup):
+    def __init__(self, choices, selection_callback):
+        super(ClockPopup, self).__init__()
+        self.choices = choices
+        self.selection_callback = selection_callback
+        self.list_box = None
+
+    def Init(self):
+        self.list_box = None
+
+    def Create(self, parent):
+        self.list_box = wx.ListBox(parent, choices=self.choices, style=wx.LB_SINGLE)
+        self.list_box.Bind(wx.EVT_LISTBOX, self.__OnSelection)
+        return True
+
+    def GetControl(self):
+        return self.list_box
+
+    def GetStringValue(self):
+        selection = self.list_box.GetSelection()
+        return self.list_box.GetString(selection) if selection != wx.NOT_FOUND else ''
+
+    def SetStringValue(self, value):
+        selection = self.list_box.FindString(value)
+        if selection != wx.NOT_FOUND:
+            self.list_box.SetSelection(selection)
+
+    def __OnSelection(self, event):
+        self.GetComboCtrl().SetValue(self.GetStringValue())
+        self.GetComboCtrl().HidePopup()
+        self.selection_callback()
+
+
 class PlaybackBar(wx.Panel):
     def __init__(self, frame):
         super(PlaybackBar, self).__init__(frame, size=(frame.GetSize().width, -1))
         self.SetBackgroundColour('light gray')
         widget_renderer = self.frame.widget_renderer
 
-        self.clock_combobox = wx.ComboBox(self, choices=['<any clk edge>'], value='<any clk edge>', style=wx.CB_READONLY)
+        cursor = frame.db.cursor()
+        cursor.execute('SELECT Name,Period FROM Clocks')
+        self.clock_periods = {r[0]:r[1] for r in cursor.fetchall()}
+        clk_names = list(self.clock_periods.keys())
+        clk_names.sort()
+        clk_names.insert(0, '<any clk edge>')
+
+        self.clock_combobox = wx.ComboCtrl(self, value='<any clk edge>', style=wx.CB_READONLY)
+        self._selected_clock = '<any clk edge>'
+        clock_popup = ClockPopup(clk_names, self.__OnClockSelected)
+        self.clock_combobox.SetPopupControl(clock_popup)
+        self.clock_combobox.SetPopupMaxHeight(10 * self.clock_combobox.GetCharHeight() + 8)
+        text_dc = wx.ClientDC(self.clock_combobox)
+        text_dc.SetFont(self.clock_combobox.GetFont())
+        choice_width = max(text_dc.GetTextExtent(choice)[0] for choice in clk_names)
+        self.clock_combobox.SetMinSize((choice_width + 40, -1))
         self.current_cyc_text = wx.StaticText(self, label='cycle:{}'.format(widget_renderer.tick))
         font = self.current_cyc_text.GetFont()
         font.SetWeight(wx.FONTWEIGHT_BOLD)
         self.current_cyc_text.SetFont(font)
         self.current_tick_text = wx.StaticText(self, label='tick:{}'.format(widget_renderer.tick))
+        self.__UpdateTimeLabels(widget_renderer.tick)
 
         self.minus_30_button = wx.Button(self, label='-30')
         self.minus_10_button = wx.Button(self, label='-10')
@@ -36,11 +85,11 @@ class PlaybackBar(wx.Panel):
 
         self.cyc_slider.Bind(wx.EVT_SCROLL, self.__OnCycSlider)
 
-        self.cyc_start_text = wx.StaticText(self, label='cyc-start:{}'.format(widget_renderer.start_tick))
+        self.cyc_start_text = wx.StaticText(self, label='start-tick:{}'.format(widget_renderer.start_tick))
         self.cyc_start_text.SetForegroundColour(wx.BLUE)
         self.cyc_start_text.Bind(wx.EVT_LEFT_DOWN, self.__OnCycStart)
 
-        self.cyc_end_text = wx.StaticText(self, label='cyc-end:{}'.format(widget_renderer.end_tick))
+        self.cyc_end_text = wx.StaticText(self, label='end-tick:{}'.format(widget_renderer.end_tick))
         self.cyc_end_text.SetForegroundColour(wx.BLUE)
         self.cyc_end_text.Bind(wx.EVT_LEFT_DOWN, self.__OnCycEnd)
 
@@ -83,8 +132,44 @@ class PlaybackBar(wx.Panel):
 
     def SyncControls(self, tick):
         self.cyc_slider.SetValue(tick)
+        self.__UpdateTimeLabels(tick)
+
+    def __UpdateTimeLabels(self, tick):
+        selected_clock = self.clock_combobox.GetValue()
+        period = self.clock_periods.get(selected_clock)
+        if period:
+            self.current_cyc_text.SetLabel('cycle:{}'.format(int(tick) // int(period)))
+            self.current_tick_text.Show()
+        else:
+            self.current_cyc_text.SetLabel('tick:{}'.format(tick))
+            self.current_tick_text.Hide()
         self.current_tick_text.SetLabel('tick:{}'.format(tick))
-        self.current_cyc_text.SetLabel('tick:{}'.format(tick))
+        self.Layout()
+
+    def __UpdateRangeLabels(self):
+        label_prefix = 'cycle' if self.clock_periods.get(self.clock_combobox.GetValue()) else 'tick'
+        self.cyc_start_text.SetLabel('start-{}:{}'.format(label_prefix, self.frame.widget_renderer.start_tick))
+        self.cyc_end_text.SetLabel('end-{}:{}'.format(label_prefix, self.frame.widget_renderer.end_tick))
+
+    def __OnClockSelected(self):
+        selected_clock = self.clock_combobox.GetValue()
+        if selected_clock == '<any clk edge>' and self.frame.inspector.HasSchedulingLinesWidget():
+            wx.MessageBox('Scheduling Lines widget requires a chosen clock', 'Error', wx.OK | wx.ICON_ERROR)
+            self.clock_combobox.SetValue(self._selected_clock)
+            return
+
+        self._selected_clock = selected_clock
+        widget_renderer = self.frame.widget_renderer
+        current_tick = widget_renderer.tick
+        period = self.clock_periods.get(selected_clock)
+        if period:
+            period = int(period)
+            lower_edge, remainder = divmod(int(current_tick), period)
+            if remainder * 2 >= period:
+                lower_edge += 1
+            current_tick = lower_edge * period
+        self.__UpdateRangeLabels()
+        widget_renderer.GoToTick(current_tick)
 
     def GetCurrentViewSettings(self):
         settings = {}
@@ -94,8 +179,18 @@ class PlaybackBar(wx.Panel):
     def ApplyViewSettings(self, settings, update_widgets=True):
         selected_clock = settings['selected_clock']
         self.clock_combobox.SetValue(selected_clock)
-        if update_widgets:
-            self.frame.inspector.RefreshWidgetsOnAllTabs()
+        self._selected_clock = selected_clock
+        widget_renderer = self.frame.widget_renderer
+        current_tick = widget_renderer.tick
+        period = self.clock_periods.get(selected_clock)
+        if period:
+            period = int(period)
+            lower_edge, remainder = divmod(int(current_tick), period)
+            if remainder * 2 >= period:
+                lower_edge += 1
+            current_tick = lower_edge * period
+        self.__UpdateRangeLabels()
+        widget_renderer.GoToTick(current_tick, update_widgets)
 
     def GetCurrentUserSettings(self):
         settings = {}
@@ -116,7 +211,9 @@ class PlaybackBar(wx.Panel):
     def __OnStep(self, event, step):
         widget_renderer = self.frame.widget_renderer
         cur_tick = widget_renderer.tick
-        widget_renderer.GoToTick(cur_tick + step)
+        period = self.clock_periods.get(self.clock_combobox.GetValue())
+        step_ticks = step * int(period) if period else step
+        widget_renderer.GoToTick(cur_tick + step_ticks)
 
     def __OnCycSlider(self, event):
         widget_renderer = self.frame.widget_renderer

@@ -4,7 +4,6 @@ from viewer.model.data_deserializers import StructDeserializer
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
 from viewer.gui.widgets.scheduling_lines import CaptionManager
-from viewer.gui.widgets.utilization import FormatUtilizPct
 
 class SummaryViews(wx.Panel):
     DEFAULT_SHOW_FULL_PATHS = True
@@ -328,7 +327,7 @@ class SummaryGrid(wx.Panel):
         def UpdateValue(self, value):
             if value:
                 size = len(value)
-                pct = f'{FormatUtilizPct(size / self.capacity)}%'
+                pct = f"{100.0 * size / self.capacity:.1f}%"
                 label = f'{pct} full ({size}/{self.capacity})'
                 self.SetLabel(label)
             else:
