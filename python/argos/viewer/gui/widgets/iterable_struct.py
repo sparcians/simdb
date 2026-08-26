@@ -1,6 +1,7 @@
 import wx, wx.grid
 from collections.abc import Iterable
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
+from viewer.gui.widgets.utilization import FormatUtilizPct
 
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
@@ -178,9 +179,10 @@ class UtilizElement(wx.StaticText):
         self.SetFont(font)
 
     def UpdateUtilizPct(self, utiliz_pct):
-        self.SetLabel('{}%'.format(round(utiliz_pct * 100)))
+        formatted_pct = FormatUtilizPct(utiliz_pct)
+        self.SetLabel('{}%'.format(formatted_pct))
         color = self.frame.widget_renderer.utiliz_handler.ConvertUtilizPctToColor(utiliz_pct)
         self.SetBackgroundColour(color)
 
-        tooltip = 'Utilization: {}% ({}/{} bins filled)'.format(round(utiliz_pct * 100), int(utiliz_pct * self.capacity), self.capacity)
+        tooltip = 'Utilization: {}% ({}/{} bins filled)'.format(formatted_pct, int(utiliz_pct * self.capacity), self.capacity)
         self.SetToolTip(tooltip)

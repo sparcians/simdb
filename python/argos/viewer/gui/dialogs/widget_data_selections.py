@@ -572,14 +572,14 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
 
     def _BuildSettingsArea(self, sizer):
         assert self._num_ticks_before >= 1 and self._num_ticks_before <= 25
-        info_ticks_before = wx.StaticText(self, label='Num ticks before current tick:')
+        info_ticks_before = wx.StaticText(self, label='Num samples before current tick:')
         self._label_ticks_before = wx.StaticText(self, label=f'({self._num_ticks_before})')
         self._slider_ticks_before = wx.Slider(
             self, value=self._num_ticks_before, minValue=1, maxValue=25)
         self._slider_ticks_before.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
 
         assert self._num_ticks_after >= 1 and self._num_ticks_after <= 25
-        info_ticks_after = wx.StaticText(self, label='Num ticks after current tick:')
+        info_ticks_after = wx.StaticText(self, label='Num samples after current tick:')
         self._label_ticks_after = wx.StaticText(self, label=f'({self._num_ticks_after})')
         self._slider_ticks_after = wx.Slider(
             self, value=self._num_ticks_after, minValue=1, maxValue=25)

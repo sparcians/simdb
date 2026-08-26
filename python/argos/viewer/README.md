@@ -19,7 +19,8 @@ python argos.py --database path/to/collected.db --view-file layout.avf
 
 - `--database` (required): the Argos-collected database to open.
 - `--view-file` (optional): an Argos View File (`*.avf`) describing a saved
-  layout. If omitted, the viewer restores your last-known view when one exists.
+  layout. If supplied, this view is always used and the database's last-known
+  view is ignored.
 
 ---
 
@@ -74,9 +75,11 @@ cell horizontally or vertically, or maximize it to fill the canvas.
 A **view file** captures your layout so you can reopen it later or share it: the
 tabs, how each canvas is split, which widgets are placed where, the columns and
 colorization chosen for each object, and the selected clock. Save with
-`File > Save View`; the window title marks unsaved changes. The viewer also
-remembers your last layout and reopens it automatically the next time you launch
-without a `--view-file`.
+`File > Save View`; the window title marks unsaved changes. When closing an
+unnamed dirty view, Argos asks whether to save it as an AVF file, save it into
+the database, discard it, or cancel closing. A view saved into the database is
+restored automatically the next time that database is opened without a
+`--view-file`.
 
 The playback position (the tick you're currently viewing) is treated as a local,
 per-session preference and is not stored in the shared view file.

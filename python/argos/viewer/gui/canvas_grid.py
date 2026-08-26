@@ -340,6 +340,10 @@ class WidgetContainer(wx.Panel):
         self.SetWidget(widget)
 
     def LaunchSchedulingLinesViewer(self):
+        if self.frame.playback_bar.clock_combobox.GetValue() == '<any clk edge>':
+            wx.MessageBox('Select a clock domain before using Scheduling Lines', 'Error', wx.OK | wx.ICON_ERROR)
+            return
+
         if isinstance(self._widget, SchedulingLinesWidget):
             elem_paths = self._widget.caption_mgr.GetAllMatchingElemPaths()
             num_ticks_before = self._widget.num_ticks_before

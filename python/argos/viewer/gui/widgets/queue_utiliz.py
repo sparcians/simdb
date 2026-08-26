@@ -2,6 +2,7 @@ import wx, copy
 from viewer.gui.dialogs.widget_data_selections import QueueUtilizEditDlg
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.scheduling_lines import CaptionManager
+from viewer.gui.widgets.utilization import FormatUtilizPct
 
 class QueueUtilizWidget(wx.Panel):
     DEFAULT_SHOW_FULL_PATHS = False
@@ -158,7 +159,7 @@ class UtilizBar(wx.Panel):
         self.SetSizer(sizer)
 
     def UpdateUtilizPct(self, utiliz_pct):
-        self.static_text.SetLabel('{}%'.format(round(utiliz_pct * 100)))
+        self.static_text.SetLabel('{}%'.format(FormatUtilizPct(utiliz_pct)))
         color = self.frame.widget_renderer.utiliz_handler.ConvertUtilizPctToColor(utiliz_pct)
         self.SetBackgroundColour(color)
 

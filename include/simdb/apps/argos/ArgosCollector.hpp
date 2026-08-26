@@ -518,7 +518,19 @@ private:
         // Set ShowInUI=1 for all the collectables that actually collected data
         void writeShowInUI_(DatabaseManager* db_mgr) const
         {
-            const std::vector<int> valid_cids(cids_with_data_.begin(), cids_with_data_.end());
+            std::vector<int> valid_cids;
+            for (auto cid : cids_with_data_)
+            {
+                if (auto it = container_max_sizes_.find(cid); it != container_max_sizes_.end())
+                {
+                    if (it->second == 0)
+                    {
+                        continue;
+                    }
+                }
+                valid_cids.push_back(cid);
+            }
+
             if (!valid_cids.empty())
             {
                 std::ostringstream oss;

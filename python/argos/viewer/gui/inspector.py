@@ -3,6 +3,7 @@ import wx
 import wx.aui
 from viewer.gui.canvas_grid import CanvasGrid
 from viewer.gui.logs import CollectionLogs
+from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
 from viewer.gui.view_settings import DirtyReasons
 from contextlib import contextmanager
 from functools import partial
@@ -51,6 +52,13 @@ class DataInspector(wx.aui.AuiNotebook):
             return None
 
         return self.tabs[tab_idx].GetWidgetContainers()
+
+    def HasSchedulingLinesWidget(self):
+        return any(
+            isinstance(container.GetWidget(), SchedulingLinesWidget)
+            for tab in self.tabs
+            for container in tab.GetWidgetContainers()
+        )
     
     def ResetCurrentTab(self):
         tab_idx = self.__SelectedTabIndex()
