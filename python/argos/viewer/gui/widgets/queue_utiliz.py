@@ -167,6 +167,8 @@ class UtilizBar(wx.Panel):
         if width == 0:
             assert color == (255, 255, 255)
             width = 200
+        else:
+            width = max(width, self.static_text.GetBestSize().width)
 
         self.SetSize((width, height))
         self.SetMinSize((width, height))

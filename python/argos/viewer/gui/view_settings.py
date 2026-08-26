@@ -1,6 +1,9 @@
-import wx, yaml, os, shutil, tempfile
+import wx, yaml, os, sqlite3, tempfile
 from viewer.model.dirty_reasons import DirtyReasons
 from viewer.gui.dialogs.save_view_file import SaveViewFileDlg
+from viewer.gui.dialogs.save_view_choice import SaveViewChoiceDlg, SAVE_AS_AVF, SAVE_AS_DB
+
+LAST_KNOWN_VIEW_TABLE = 'ArgosLastKnownView'
 
 class ViewSettings:
     def __init__(self):
@@ -9,7 +12,6 @@ class ViewSettings:
         self._frame = None
         self._dirty = False
         self._dirty_reasons = set()
-        self._last_known_view = os.path.expanduser('~/.argos/last_known_view.avf')
 
     @property
     def view_file(self):
@@ -41,10 +43,7 @@ class ViewSettings:
         self._frame = frame
         if view_file:
             self.Load(view_file) # Not dirty
-        elif os.path.exists(self._last_known_view):
-            self.Load(self._last_known_view, set_as_current=False)
-            self.SetDirty(True)  # Implicitly loading "last known view" does not clear dirty flag
-        else:
+        elif not self.__LoadLastKnownView():
             self.__ResetDefaultViewSettings()
 
         self.__ApplyUserSettings()
@@ -60,10 +59,7 @@ class ViewSettings:
         try:
             with open(view_file, 'r') as fin:
                 settings = yaml.load(fin, Loader=yaml.FullLoader)
-                self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
-                self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
-                self._frame.inspector.ApplyViewSettings(settings['Inspector'])
-                self._frame.widget_renderer.ApplyViewSettings(settings['WidgetRenderer'])
+                self.__ApplyViewSettings(settings)
         except Exception as ex:
             print (f"Error loading view file '{view_file}': '{ex}'")
             self.__ResetDefaultViewSettings()
@@ -72,6 +68,58 @@ class ViewSettings:
         if set_as_current:
             self.view_file = view_file
         self.SetDirty(False)
+
+    def __ApplyViewSettings(self, settings):
+        self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
+        self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
+        self._frame.inspector.ApplyViewSettings(settings['Inspector'])
+        self._frame.widget_renderer.ApplyViewSettings(settings['WidgetRenderer'])
+        self._frame.inspector.RefreshWidgetsOnAllTabs()
+
+    def __GetViewSettings(self):
+        return {
+            'PlaybackBar': self._frame.playback_bar.GetCurrentViewSettings(),
+            'DataRetriever': self._frame.data_retriever.GetCurrentViewSettings(),
+            'Inspector': self._frame.inspector.GetCurrentViewSettings(),
+            'WidgetRenderer': self._frame.widget_renderer.GetCurrentViewSettings()
+        }
+
+    def __LoadLastKnownView(self):
+        try:
+            cursor = self._frame.db.cursor()
+            cursor.execute('SELECT ViewYaml FROM {} WHERE Id = 1'.format(LAST_KNOWN_VIEW_TABLE))
+            row = cursor.fetchone()
+            if row is None:
+                return False
+
+            settings = yaml.safe_load(row[0])
+            self.__ApplyViewSettings(settings)
+            self.view_file = None
+            self.SetDirty(False)
+            return True
+        except Exception as ex:
+            print (f"Error loading last known view from database: '{ex}'")
+            return False
+
+    def __SaveViewToDatabase(self):
+        settings_yaml = yaml.safe_dump(self.__GetViewSettings())
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.avf', prefix='argos_view_',
+                                         dir=tempfile.gettempdir(), delete=False) as fout:
+            fout.write(settings_yaml)
+
+        cursor = self._frame.db.cursor()
+        cursor.execute('CREATE TABLE IF NOT EXISTS {} ('
+                       'Id INTEGER PRIMARY KEY CHECK (Id = 1), '
+                       'ViewYaml TEXT NOT NULL)'.format(LAST_KNOWN_VIEW_TABLE))
+        cursor.execute('INSERT OR REPLACE INTO {} (Id, ViewYaml) VALUES (1, ?)'
+                       .format(LAST_KNOWN_VIEW_TABLE), (settings_yaml,))
+        self._frame.db.commit()
+
+    def __SaveViewChoice(self):
+        dlg = SaveViewChoiceDlg()
+        result = dlg.ShowModal()
+        dlg.Destroy()
+        return result
 
     def CreateNewView(self):
         if self._dirty:
@@ -204,33 +252,36 @@ class ViewSettings:
         self.__SaveUserSettings()
 
         if self.view_file is None:
-            # Common case: no named AVF in use. Snapshot the current view so the
-            # next launch (without --view-file) reloads where the user left off.
-            self.__WriteViewSettings(self._last_known_view)
+            if not self._dirty:
+                return True
+
+            result = self.__SaveViewChoice()
+            if result == wx.ID_CANCEL:
+                return False
+
+            if result == SAVE_AS_AVF:
+                return self.SaveView()
+
+            if result == SAVE_AS_DB:
+                self.__SaveViewToDatabase()
+                self.SetDirty(False)
+
             return True
 
-        # A named AVF is in use. Offer to save changes back to it, then drop any
-        # last_known_view so it does not shadow the named view on the next launch.
+        # A named AVF is in use. Offer to save changes back to it.
         if self._dirty:
             result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
             if result == wx.ID_CANCEL:
                 return False
 
             if result == wx.ID_YES:
-                self.SaveView(prompt_if_dirty=False)
-
-        if os.path.exists(self._last_known_view):
-            os.remove(self._last_known_view)
+                if not self.SaveView(prompt_if_dirty=False):
+                    return False
 
         return True
 
     def __WriteViewSettings(self, view_file):
-        settings = {
-            'PlaybackBar': self._frame.playback_bar.GetCurrentViewSettings(),
-            'DataRetriever': self._frame.data_retriever.GetCurrentViewSettings(),
-            'Inspector': self._frame.inspector.GetCurrentViewSettings(),
-            'WidgetRenderer': self._frame.widget_renderer.GetCurrentViewSettings()
-        }
+        settings = self.__GetViewSettings()
 
         settings_dir = os.path.dirname(view_file)
         if settings_dir and not os.path.exists(settings_dir):

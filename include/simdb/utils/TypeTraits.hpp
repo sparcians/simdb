@@ -17,6 +17,7 @@
 #include <queue>
 #include <set>
 #include <stack>
+#include <stdint.h>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
