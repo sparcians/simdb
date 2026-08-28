@@ -189,6 +189,17 @@ class PlaybackBar(wx.Panel):
         settings['selected_clock'] = self.clock_combobox.GetValue()
         return settings
 
+    def ValidateViewSettings(self, settings, db, simhier, dtype_inspector, load_errors):
+        selected_clk = settings.get('selected_clock')
+        if isinstance(selected_clk, str) and selected_clk != '<any clk edge>':
+            cursor = db.cursor()
+            cmd = f"SELECT COUNT(*) FROM Clocks WHERE Name='{selected_clk}'"
+            cursor.execute(cmd)
+            valid_clk = len(cursor.fetchall()) == 1
+            if not valid_clk:
+                err = f"Selected clock is not found in the database: {selected_clk}"
+                load_errors.append(err)
+
     def ApplyViewSettings(self, settings, update_widgets=True):
         selected_clock = settings['selected_clock']
         self.clock_combobox.SetValue(selected_clock)

@@ -62,6 +62,15 @@ class DataRetriever:
 
         return settings
 
+    def ValidateViewSettings(self, settings, db, simhier, dtype_inspector, load_errors):
+        for elem_path, _ in settings.items():
+            if elem_path not in simhier.GetElemPaths():
+                err = f"Collectable path not found in database: {elem_path}"
+                load_errors.append(err)
+            else:
+                # TODO cnyce: validate displayed_columns against the struct defn
+                pass
+
     def ApplyViewSettings(self, settings):
         self._displayed_columns_by_elem_path = {}
         self._auto_colorize_column_by_elem_path = {}

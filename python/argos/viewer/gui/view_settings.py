@@ -63,6 +63,7 @@ class ViewSettings:
         except Exception as ex:
             print (f"Error loading view file '{view_file}': '{ex}'")
             self.__ResetDefaultViewSettings()
+            set_as_current = False
 
         self._frame.inspector.RefreshWidgetsOnAllTabs()
         if set_as_current:
@@ -70,6 +71,23 @@ class ViewSettings:
         self.SetDirty(False)
 
     def __ApplyViewSettings(self, settings):
+        db = self._frame.db
+        simhier = self._frame.simhier
+        dtype_inspector = self._frame.dtype_inspector
+
+        load_errors = []
+        self._frame.playback_bar.ValidateViewSettings(settings['PlaybackBar'], db, simhier, dtype_inspector, load_errors)
+        self._frame.data_retriever.ValidateViewSettings(settings['DataRetriever'], db, simhier, dtype_inspector, load_errors)
+        self._frame.inspector.ValidateViewSettings(settings['Inspector'], db, simhier, dtype_inspector, load_errors)
+        self._frame.widget_renderer.ValidateViewSettings(settings['WidgetRenderer'], db, simhier, dtype_inspector, load_errors)
+
+        if load_errors:
+            title = 'Error ' if len(load_errors) == 1 else 'Errors '
+            title += 'Loading View'
+            msg = '\n\n-'.join(load_errors)
+            wx.MessageBox(msg, title, wx.OK | wx.ICON_ERROR)
+            raise RuntimeError(msg)
+
         self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
         self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
         self._frame.inspector.ApplyViewSettings(settings['Inspector'])
@@ -160,7 +178,7 @@ class ViewSettings:
             finally:
                 wx.EndBusyCursor()
 
-        if os.path.abspath(view_file) == os.path.abspath(self.view_file):
+        if isinstance(self.view_file, str) and os.path.abspath(view_file) == os.path.abspath(self.view_file):
             msg = f"View file '{os.path.basename(view_file)}' is already open in Argos"
             dlg = wx.MessageDialog(None, msg, 'Error', wx.OK | wx.ICON_ERROR)
             dlg.ShowModal()

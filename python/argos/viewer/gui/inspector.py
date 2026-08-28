@@ -74,6 +74,10 @@ class DataInspector(wx.aui.AuiNotebook):
         settings['tab_settings'] = [tab.GetCurrentViewSettings() for tab in self.tabs]
         return settings
     
+    def ValidateViewSettings(self, settings, db, simhier, dtype_inspector, load_errors):
+        # TODO cnyce: validate that the widgets would be valid if we tried to apply the view
+        pass
+
     def ApplyViewSettings(self, settings):
         with self.__SuppressAddTabDialog():
             # Reset all tabs
