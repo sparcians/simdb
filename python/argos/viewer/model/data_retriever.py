@@ -255,6 +255,8 @@ class DataRetriever:
         return unpacked
 
     def UnpackRange(self, start_tick, end_tick, elem_paths=None):
+        start_tick = int(start_tick)
+        end_tick = int(end_tick)
         if elem_paths is None:
             elem_paths = self.simhier.GetItemElemPaths()
         cids = {self.simhier.GetCollectionID(p) for p in elem_paths}
@@ -271,10 +273,17 @@ class DataRetriever:
             values_by_tick = handler.GetValuesByTick(elem_path)
             clock_id = self._clock_id_for_elem_path(elem_path)
             time_vals, data_vals = [], []
-            for tick in sorted(values_by_tick.keys()):
-                if start_tick <= tick <= end_tick and self._clock_collected_at_tick(clock_id, tick):
+            if start_tick == end_tick:
+                point_ticks = [tick for tick in values_by_tick if tick <= end_tick]
+                if point_ticks and self._clock_collected_at_tick(clock_id, end_tick):
+                    tick = max(point_ticks)
                     time_vals.append(tick)
                     data_vals.append(values_by_tick[tick])
+            else:
+                for tick in sorted(values_by_tick.keys()):
+                    if start_tick <= tick <= end_tick and self._clock_collected_at_tick(clock_id, tick):
+                        time_vals.append(tick)
+                        data_vals.append(values_by_tick[tick])
             unpacked[elem_path] = {'TimeVals': time_vals, 'DataVals': data_vals}
 
         return unpacked
