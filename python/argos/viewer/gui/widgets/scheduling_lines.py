@@ -223,8 +223,11 @@ class SchedulingLinesWidget(wx.Panel):
             # would otherwise reset the scroll position back to the top.
             saved_view_start = self.grid.GetViewStart() if self.grid else None
 
-            start_time = self.frame.widget_renderer.tick - self.num_ticks_before
-            end_time = self.frame.widget_renderer.tick + self.num_ticks_after
+            selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+            clock_period = self.frame.playback_bar.clock_periods.get(selected_clock, 1)
+            current_tick = self.frame.widget_renderer.tick
+            start_time = current_tick - (self.num_ticks_before + 1) * int(clock_period)
+            end_time = current_tick + self.num_ticks_after * int(clock_period)
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
             self._caption_elem_paths = elem_paths
             self._ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
@@ -278,13 +281,14 @@ class SchedulingLinesWidget(wx.Panel):
 
         # The number of columns can be calculated as:
         #  1. Start with the sum of self.num_ticks_before and self.num_ticks_after (A)
-        #  2. Add 1 to (A) to account for the element paths column (captions)
+        #  2. Add 2 to (A) to account for the element paths column (captions)
+        #     and the current-cycle timeline column
         #  3. If self.show_detailed_queue_packets is True, add 3 to (A) to account for:
         #     a. A column to add a separator between the summary and detailed sections
         #     b. A column to duplicate the element paths column (captions)
         #     c. A column to show the stringified packet data e.g. "IntVal(4) DoubleVal(3.14)"
 
-        num_cols = self.num_ticks_before + self.num_ticks_after + 1
+        num_cols = self.num_ticks_before + self.num_ticks_after + 2
         if self.show_detailed_queue_packets:
             num_cols += 2
 
@@ -304,23 +308,30 @@ class SchedulingLinesWidget(wx.Panel):
             self, self.__EditWidget, 'Edit widget settings')
 
         current_tick = self.frame.widget_renderer.tick
+        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
         col_labels = []
-        time_vals = self.frame.data_retriever.GetAllTimeVals()
-        time_vals = {int(val) for val in time_vals}
-        for col in range(1, self.num_ticks_before + self.num_ticks_after + 1):
-            tick = current_tick - self.num_ticks_before + col - 1
-            if int(tick) in time_vals:
-                self.grid.SetColLabelValue(col, str(tick))
-                col_labels.append(str(tick))
+        range_cycles = sorted({
+            int(time_val) // clock_period
+            for elem_data in self._ranges.values()
+            for time_val in elem_data['TimeVals']
+        })
+        for col in range(1, self.num_ticks_before + self.num_ticks_after + 2):
+            label_idx = col - 1
+            if label_idx < len(range_cycles):
+                label = str(range_cycles[label_idx])
+                self.grid.SetColLabelValue(col, label)
+                col_labels.append(label)
             else:
                 self.grid.SetColLabelValue(col, '')
 
         if self.show_detailed_queue_packets:
-            detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 2
+            detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 3
             self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
-            if int(current_tick) in time_vals:
-                self.grid.SetColLabelValue(detailed_pkt_col, str(current_tick))
-                col_labels.append(str(current_tick))
+            current_cycle = int(current_tick) // clock_period
+            if current_cycle in range_cycles:
+                self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
+                col_labels.append(str(current_cycle))
             else:
                 self.grid.SetColLabelValue(detailed_pkt_col, '')
 
@@ -369,7 +380,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         # Left-justify the detailed packet column
         if self.show_detailed_queue_packets:
-            col = self.num_ticks_before + self.num_ticks_after + 2
+            col = self.num_ticks_before + self.num_ticks_after + 3
 
             def GetMaxFieldVarLengths(strings):
                 result = {}
@@ -797,6 +808,9 @@ class Rasterizer:
 
         tracked_annos = self.widget.tracked_annos
         show_border = auto_colorize_column in tracked_annos and tracked_annos[auto_colorize_column] == auto_colorize_key
+        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
+        time_cycle = int(time_val) // clock_period
 
         for col in range(self.grid.GetNumberCols()):
             if not self.grid.IsColShown(col):
@@ -808,7 +822,7 @@ class Rasterizer:
             except:
                 continue
 
-            if col_label == int(time_val):
+            if col_label == time_cycle:
                 self.grid.SetCellValue(self.row, col, auto_label)
                 self.grid.SetCellBackgroundColour(self.row, col, auto_color)
                 if self.widget.enable_tooltips:
@@ -819,7 +833,7 @@ class Rasterizer:
                 self.grid.SetCellBorder(self.row, col, border_width, border_side)
                 break
 
-        if self.detailed_pkt_col != -1 and time_val == self.frame.widget_renderer.tick:
+        if self.detailed_pkt_col != -1 and time_cycle == int(self.frame.widget_renderer.tick) // clock_period:
             def Strip(stringized_anno, string, replace):
                 while string in stringized_anno:
                     stringized_anno = stringized_anno.replace(string, replace)

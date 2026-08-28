@@ -98,7 +98,6 @@ class ViewSettings:
             self.SetDirty(False)
             return True
         except Exception as ex:
-            print (f"Error loading last known view from database: '{ex}'")
             return False
 
     def __SaveViewToDatabase(self):

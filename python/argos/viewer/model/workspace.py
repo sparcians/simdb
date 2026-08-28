@@ -1,9 +1,11 @@
-import wx
+import wx, os
 from viewer.model.frame import ArgosFrame
 from viewer.gui.view_settings import ViewSettings
 
 class Workspace:
     def __init__(self, db_path, view_file):
+        if not os.path.isfile(db_path):
+            raise ValueError(f"Database file does not exist: {db_path}")
         self._view_settings = ViewSettings()
         self._frame = ArgosFrame(db_path, self._view_settings)
         self._frame.PostLoad(view_file)
