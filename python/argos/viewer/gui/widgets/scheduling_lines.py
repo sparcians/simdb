@@ -310,6 +310,7 @@ class SchedulingLinesWidget(wx.Panel):
         current_tick = self.frame.widget_renderer.tick
         selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
         clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
+        current_cycle = self.frame.playback_bar.GetCurrentCycle()
         col_labels = []
         range_cycles = sorted({
             int(time_val) // clock_period
@@ -328,7 +329,6 @@ class SchedulingLinesWidget(wx.Panel):
         if self.show_detailed_queue_packets:
             detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 3
             self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
-            current_cycle = int(current_tick) // clock_period
             if current_cycle in range_cycles:
                 self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
                 col_labels.append(str(current_cycle))
@@ -358,10 +358,19 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.grid.ClearGrid()
 
-        # Draw a thick black line to mark the current time
+        current_cycle_col = None
+        for col in range(1, self.num_ticks_before + self.num_ticks_after + 2):
+            try:
+                if int(self.grid.GetColLabelValue(col)) == current_cycle:
+                    current_cycle_col = col
+                    break
+            except ValueError:
+                continue
+
+        # Draw thick black lines on both sides of the current cycle.
         for row in range(num_rows):
-            self.grid.SetCellBorder(row, self.num_ticks_before, 1, wx.RIGHT)
-            self.grid.SetCellBorder(row, self.num_ticks_before + 1, 1, wx.LEFT)
+            if current_cycle_col is not None:
+                self.grid.SetCellBorder(row, current_cycle_col, 1, wx.LEFT | wx.RIGHT)
 
         self.__SetElementCaptions(0)
 
@@ -833,7 +842,7 @@ class Rasterizer:
                 self.grid.SetCellBorder(self.row, col, border_width, border_side)
                 break
 
-        if self.detailed_pkt_col != -1 and time_cycle == int(self.frame.widget_renderer.tick) // clock_period:
+        if self.detailed_pkt_col != -1 and time_cycle == self.frame.playback_bar.GetCurrentCycle():
             def Strip(stringized_anno, string, replace):
                 while string in stringized_anno:
                     stringized_anno = stringized_anno.replace(string, replace)

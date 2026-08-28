@@ -146,10 +146,23 @@ class PlaybackBar(wx.Panel):
         self.current_tick_text.SetLabel('tick:{}'.format(tick))
         self.Layout()
 
+    def GetCurrentCycle(self):
+        if self.clock_combobox.GetValue() == '<any clk edge>':
+            raise ValueError('A clock must be selected to get the current cycle')
+        return int(self.current_cyc_text.GetLabel().split(':', 1)[1])
+
     def __UpdateRangeLabels(self):
-        label_prefix = 'cycle' if self.clock_periods.get(self.clock_combobox.GetValue()) else 'tick'
-        self.cyc_start_text.SetLabel('start-{}:{}'.format(label_prefix, self.frame.widget_renderer.start_tick))
-        self.cyc_end_text.SetLabel('end-{}:{}'.format(label_prefix, self.frame.widget_renderer.end_tick))
+        period = self.clock_periods.get(self.clock_combobox.GetValue())
+        if period:
+            label_prefix = 'cycle'
+            start_value = int(self.frame.widget_renderer.start_tick) // int(period)
+            end_value = int(self.frame.widget_renderer.end_tick) // int(period)
+        else:
+            label_prefix = 'tick'
+            start_value = self.frame.widget_renderer.start_tick
+            end_value = self.frame.widget_renderer.end_tick
+        self.cyc_start_text.SetLabel('start-{}:{}'.format(label_prefix, start_value))
+        self.cyc_end_text.SetLabel('end-{}:{}'.format(label_prefix, end_value))
 
     def __OnClockSelected(self):
         selected_clock = self.clock_combobox.GetValue()
