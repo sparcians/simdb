@@ -123,7 +123,7 @@ class ViewSettings:
     def CreateNewView(self):
         if self._dirty:
             if self.view_file:
-                result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
+                result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)))
                 if result == wx.ID_CANCEL:
                     return
 
@@ -132,7 +132,7 @@ class ViewSettings:
 
                 self.__ResetDefaultViewSettings()
             else:
-                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?", True)
+                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?")
                 if result == wx.ID_CANCEL:
                     return
 
@@ -160,7 +160,7 @@ class ViewSettings:
             finally:
                 wx.EndBusyCursor()
 
-        if view_file == self.view_file:
+        if os.path.abspath(view_file) == os.path.abspath(self.view_file):
             msg = f"View file '{os.path.basename(view_file)}' is already open in Argos"
             dlg = wx.MessageDialog(None, msg, 'Error', wx.OK | wx.ICON_ERROR)
             dlg.ShowModal()
@@ -269,7 +269,7 @@ class ViewSettings:
 
         # A named AVF is in use. Offer to save changes back to it.
         if self._dirty:
-            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
+            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)))
             if result == wx.ID_CANCEL:
                 return False
 
@@ -347,8 +347,8 @@ class ViewSettings:
             os.remove(settings_file)
             self.__ResetDefaultViewSettings()
 
-    def __AskToSaveChangesToCurrentView(self, prompt, include_skip_btn=False):
-        dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons, include_skip_btn=include_skip_btn)
+    def __AskToSaveChangesToCurrentView(self, prompt):
+        dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons)
         result = dlg.ShowModal()
         dlg.Destroy()
         return result
