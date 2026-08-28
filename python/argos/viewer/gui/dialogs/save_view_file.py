@@ -2,7 +2,7 @@ import wx
 from viewer.model.dirty_reasons import DIRTY_REASONS
 
 class SaveViewFileDlg(wx.Dialog):
-    def __init__(self, prompt='Save to view file?', reasons=None, include_skip_btn=False):
+    def __init__(self, prompt='Save to view file?', reasons=None):
         super().__init__(None, title='Save View')
 
         self._reasons = set(reasons) if reasons else None
@@ -19,10 +19,9 @@ class SaveViewFileDlg(wx.Dialog):
         btn_sizer.Add(save_btn, 0, wx.ALL, 5)
 
         # Skip button
-        if include_skip_btn:
-            skip_btn = wx.Button(self, label="Skip")
-            skip_btn.Bind(wx.EVT_BUTTON, lambda event: self.EndModal(wx.ID_NO))
-            btn_sizer.Add(skip_btn, 0, wx.ALL, 5)
+        skip_btn = wx.Button(self, label="Skip")
+        skip_btn.Bind(wx.EVT_BUTTON, lambda event: self.EndModal(wx.ID_NO))
+        btn_sizer.Add(skip_btn, 0, wx.ALL, 5)
 
         # Cancel button
         cancel_btn = wx.Button(self, label="Cancel")

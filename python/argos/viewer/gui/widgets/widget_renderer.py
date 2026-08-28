@@ -49,6 +49,9 @@ class WidgetRenderer:
     def GetCurrentViewSettings(self):
         return {}
     
+    def ValidateViewSettings(self, settings, db, simhier, dtype_inspector, load_errors):
+        pass
+
     def ApplyViewSettings(self, settings):
         pass
 

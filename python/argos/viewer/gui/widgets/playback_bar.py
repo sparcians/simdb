@@ -146,10 +146,23 @@ class PlaybackBar(wx.Panel):
         self.current_tick_text.SetLabel('tick:{}'.format(tick))
         self.Layout()
 
+    def GetCurrentCycle(self):
+        if self.clock_combobox.GetValue() == '<any clk edge>':
+            raise ValueError('A clock must be selected to get the current cycle')
+        return int(self.current_cyc_text.GetLabel().split(':', 1)[1])
+
     def __UpdateRangeLabels(self):
-        label_prefix = 'cycle' if self.clock_periods.get(self.clock_combobox.GetValue()) else 'tick'
-        self.cyc_start_text.SetLabel('start-{}:{}'.format(label_prefix, self.frame.widget_renderer.start_tick))
-        self.cyc_end_text.SetLabel('end-{}:{}'.format(label_prefix, self.frame.widget_renderer.end_tick))
+        period = self.clock_periods.get(self.clock_combobox.GetValue())
+        if period:
+            label_prefix = 'cycle'
+            start_value = int(self.frame.widget_renderer.start_tick) // int(period)
+            end_value = int(self.frame.widget_renderer.end_tick) // int(period)
+        else:
+            label_prefix = 'tick'
+            start_value = self.frame.widget_renderer.start_tick
+            end_value = self.frame.widget_renderer.end_tick
+        self.cyc_start_text.SetLabel('start-{}:{}'.format(label_prefix, start_value))
+        self.cyc_end_text.SetLabel('end-{}:{}'.format(label_prefix, end_value))
 
     def __OnClockSelected(self):
         selected_clock = self.clock_combobox.GetValue()
@@ -175,6 +188,17 @@ class PlaybackBar(wx.Panel):
         settings = {}
         settings['selected_clock'] = self.clock_combobox.GetValue()
         return settings
+
+    def ValidateViewSettings(self, settings, db, simhier, dtype_inspector, load_errors):
+        selected_clk = settings.get('selected_clock')
+        if isinstance(selected_clk, str) and selected_clk != '<any clk edge>':
+            cursor = db.cursor()
+            cmd = f"SELECT COUNT(*) FROM Clocks WHERE Name='{selected_clk}'"
+            cursor.execute(cmd)
+            valid_clk = len(cursor.fetchall()) == 1
+            if not valid_clk:
+                err = f"Selected clock is not found in the database: {selected_clk}"
+                load_errors.append(err)
 
     def ApplyViewSettings(self, settings, update_widgets=True):
         selected_clock = settings['selected_clock']

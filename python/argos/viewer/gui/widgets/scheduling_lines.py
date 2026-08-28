@@ -248,15 +248,11 @@ class SchedulingLinesWidget(wx.Panel):
                 self.grid.Scroll(saved_view_start[0], saved_view_start[1])
 
     def __RegenerateSchedulingLinesGrid(self, new_grid):
+        sizer = self.GetSizer()
         if self.grid:
+            sizer.Detach(self.grid)
             self.grid.Destroy()
             self.grid = None
-
-        sizer = self.GetSizer()
-        if sizer:
-            sizer.Clear()
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
 
         self._struct_dtypes_by_row = {}
         num_rows = 0
@@ -304,12 +300,10 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
-        gear_btn, clear_btn, split_lr, split_tb, maximize_btn = self.frame.CreateWidgetStandardButtons(
-            self, self.__EditWidget, 'Edit widget settings')
-
         current_tick = self.frame.widget_renderer.tick
         selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
         clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
+        current_cycle = self.frame.playback_bar.GetCurrentCycle()
         col_labels = []
         range_cycles = sorted({
             int(time_val) // clock_period
@@ -328,7 +322,6 @@ class SchedulingLinesWidget(wx.Panel):
         if self.show_detailed_queue_packets:
             detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 3
             self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
-            current_cycle = int(current_tick) // clock_period
             if current_cycle in range_cycles:
                 self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
                 col_labels.append(str(current_cycle))
@@ -345,23 +338,38 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.SetColLabelTextOrientation(wx.VERTICAL)
         self.grid.HideRowLabels()
 
-        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT | wx.LEFT, 5)
-        btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
-        btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
-        btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
-        btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
-        sizer.Add(btn_sizer, 0, wx.BOTTOM, 5)
+        if sizer is None:
+            sizer = wx.BoxSizer(wx.VERTICAL)
+
+            gear_btn, clear_btn, split_lr, split_tb, maximize_btn = self.frame.CreateWidgetStandardButtons(
+                self, self.__EditWidget, 'Edit widget settings')
+
+            btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+            btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT | wx.LEFT, 5)
+            btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+            btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+            btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+            btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
+            sizer.Add(btn_sizer, 0, wx.BOTTOM, 5)
+            self.SetSizer(sizer)
 
         sizer.Add(self.grid, 0, wx.EXPAND)
-        self.SetSizer(sizer)
 
         self.grid.ClearGrid()
 
-        # Draw a thick black line to mark the current time
+        current_cycle_col = None
+        for col in range(1, self.num_ticks_before + self.num_ticks_after + 2):
+            try:
+                if int(self.grid.GetColLabelValue(col)) == current_cycle:
+                    current_cycle_col = col
+                    break
+            except ValueError:
+                continue
+
+        # Draw thick black lines on both sides of the current cycle.
         for row in range(num_rows):
-            self.grid.SetCellBorder(row, self.num_ticks_before, 1, wx.RIGHT)
-            self.grid.SetCellBorder(row, self.num_ticks_before + 1, 1, wx.LEFT)
+            if current_cycle_col is not None:
+                self.grid.SetCellBorder(row, current_cycle_col, 1, wx.LEFT | wx.RIGHT)
 
         self.__SetElementCaptions(0)
 
@@ -432,6 +440,11 @@ class SchedulingLinesWidget(wx.Panel):
                     label = AlignLabel(label, max_varlens_by_field)
 
                 self.grid.SetCellValue(row, col, label)
+
+        for row in range(self.grid.GetNumberRows()):
+            for col in range(1, self.grid.GetNumberCols()):
+                if self.grid.GetCellValue(row, col) == '' and self.grid.GetCellBackgroundColour(row, col) == (255, 255, 255):
+                    self.grid.SetCellBackgroundColour(row, col, (240,240,240))
 
         self.grid.AutoSize()
         self.Layout()
@@ -833,7 +846,7 @@ class Rasterizer:
                 self.grid.SetCellBorder(self.row, col, border_width, border_side)
                 break
 
-        if self.detailed_pkt_col != -1 and time_cycle == int(self.frame.widget_renderer.tick) // clock_period:
+        if self.detailed_pkt_col != -1 and time_cycle == self.frame.playback_bar.GetCurrentCycle():
             def Strip(stringized_anno, string, replace):
                 while string in stringized_anno:
                     stringized_anno = stringized_anno.replace(string, replace)

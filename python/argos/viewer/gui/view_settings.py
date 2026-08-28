@@ -63,6 +63,7 @@ class ViewSettings:
         except Exception as ex:
             print (f"Error loading view file '{view_file}': '{ex}'")
             self.__ResetDefaultViewSettings()
+            set_as_current = False
 
         self._frame.inspector.RefreshWidgetsOnAllTabs()
         if set_as_current:
@@ -70,6 +71,23 @@ class ViewSettings:
         self.SetDirty(False)
 
     def __ApplyViewSettings(self, settings):
+        db = self._frame.db
+        simhier = self._frame.simhier
+        dtype_inspector = self._frame.dtype_inspector
+
+        load_errors = []
+        self._frame.playback_bar.ValidateViewSettings(settings['PlaybackBar'], db, simhier, dtype_inspector, load_errors)
+        self._frame.data_retriever.ValidateViewSettings(settings['DataRetriever'], db, simhier, dtype_inspector, load_errors)
+        self._frame.inspector.ValidateViewSettings(settings['Inspector'], db, simhier, dtype_inspector, load_errors)
+        self._frame.widget_renderer.ValidateViewSettings(settings['WidgetRenderer'], db, simhier, dtype_inspector, load_errors)
+
+        if load_errors:
+            title = 'Error ' if len(load_errors) == 1 else 'Errors '
+            title += 'Loading View'
+            msg = '\n\n-'.join(load_errors)
+            wx.MessageBox(msg, title, wx.OK | wx.ICON_ERROR)
+            raise RuntimeError(msg)
+
         self._frame.playback_bar.ApplyViewSettings(settings['PlaybackBar'])
         self._frame.data_retriever.ApplyViewSettings(settings['DataRetriever'])
         self._frame.inspector.ApplyViewSettings(settings['Inspector'])
@@ -123,7 +141,7 @@ class ViewSettings:
     def CreateNewView(self):
         if self._dirty:
             if self.view_file:
-                result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
+                result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)))
                 if result == wx.ID_CANCEL:
                     return
 
@@ -132,7 +150,7 @@ class ViewSettings:
 
                 self.__ResetDefaultViewSettings()
             else:
-                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?", True)
+                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?")
                 if result == wx.ID_CANCEL:
                     return
 
@@ -160,7 +178,7 @@ class ViewSettings:
             finally:
                 wx.EndBusyCursor()
 
-        if view_file == self.view_file:
+        if isinstance(self.view_file, str) and os.path.abspath(view_file) == os.path.abspath(self.view_file):
             msg = f"View file '{os.path.basename(view_file)}' is already open in Argos"
             dlg = wx.MessageDialog(None, msg, 'Error', wx.OK | wx.ICON_ERROR)
             dlg.ShowModal()
@@ -269,7 +287,7 @@ class ViewSettings:
 
         # A named AVF is in use. Offer to save changes back to it.
         if self._dirty:
-            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)), True)
+            result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)))
             if result == wx.ID_CANCEL:
                 return False
 
@@ -347,8 +365,8 @@ class ViewSettings:
             os.remove(settings_file)
             self.__ResetDefaultViewSettings()
 
-    def __AskToSaveChangesToCurrentView(self, prompt, include_skip_btn=False):
-        dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons, include_skip_btn=include_skip_btn)
+    def __AskToSaveChangesToCurrentView(self, prompt):
+        dlg = SaveViewFileDlg(prompt=prompt, reasons=self._dirty_reasons)
         result = dlg.ShowModal()
         dlg.Destroy()
         return result
