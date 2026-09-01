@@ -141,6 +141,13 @@ def CreateDeserializer(inspector, dtype_name, tiny_strings=None):
     if dtype_name == 'string':
         return StringDeserializer(tiny_strings)
 
+    # List-of-* types
+    if dtype_name.startswith('list-of-'):
+        element_type_name = dtype_name[len('list-of-'):]
+        element_deserializer = CreateDeserializer(inspector, element_type_name, tiny_strings)
+        if element_deserializer is not None:
+            return ListDeserializer(element_deserializer, max_len=32)
+
     # Container types
     container_meta = GetContainerMeta(dtype_name)
     if container_meta:
@@ -254,6 +261,25 @@ class EnumDeserializer:
         enum_val = self._val_deserializer.Deserialize(data_bytes)
         enum_val = int(enum_val)
         return self._enum_map[enum_val]
+
+# This class deserializes list-of-* integer arrays.
+class ListDeserializer:
+    def __init__(self, element_deserializer, max_len=32):
+        self._element_deserializer = element_deserializer
+        self._max_len = max_len
+
+    def GetNumBytes(self):
+        return 1 + self._max_len * self._element_deserializer.GetNumBytes()
+
+    def Deserialize(self, data_bytes):
+        buf = ByteBuffer.CreateFrom(data_bytes)
+        count = buf.Read('B')
+        assert 0 <= count <= self._max_len
+
+        values = []
+        for _ in range(count):
+            values.append(self._element_deserializer.Deserialize(buf))
+        return values
 
 # This class deserializes contiguous container types.
 class ContigContainerDeserializer:
@@ -383,10 +409,15 @@ class StructDeserializer:
         for field in struct_defn.children:
             if field.name and field.kind != 'struct':
                 flattened_field_names.append(field.name)
-            if field.kind == 'pod' and field.type_name != 'string':
+            if field.kind == 'pod' and field.type_name != 'string' and not field.type_name.startswith('list-of-'):
                 deserializer = SimpleDeserializer(
                     field.type_name, field.special_formatter or ""
                 )
+                field_deserializers.append((field.name, deserializer))
+            elif field.kind == 'pod' and field.type_name.startswith('list-of-'):
+                integer_type = field.type_name.strip('list-of-')
+                integer_deserializer = SimpleDeserializer(integer_type)
+                deserializer = ListDeserializer(integer_deserializer)
                 field_deserializers.append((field.name, deserializer))
             elif field.type_name == 'string':
                 deserializer = StringDeserializer(tiny_strings)
