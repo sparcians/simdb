@@ -131,6 +131,8 @@ class DataTypeInspector:
                 kind = "pod"
             elif type_name == "string":
                 kind = "pod"
+            elif type_name.startswith("list-of-"):
+                kind = "pod"
             elif type_name != "dynamic":
                 kind = "enum"
                 if type_name not in enum_defns:
