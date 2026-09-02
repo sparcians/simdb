@@ -50,7 +50,7 @@ class ViewSettings:
     
     def Load(self, view_file, set_as_current=True):
         if not os.path.isfile(view_file):
-            msg = f"View file '{view_file}' does not exist"
+            msg = f"Layout file '{view_file}' does not exist"
             dlg = wx.MessageDialog(None, msg, 'Error', wx.OK | wx.ICON_ERROR)
             dlg.ShowModal()
             dlg.Destroy()
@@ -61,7 +61,7 @@ class ViewSettings:
                 settings = yaml.load(fin, Loader=yaml.FullLoader)
                 self.__ApplyViewSettings(settings)
         except Exception as ex:
-            print (f"Error loading view file '{view_file}': '{ex}'")
+            print (f"Error loading layout file '{view_file}': '{ex}'")
             self.__ResetDefaultViewSettings()
             set_as_current = False
 
@@ -83,7 +83,7 @@ class ViewSettings:
 
         if load_errors:
             title = 'Error ' if len(load_errors) == 1 else 'Errors '
-            title += 'Loading View'
+            title += 'Loading Layout'
             msg = '\n\n-'.join(load_errors)
             wx.MessageBox(msg, title, wx.OK | wx.ICON_ERROR)
             raise RuntimeError(msg)
@@ -120,7 +120,7 @@ class ViewSettings:
 
     def __SaveViewToDatabase(self):
         settings_yaml = yaml.safe_dump(self.__GetViewSettings())
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.avf', prefix='argos_view_',
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.alf', prefix='argos_view_',
                                          dir=tempfile.gettempdir(), delete=False) as fout:
             fout.write(settings_yaml)
 
@@ -150,7 +150,7 @@ class ViewSettings:
 
                 self.__ResetDefaultViewSettings()
             else:
-                result = self.__AskToSaveChangesToCurrentView("Save current view to new file before creating a new view?")
+                result = self.__AskToSaveChangesToCurrentView("Save current layout to new file before creating a new layout?")
                 if result == wx.ID_CANCEL:
                     return
 
@@ -179,7 +179,7 @@ class ViewSettings:
                 wx.EndBusyCursor()
 
         if isinstance(self.view_file, str) and os.path.abspath(view_file) == os.path.abspath(self.view_file):
-            msg = f"View file '{os.path.basename(view_file)}' is already open in Argos"
+            msg = f"Layout file '{os.path.basename(view_file)}' is already open in Argos"
             dlg = wx.MessageDialog(None, msg, 'Error', wx.OK | wx.ICON_ERROR)
             dlg.ShowModal()
             dlg.Destroy()
@@ -228,7 +228,7 @@ class ViewSettings:
 
         if self.view_file is None and prompt_if_dirty:
             # Ask the user if they want to save the view to a new file
-            dlg = SaveViewFileDlg(prompt="Save current Argos view to a new file?", reasons=self._dirty_reasons)
+            dlg = SaveViewFileDlg(prompt="Save current Argos layout to a new file?", reasons=self._dirty_reasons)
         elif self.view_file is not None and prompt_if_dirty:
             dlg = SaveViewFileDlg(prompt="Save changes to '{}'?".format(os.path.basename(self.view_file)), reasons=self._dirty_reasons)
         else:
@@ -246,12 +246,12 @@ class ViewSettings:
             view_file = self.view_file
             if not view_file:
                 assert prompt_if_dirty
-                with wx.FileDialog(None, "Save Argos View", wildcard="AVF files (*.avf)|*.avf|All files (*.*)|*.*",
+                with wx.FileDialog(None, "Save Argos Layout", wildcard="ALF files (*.alf)|*.alf|All files (*.*)|*.*",
                                    style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT, defaultDir=self._views_dir) as dlg:
                     if dlg.ShowModal() == wx.ID_OK:
                         path = dlg.GetPath()
-                        if not path.endswith('.avf'):
-                            path += '.avf'
+                        if not path.endswith('.alf'):
+                            path += '.alf'
 
                         view_file = path
 
@@ -383,7 +383,7 @@ class ViewSettings:
 
     def __GetViewFileForOpen(self):
         with wx.FileDialog(self._frame, "Open file", defaultDir=self._views_dir, 
-                    wildcard="AVF files (*.avf)|*.avf|All files (*.*)|*.*",
+                    wildcard="ALF files (*.alf)|*.alf|All files (*.*)|*.*",
                     style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 return dlg.GetPath()
@@ -391,11 +391,11 @@ class ViewSettings:
                 return None
             
     def __GetViewFileForSave(self):
-        with wx.FileDialog(None, "Save Argos View", wildcard="AVF files (*.avf)|*.avf|All files (*.*)|*.*",
+        with wx.FileDialog(None, "Save Argos Layout", wildcard="ALF files (*.alf)|*.alf|All files (*.*)|*.*",
                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT, defaultDir=self._views_dir) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 path = dlg.GetPath()
-                if not path.endswith('.avf'):
-                    path += '.avf'
+                if not path.endswith('.alf'):
+                    path += '.alf'
 
                 return path

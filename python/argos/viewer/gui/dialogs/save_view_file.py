@@ -2,8 +2,8 @@ import wx
 from viewer.model.dirty_reasons import DIRTY_REASONS
 
 class SaveViewFileDlg(wx.Dialog):
-    def __init__(self, prompt='Save to view file?', reasons=None):
-        super().__init__(None, title='Save View')
+    def __init__(self, prompt='Save to layout file?', reasons=None):
+        super().__init__(None, title='Save Layout')
 
         self._reasons = set(reasons) if reasons else None
         sizer = wx.BoxSizer(wx.VERTICAL)

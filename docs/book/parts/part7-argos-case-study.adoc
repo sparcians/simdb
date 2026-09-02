@@ -443,7 +443,7 @@ look at.
 image::argos-first-launch.png[Argos on first open: an empty canvas showing the Quick Links menu,role=text-center]
 
 If you have looked at this data before, the viewer reopens your last layout
-automatically; you can also hand it a saved *view file* to jump straight to a
+automatically; you can also hand it a saved *layout file* to jump straight to a
 prepared arrangement (more on those below).
 
 === Quick Links: building a view from an empty cell
@@ -542,19 +542,19 @@ The upshot is a viewer whose memory footprint is tied to *what is on screen*, no
 to the size of the database. A multi-gigabyte run opens as readily as a small one,
 because Argos only ever pulls the slice of data the current view and tick require.
 
-=== View files: saving and sharing a layout
+=== Layout files: saving and sharing a layout
 
 A carefully arranged view is worth keeping, so the viewer can save your layout to a
-*view file*. It captures the whole arrangement -- the tabs, how each canvas is
+*layout file*. It captures the whole arrangement -- the tabs, how each canvas is
 split, which widgets sit where, the columns and colorization chosen for each
 object, and the selected clock -- so you can reopen it later or hand it to a
 colleague to reproduce your exact setup. The window title marks when there are
 unsaved changes, and the viewer remembers your most recent layout and restores it
-automatically the next time you open the same data without naming a view file.
+automatically the next time you open the same data without naming a layout file.
 
 One deliberate exception: the *playback position* -- the specific tick you happen to
 be viewing -- is treated as a per-session preference and is *not* stored in the
-shared view file. A view file describes how to look at a run, not where in time you
+shared layout file. A layout file describes how to look at a run, not where in time you
 last paused, so sharing one does not drag your colleague to your current tick.
 
 [NOTE]
@@ -562,7 +562,7 @@ last paused, so sharing one does not drag your colleague to your current tick.
 The viewer is intentionally described here at the level of features and workflow.
 Its implementation is being revised, so this chapter avoids tying anything to
 specific internals -- what a user does with the canvas, Quick Links, widgets,
-playback bar, and view files is what matters, and that is stable.
+playback bar, and layout files is what matters, and that is stable.
 ====
 
 That is the viewer as an instrument: open a run, create widgets from an empty
