@@ -760,7 +760,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_widgets">Widgets</a></li>
 <li><a href="#_the_playback_bar_moving_through_time">The playback bar: moving through time</a></li>
 <li><a href="#_a_thin_client_by_design">A thin client, by design</a></li>
-<li><a href="#_view_files_saving_and_sharing_a_layout">View files: saving and sharing a layout</a></li>
+<li><a href="#_layout_files_saving_and_sharing_a_layout">Layout files: saving and sharing a layout</a></li>
 </ul>
 </li>
 <li><a href="#ch-35-end-to-end">35. End-to-End</a>
@@ -6378,7 +6378,7 @@ look at.</p>
 </div>
 <div class="paragraph">
 <p>If you have looked at this data before, the viewer reopens your last layout
-automatically; you can also hand it a saved <strong>view file</strong> to jump straight to a
+automatically; you can also hand it a saved <strong>layout file</strong> to jump straight to a
 prepared arrangement (more on those below).</p>
 </div>
 </div>
@@ -6517,20 +6517,20 @@ because Argos only ever pulls the slice of data the current view and tick requir
 </div>
 </div>
 <div class="sect2">
-<h3 id="_view_files_saving_and_sharing_a_layout">View files: saving and sharing a layout</h3>
+<h3 id="_layout_files_saving_and_sharing_a_layout">Layout files: saving and sharing a layout</h3>
 <div class="paragraph">
 <p>A carefully arranged view is worth keeping, so the viewer can save your layout to a
-<strong>view file</strong>. It captures the whole arrangement&#8201;&#8212;&#8201;the tabs, how each canvas is
+<strong>layout file</strong>. It captures the whole arrangement&#8201;&#8212;&#8201;the tabs, how each canvas is
 split, which widgets sit where, the columns and colorization chosen for each
 object, and the selected clock&#8201;&#8212;&#8201;so you can reopen it later or hand it to a
 colleague to reproduce your exact setup. The window title marks when there are
 unsaved changes, and the viewer remembers your most recent layout and restores it
-automatically the next time you open the same data without naming a view file.</p>
+automatically the next time you open the same data without naming a layout file.</p>
 </div>
 <div class="paragraph">
 <p>One deliberate exception: the <strong>playback position</strong>&#8201;&#8212;&#8201;the specific tick you happen to
 be viewing&#8201;&#8212;&#8201;is treated as a per-session preference and is <strong>not</strong> stored in the
-shared view file. A view file describes how to look at a run, not where in time you
+shared layout file. A layout file describes how to look at a run, not where in time you
 last paused, so sharing one does not drag your colleague to your current tick.</p>
 </div>
 <div class="admonitionblock note">
@@ -6544,7 +6544,7 @@ last paused, so sharing one does not drag your colleague to your current tick.</
 <p>The viewer is intentionally described here at the level of features and workflow.
 Its implementation is being revised, so this chapter avoids tying anything to
 specific internals&#8201;&#8212;&#8201;what a user does with the canvas, Quick Links, widgets,
-playback bar, and view files is what matters, and that is stable.</p>
+playback bar, and layout files is what matters, and that is stable.</p>
 </div>
 </td>
 </tr>

@@ -11,6 +11,6 @@ build.log
 python/__pycache__
 __pycache__/
 build/
-**/*.avf
+**/*.alf
 **/*.db
 .cursor/

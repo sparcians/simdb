@@ -8,9 +8,9 @@ class MyApp(wx.App):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", required=True, help="Path to the database file")
-    parser.add_argument("--view-file", help="Path to the view file (*.avf) to load")
+    parser.add_argument("--layout-file", help="Path to the layout file (*.alf) to load")
     args = parser.parse_args()
 
     app = MyApp()
-    workspace = Workspace(args.database, args.view_file)
+    workspace = Workspace(args.database, args.layout_file)
     app.MainLoop()

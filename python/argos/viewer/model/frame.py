@@ -28,9 +28,9 @@ class ArgosFrame(wx.Frame):
         self.menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
 
-        new_view = file_menu.Append(wx.ID_NEW, '&New View\tCtrl+N', 'Create a new view')
-        open_view = file_menu.Append(wx.ID_OPEN, '&Open View\tCtrl+O', 'Open an existing view')
-        save_view = file_menu.Append(wx.ID_SAVE, '&Save View\tCtrl+S', 'Save the current view')
+        new_view = file_menu.Append(wx.ID_NEW, '&New Layout\tCtrl+N', 'Create a new layout')
+        open_view = file_menu.Append(wx.ID_OPEN, '&Open Layout\tCtrl+O', 'Open an existing layout')
+        save_view = file_menu.Append(wx.ID_SAVE, '&Save Layout\tCtrl+S', 'Save the current layout')
         file_menu.AppendSeparator()
         exit_argos = file_menu.Append(wx.ID_EXIT, 'E&xit\tAlt+F4', 'Exit Argos')
 
