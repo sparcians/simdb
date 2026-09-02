@@ -14,11 +14,11 @@ viewer answers *"now that it's captured, how do I look at it?"*
 
 ```bash
 python argos.py --database path/to/collected.db
-python argos.py --database path/to/collected.db --view-file layout.alf
+python argos.py --database path/to/collected.db --layout-file layout.alf
 ```
 
 - `--database` (required): the Argos-collected database to open.
-- `--view-file` (optional): an Argos Layout File (`*.alf`) describing a saved
+- `--layout-file` (optional): an Argos Layout File (`*.alf`) describing a saved
   layout. If supplied, this view is always used and the database's last-known
   view is ignored.
 
@@ -79,7 +79,7 @@ colorization chosen for each object, and the selected clock. Save with
 unnamed dirty layout, Argos asks whether to save it as an ALF file, save it into
 the database, discard it, or cancel closing. A view saved into the database is
 restored automatically the next time that database is opened without a
-`--view-file`.
+`--layout-file`.
 
 The playback position (the tick you're currently viewing) is treated as a local,
 per-session preference and is not stored in the shared layout file.
