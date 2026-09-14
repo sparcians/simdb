@@ -64,6 +64,7 @@ class DataTypeInspector:
         self._root_views = []
         self._deserializers_by_typename = {}
         self._tiny_strings = TinyStrings(db_file)
+        self._scalar_enums = {}
         self._load()
 
     @property
@@ -223,6 +224,27 @@ class DataTypeInspector:
 
         return self.GetRootDefn(struct_name)
 
+    def _get_scalar_enum(self, enum_name):
+        # type: (str) -> Optional[tuple]
+        """Resolve/cache (members, backing type) for an enum collected directly (not as a struct field)."""
+        if enum_name in self._scalar_enums:
+            return self._scalar_enums[enum_name]
+
+        result = None
+        cur = self._conn.cursor()
+        cur.execute("SELECT Id,EnumIntTypeName FROM CollectedEnums WHERE EnumName=?", (enum_name,))
+        row = cur.fetchone()
+        if row:
+            enum_id, backing_type = row
+            cur.execute("SELECT MemberName,MemberValueStr FROM EnumMembers WHERE EnumID=?", (enum_id,))
+            rows = cur.fetchall()
+            if rows:
+                members = {member_name: int(value_str) for member_name, value_str in rows}
+                result = (members, backing_type)
+
+        self._scalar_enums[enum_name] = result
+        return result
+
     def GetEnumMap(self, enum_name):
         # type: (str) -> Optional[Dict[str, int]]
         """Member map for ``Kind == 'enum'`` where ``TypeName`` or field ``Name`` matches *enum_name*."""
@@ -231,6 +253,13 @@ class DataTypeInspector:
                 continue
             if node.type_name == enum_name or node.name == enum_name:
                 return dict(node.enum_members)
+
+        # The above loop checked for enums found inside a collected struct.
+        # Standalone enums fall here.
+        scalar_enum = self._get_scalar_enum(enum_name)
+        if scalar_enum:
+            return dict(scalar_enum[0])
+
         return None
 
     def GetEnumBackingKind(self, enum_name):
@@ -241,6 +270,11 @@ class DataTypeInspector:
                 continue
             if node.type_name == enum_name or node.name == enum_name:
                 return node.enum_backing
+
+        scalar_enum = self._get_scalar_enum(enum_name)
+        if scalar_enum:
+            return scalar_enum[1]
+
         return None
 
     def GetSimpleTypeSpecialFormatter(self, type_name):
