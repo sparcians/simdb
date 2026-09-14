@@ -52,6 +52,36 @@ class ArgosFrame(wx.Frame):
 
     def PostLoad(self, view_file):
         self.view_settings.PostLoad(self, view_file)
+        self.__AutoMaximizeSingleWidget()
+
+    def __AutoMaximizeSingleWidget(self):
+        if self.inspector.GetTabNames() != ['Tab 1']:
+            return
+
+        containers = self.inspector.tabs[0].GetWidgetContainers()
+        widgets = [c.GetWidget() for c in containers if c.GetWidget() is not None]
+        if len(widgets) != 1:
+            return
+
+        btn = self.__FindMaximizeButton(widgets[0])
+        if btn is not None:
+            self.inspector.SetSelection(1)
+            event = wx.CommandEvent(wx.EVT_BUTTON.typeId, btn.GetId())
+            event.SetEventObject(btn)
+            btn.GetEventHandler().ProcessEvent(event)
+            # Do not dirty the layout. This forced button click is a workaround
+            # for single-SchedulingLines layouts on first load ("ghost" buttons
+            # appear and you have to mouseover to get rid of them).
+            self.view_settings.SetDirty(False)
+
+    def __FindMaximizeButton(self, window):
+        for child in window.GetChildren():
+            if isinstance(child, wx.Button) and child.GetLabel() == "@":
+                return child
+            btn = self.__FindMaximizeButton(child)
+            if btn is not None:
+                return btn
+        return None
 
     def CreateResourceBitmap(self, filename, size=(16, 16)):
         w,h = size

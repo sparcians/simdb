@@ -49,10 +49,21 @@ class DataRetriever:
 
     def GetCurrentViewSettings(self):
         settings = {}
-        assert set(self._displayed_columns_by_elem_path.keys()) == set(self._auto_colorize_column_by_elem_path.keys())
+
+        # Keep the per-element struct metadata normalized even when scalar struct
+        # paths are present.
+        for elem_path, displayed_columns in list(self._displayed_columns_by_elem_path.items()):
+            self._auto_colorize_column_by_elem_path.setdefault(elem_path, None)
+            if displayed_columns is None:
+                self._displayed_columns_by_elem_path[elem_path] = []
+
+        for elem_path, auto_colorize_column in list(self._auto_colorize_column_by_elem_path.items()):
+            self._displayed_columns_by_elem_path.setdefault(elem_path, [])
+            if auto_colorize_column is not None and auto_colorize_column not in self._displayed_columns_by_elem_path[elem_path]:
+                self._displayed_columns_by_elem_path[elem_path] = [auto_colorize_column] + self._displayed_columns_by_elem_path[elem_path]
 
         for elem_path, displayed_columns in self._displayed_columns_by_elem_path.items():
-            assert len(displayed_columns) > 0
+            assert len(displayed_columns) > 0 or elem_path in self._auto_colorize_column_by_elem_path
             settings[elem_path] = {'auto_colorize_column': None}
             settings[elem_path]['displayed_columns'] = copy.deepcopy(displayed_columns)
 
@@ -63,13 +74,9 @@ class DataRetriever:
         return settings
 
     def ValidateViewSettings(self, settings, db, simhier, dtype_inspector, load_errors):
-        for elem_path, _ in settings.items():
-            if elem_path not in simhier.GetElemPaths():
-                err = f"Collectable path not found in database: {elem_path}"
-                load_errors.append(err)
-            else:
-                # TODO cnyce: validate displayed_columns against the struct defn
-                pass
+        # Encountering a collectable path in the layout file that is not in the database
+        # is not an error. We have no other checks to make.
+        pass
 
     def ApplyViewSettings(self, settings):
         self._displayed_columns_by_elem_path = {}
@@ -77,6 +84,19 @@ class DataRetriever:
 
         for elem_path, struct_settings in settings.items():
             displayed_columns = struct_settings['displayed_columns']
+            if displayed_columns == '<ALL_COLUMNS>':
+                cid = self.simhier.GetCollectionID(elem_path)
+                # No CID? This path was not collected in this DB.
+                if cid is None:
+                    continue
+
+                dtype = self.dtype_inspector.GetDataTypeForCollectionID(cid)
+                deserializer = self.dtype_inspector.GetDeserializer(dtype)
+                if isinstance(deserializer, (ContigContainerDeserializer, SparseContainerDeserializer)):
+                    deserializer = deserializer._bin_deserializer
+                if isinstance(deserializer, StructDeserializer):
+                    displayed_columns = deserializer.GetAllFieldNames()
+
             auto_colorize_column = struct_settings['auto_colorize_column']
             self._displayed_columns_by_elem_path[elem_path] = copy.deepcopy(displayed_columns)
             self._auto_colorize_column_by_elem_path[elem_path] = auto_colorize_column

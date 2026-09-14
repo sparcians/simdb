@@ -354,6 +354,8 @@ public:
             dumpTable(db_mgr_, "CollectedEnums");
             dumpTable(db_mgr_, "EnumMembers");
             dumpTable(db_mgr_, "CollectableTreeNodes");
+            dumpTable(db_mgr_, "DataTypeSchemas");
+            dumpTable(db_mgr_, "DataTypeNodes");
             dumpTable(db_mgr_, "QueueMaxSizes");
             dumpTable(db_mgr_, "Notifications");
         }
