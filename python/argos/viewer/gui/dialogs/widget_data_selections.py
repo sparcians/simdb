@@ -567,7 +567,7 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
             (self.SHOW_DID_LABEL, show_did),
         ]
         WidgetDataSelectionsDlg.__init__(
-            self, parent, frame, elem_paths, queues_only=True, settings_chkboxes=chkboxes,
+            self, parent, frame, elem_paths, queues_only=False, settings_chkboxes=chkboxes,
         )
 
     def _BuildSettingsArea(self, sizer):

@@ -52,9 +52,6 @@ class QueueUtilizWidget(wx.Panel):
     def GetWidgetCreationString(self):
         return 'Queue Utilization'
 
-    def GetErrorIfDroppedNodeIncompatible(self, elem_path):
-        return None
-
     def AddElement(self, elem_path):
         pass
 

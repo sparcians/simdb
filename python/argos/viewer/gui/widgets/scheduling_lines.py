@@ -27,6 +27,8 @@ class SchedulingLinesWidget(wx.Panel):
         self.tracked_annos = {}
         self.grid = None
         self.rasterizers = {}
+        self.scalar_row_by_elem_path = {}
+        self.scalar_elem_paths = set(frame.simhier.GetScalarStatsElemPaths()) | set(frame.simhier.GetScalarStructsElemPaths())
 
         cursor = frame.db.cursor()
         cmd = 'SELECT CID,MaxSize FROM QueueMaxSizes'
@@ -35,6 +37,14 @@ class SchedulingLinesWidget(wx.Panel):
         self.queue_max_sizes_by_collection_id = {}
         for collection_id,max_size in cursor.fetchall():
             self.queue_max_sizes_by_collection_id[collection_id] = max_size
+
+        # Scalars are single-value collectables, not queue bins. They still have
+        # a collection ID and should be treated as having data for display purposes,
+        # even though they do not participate in queue-capacity logic.
+        for elem_path in self.scalar_elem_paths:
+            collection_id = frame.simhier.GetCollectionID(elem_path)
+            if collection_id is not None:
+                self.queue_max_sizes_by_collection_id[collection_id] = 1
 
         if elem_paths:
             self.SetElements(elem_paths)
@@ -70,33 +80,6 @@ class SchedulingLinesWidget(wx.Panel):
     def GetWidgetCreationString(self):
         return 'Scheduling Lines'
 
-    def GetErrorIfDroppedNodeIncompatible(self, elem_path):
-        simhier = self.frame.simhier
-        is_timeseries = elem_path in simhier.GetScalarStatsElemPaths()
-        is_container = elem_path in simhier.GetContainerElemPaths()
-
-        if not is_container:
-            msg = 'Only leaf nodes that are containers (queues) can be dropped here. '
-            msg += 'This node represents a scalar stat (timeseries).' if is_timeseries else 'This node represents a struct.'
-            return msg, 'Incompatible Node'
-
-        if elem_path in self.caption_mgr.GetAllMatchingElemPaths():
-            return 'This queue is already being displayed.', 'Duplicate Queue'
-        
-        if self.grid:
-            existing_captions = set()
-            for row in range(self.grid.GetNumberRows()):
-                existing_captions.add(self.grid.GetCellValue(row, 0).rstrip())
-
-            todo_captions = self.__GetCaptionsForElement(elem_path, self.__GetCaptionElemPathsIncluding(elem_path))
-            for caption in todo_captions:
-                if caption in existing_captions:
-                    msg = 'Adding this to the Scheduling Lines widget would result in a duplicate caption(s). '
-                    msg += 'You need to open the widget settings dialog and adjust the regexes.'
-                    return msg, 'Duplicate Caption'
-
-        return None
-
     def AddElement(self, elem_path):
         self.__AddElement(elem_path)
         self.__Refresh()
@@ -109,6 +92,8 @@ class SchedulingLinesWidget(wx.Panel):
         for elem_path in elem_paths:
             elem_cid = self.frame.simhier.GetCollectionID(elem_path)
             has_data = self.queue_max_sizes_by_collection_id.get(elem_cid, 0) > 0
+            if elem_path in self.scalar_elem_paths:
+                has_data = True
             if has_data:
                 elem_paths_with_data.append(elem_path)
             else:
@@ -136,6 +121,7 @@ class SchedulingLinesWidget(wx.Panel):
     def GetCurrentViewSettings(self):
         settings = {}
         settings['regexes'] = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
+        settings['custom_captions'] = self.caption_mgr.GetCustomCaptions()
         settings['num_ticks_before'] = self.num_ticks_before
         settings['num_ticks_after'] = self.num_ticks_after
         settings['show_detailed_queue_packets'] = self.show_detailed_queue_packets
@@ -150,7 +136,9 @@ class SchedulingLinesWidget(wx.Panel):
         return {}
 
     def ApplyViewSettings(self, settings):
+        custom_captions = settings.get('custom_captions', {})
         dirty = self.caption_mgr.GetElemPathRegexReplacements(as_list=True) != settings['regexes'] or \
+                self.caption_mgr.GetCustomCaptions() != custom_captions or \
                 self.num_ticks_before != settings['num_ticks_before'] or \
                 self.num_ticks_after != settings['num_ticks_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
@@ -164,6 +152,7 @@ class SchedulingLinesWidget(wx.Panel):
             return
 
         self.caption_mgr.SetElemPathRegexReplacements(settings['regexes'])
+        self.caption_mgr.SetCustomCaptions(custom_captions)
         self.num_ticks_before = settings['num_ticks_before']
         self.num_ticks_after = settings['num_ticks_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
@@ -297,6 +286,7 @@ class SchedulingLinesWidget(wx.Panel):
         if new_grid or self.grid is None:
             self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
         self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
+        self.grid.GetGridWindow().Bind(wx.EVT_RIGHT_DOWN, self.__OnGridRightDown)
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
@@ -373,8 +363,75 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.__SetElementCaptions(0)
 
+    def __ScalarValueToString(self, value):
+        if value is None:
+            return ''
+        if isinstance(value, (list, tuple)):
+            parts = []
+            for key, val in value:
+                if key == 'DID' and not self.show_did:
+                    continue
+                parts.append(f'{key}({val})')
+            return ' '.join(parts)
+        return str(value)
+
     def __RasterizeAllCells(self):
         for elem_path, vals in self._ranges.items():
+            if elem_path in self.scalar_elem_paths:
+                row = self.scalar_row_by_elem_path.get(elem_path)
+                if row is None:
+                    continue
+
+                selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+                clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
+                current_cycle = self.frame.playback_bar.GetCurrentCycle()
+                detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 3 if self.show_detailed_queue_packets else -1
+
+                for i, value in enumerate(vals['DataVals']):
+                    if value is None:
+                        continue
+
+                    time_val = vals['TimeVals'][i]
+                    time_cycle = int(time_val) // clock_period
+                    text = self.__ScalarValueToString(value)
+
+                    auto_colorize_column = self.frame.data_retriever.GetAutoColorizeColumn(elem_path)
+                    auto_colorize_key = None
+                    if isinstance(value, (list, tuple)) and auto_colorize_column is not None:
+                        for key, keyval in value:
+                            if key == auto_colorize_column:
+                                auto_colorize_key = keyval
+                                break
+
+                    if auto_colorize_key is None:
+                        auto_colorize_key = text if text else str(value)
+
+                    auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key)
+                    auto_color = self.frame.widget_renderer.GetAutoColor(auto_colorize_key)
+
+                    for col in range(self.grid.GetNumberCols()):
+                        if not self.grid.IsColShown(col):
+                            break
+                        col_label = self.grid.GetColLabelValue(col)
+                        try:
+                            col_label = int(col_label)
+                        except ValueError:
+                            continue
+                        if col_label == time_cycle:
+                            self.grid.SetCellValue(row, col, auto_label)
+                            self.grid.SetCellBackgroundColour(row, col, auto_color)
+                            if self.enable_tooltips:
+                                self.grid.SetCellToolTip(row, col, text)
+                            break
+
+                    if detailed_pkt_col != -1 and time_cycle == current_cycle:
+                        self.grid.SetCellValue(row, detailed_pkt_col, text)
+                        self.grid.SetCellAlignment(row, detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
+                        self.grid.SetCellBackgroundColour(row, detailed_pkt_col, auto_color)
+                        if self.enable_tooltips:
+                            self.grid.SetCellToolTip(row, detailed_pkt_col, text)
+                continue
+
             time_vals = vals['TimeVals']
             data_vals = vals['DataVals']
 
@@ -502,30 +559,29 @@ class SchedulingLinesWidget(wx.Panel):
         for i, segment in enumerate(layout):
             caption = self.__FormatSegmentCaption(elem_path, segment)
             caption += ' ' * (max_num_chars - len(caption))
-            self.grid.SetCellValue(row_offset + i, col, caption)
+            row = row_offset + i
+            self.grid.SetCellValue(row, col, caption)
 
             if segment['kind'] == 'bin':
                 bin_idx = segment['bin']
                 self.rasterizers[(elem_path, bin_idx)] = Rasterizer(
-                    self.frame, self.grid, self, elem_path, bin_idx, row_offset + i, detailed_pkt_col)
+                    self.frame, self.grid, self, elem_path, bin_idx, row, detailed_pkt_col)
+            elif segment['kind'] == 'scalar':
+                self.scalar_row_by_elem_path[elem_path] = row
 
         return len(layout)
-
-    def __GetCaptionElemPathsIncluding(self, elem_path):
-        elem_paths = list(self.caption_mgr.GetAllMatchingElemPaths())
-        if elem_path not in elem_paths:
-            elem_paths.append(elem_path)
-        return elem_paths
-
-    def __GetCaptionsForElement(self, elem_path, elem_paths=None):
-        segments = self.__BuildStaticRowLayout(elem_path)
-        return [self.__FormatSegmentCaption(elem_path, segment, elem_paths) for segment in segments]
 
     def __GetBinsWithDataByElemPath(self, ranges, elem_paths):
         bins_with_data_by_elem_path = {}
         for elem_path in elem_paths:
             bins_with_data = set()
             vals = ranges.get(elem_path, {'DataVals': []})
+            if elem_path in self.scalar_elem_paths:
+                for data_val in vals.get('DataVals', []):
+                    if data_val is not None:
+                        bins_with_data.add(0)
+                bins_with_data_by_elem_path[elem_path] = bins_with_data
+                continue
             for data_dicts in vals['DataVals']:
                 if data_dicts is None:
                     continue
@@ -541,6 +597,9 @@ class SchedulingLinesWidget(wx.Panel):
         return self.__BuildStaticRowLayout(elem_path)
 
     def __BuildStaticRowLayout(self, elem_path):
+        if elem_path in self.scalar_elem_paths:
+            return [{'kind': 'scalar'}]
+
         collection_id = self.frame.simhier.GetCollectionID(elem_path)
         num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
         max_size = self.queue_max_sizes_by_collection_id[collection_id]
@@ -561,6 +620,9 @@ class SchedulingLinesWidget(wx.Panel):
         return segments
 
     def __BuildDynamicRowLayout(self, elem_path, bins_with_data):
+        if elem_path in self.scalar_elem_paths:
+            return [{'kind': 'scalar'}]
+
         collection_id = self.frame.simhier.GetCollectionID(elem_path)
         num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
 
@@ -583,6 +645,13 @@ class SchedulingLinesWidget(wx.Panel):
         if elem_paths is None:
             elem_paths = self._caption_elem_paths
 
+        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
+        custom_caption = self.caption_mgr.GetCustomCaption(segment_key)
+        if custom_caption is not None:
+            return custom_caption
+
+        if segment['kind'] == 'scalar':
+            return self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths) or self.caption_mgr.GetMinimumUniqueSuffix(elem_path, elem_paths)
         if segment['kind'] == 'no_data':
             return '{}(no data)'.format(
                 self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths))
@@ -608,6 +677,8 @@ class SchedulingLinesWidget(wx.Panel):
         return None
 
     def __SegmentElemPathTooltip(self, elem_path, segment):
+        if segment['kind'] == 'scalar':
+            return elem_path
         if segment['kind'] == 'no_data':
             return elem_path
         if segment['kind'] == 'range':
@@ -631,6 +702,118 @@ class SchedulingLinesWidget(wx.Panel):
             self.grid.SetToolTip(tooltip)
         else:
             self.grid.UnsetToolTip()
+
+    def __OnGridRightDown(self, evt):
+        x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
+        row, col = self.grid.XYToCell(x, y)
+
+        if col != 0 or row < 0 or row >= self.grid.GetNumberRows():
+            evt.Skip()
+            return
+
+        # Find the (elem_path, segment) corresponding to this row
+        current_row = 0
+        target_info = None
+        for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
+            layouts = self._layouts_by_elem_path.get(elem_path, [])
+            if current_row <= row < current_row + len(layouts):
+                segment = layouts[row - current_row]
+                target_info = (elem_path, segment)
+                break
+            current_row += len(layouts)
+
+        if not target_info:
+            evt.Skip()
+            return
+
+        elem_path, segment = target_info
+        is_container = segment['kind'] in ('bin', 'range', 'no_data')
+        current_caption = self.grid.GetCellValue(row, 0).strip()
+
+        menu = wx.Menu()
+        if is_container:
+            item_single = menu.Append(wx.ID_ANY, "Edit caption (just this one)")
+            self.Bind(
+                wx.EVT_MENU,
+                partial(self.__OnEditSingleCaption, elem_path=elem_path, segment=segment, current_caption=current_caption),
+                item_single
+            )
+
+            item_container = menu.Append(wx.ID_ANY, "Edit captions in this container")
+            self.Bind(
+                wx.EVT_MENU,
+                partial(self.__OnEditContainerCaptions, elem_path=elem_path),
+                item_container
+            )
+        else:
+            item_scalar = menu.Append(wx.ID_ANY, "Edit caption")
+            self.Bind(
+                wx.EVT_MENU,
+                partial(self.__OnEditScalarCaption, elem_path=elem_path, current_caption=current_caption),
+                item_scalar
+            )
+
+        self.PopupMenu(menu)
+        menu.Destroy()
+
+    def __OnEditSingleCaption(self, evt, elem_path, segment, current_caption):
+        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
+        dlg = wx.TextEntryDialog(
+            self,
+            f"Enter new caption for '{segment_key}':\n(Leave blank to reset to default)",
+            "Edit Caption",
+            value=current_caption
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            new_caption = dlg.GetValue().strip()
+            if new_caption:
+                self.caption_mgr.SetCustomCaption(segment_key, new_caption)
+            else:
+                self.caption_mgr.RemoveCustomCaption(segment_key)
+            self.__Refresh()
+            self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
+        dlg.Destroy()
+
+    def __OnEditContainerCaptions(self, evt, elem_path):
+        custom_prefix = self.caption_mgr.GetCustomCaption(elem_path)
+        if custom_prefix is not None:
+            default_value = custom_prefix
+        else:
+            prefix = self.caption_mgr.GetCaptionPrefix(elem_path, self._caption_elem_paths, self.show_full_paths)
+            default_value = prefix if prefix else ''
+
+        dlg = wx.TextEntryDialog(
+            self,
+            f"Enter new caption for container '{elem_path}':\n(Leave blank to reset to default)",
+            "Edit Container Captions",
+            value=default_value
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            new_caption = dlg.GetValue().strip()
+            if new_caption:
+                self.caption_mgr.SetCustomCaption(elem_path, new_caption)
+            else:
+                self.caption_mgr.RemoveContainerCustomCaptions(elem_path)
+            self.__Refresh()
+            self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
+        dlg.Destroy()
+
+    def __OnEditScalarCaption(self, evt, elem_path, current_caption):
+        dlg = wx.TextEntryDialog(
+            self,
+            f"Enter new caption for '{elem_path}':\n(Leave blank to reset to default)",
+            "Edit Caption",
+            value=current_caption
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            new_caption = dlg.GetValue().strip()
+            if new_caption:
+                self.caption_mgr.SetCustomCaption(elem_path, new_caption)
+            else:
+                self.caption_mgr.RemoveCustomCaption(elem_path)
+            self.__Refresh()
+            self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
+        dlg.Destroy()
 
     def __EditWidget(self, evt):
         widget_container = self.GetParent()
@@ -669,6 +852,39 @@ class CaptionManager:
 
     def ClearSelections(self):
         self.regex_replacements_by_elem_path_regex = OrderedDict()
+        self.custom_captions = {}
+
+    def SetCustomCaption(self, segment_key, caption):
+        self.custom_captions[segment_key] = caption
+
+    def RemoveCustomCaption(self, segment_key):
+        self.custom_captions.pop(segment_key, None)
+
+    def RemoveContainerCustomCaptions(self, elem_path):
+        self.RemoveCustomCaption(elem_path)
+        keys_to_remove = [
+            k for k in self.custom_captions
+            if k == elem_path or k.startswith(f"{elem_path}[")
+        ]
+        for k in keys_to_remove:
+            self.custom_captions.pop(k, None)
+
+    def GetCustomCaption(self, segment_key):
+        return self.custom_captions.get(segment_key)
+
+    def GetCustomCaptions(self):
+        return copy.deepcopy(self.custom_captions)
+
+    def SetCustomCaptions(self, custom_captions):
+        if isinstance(custom_captions, list):
+            self.custom_captions = dict(custom_captions)
+        elif isinstance(custom_captions, dict):
+            self.custom_captions = copy.deepcopy(custom_captions)
+        else:
+            self.custom_captions = {}
+
+    def ClearCustomCaptions(self):
+        self.custom_captions = {}
 
     def SetElemPathRegexReplacement(self, elem_path_regex, regex_replacement):
         self.regex_replacements_by_elem_path_regex[elem_path_regex] = regex_replacement
@@ -692,6 +908,8 @@ class CaptionManager:
         if elem_paths is None:
             elem_paths = self.GetAllMatchingElemPaths()
 
+        is_scalar = elem_path in self.simhier.GetScalarStatsElemPaths() or elem_path in self.simhier.GetScalarStructsElemPaths()
+
         for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
             if regex == elem_path:
                 # No regex was supplied in the settings dialog. The full path was given e.g.
@@ -702,7 +920,10 @@ class CaptionManager:
                 #
                 # We will just return the last part of the path as the caption using
                 # heads-up camel case e.g. "NumInstsRetired[3]"
-                return self.GetCaptionPrefix(elem_path, elem_paths, show_full_paths) + '[{}]'.format(bin_idx)
+                prefix = self.GetCaptionPrefix(elem_path, elem_paths, show_full_paths)
+                if is_scalar:
+                    return prefix
+                return prefix + '[{}]'.format(bin_idx)
 
             if re.compile(regex).match(elem_path):
                 # This matched an elem path e.g.
@@ -716,14 +937,24 @@ class CaptionManager:
                 #                                               | |
                 #                                               | bin index
                 #                                               core index
-                return re.sub(regex, replacements, elem_path) + '[{}]'.format(bin_idx)
+                caption = re.sub(regex, replacements, elem_path)
+                if is_scalar:
+                    return caption
+                return caption + '[{}]'.format(bin_idx)
 
         prefix = elem_path if show_full_paths else self.GetMinimumUniqueSuffix(elem_path, elem_paths)
+        if is_scalar:
+            return prefix
         return f'{prefix}[{bin_idx}]'
     
     def GetCaptionPrefix(self, elem_path, elem_paths=None, show_full_paths=False):
         if elem_paths is None:
             elem_paths = self.GetAllMatchingElemPaths()
+
+        # Check custom container-level caption first
+        custom_prefix = self.GetCustomCaption(elem_path)
+        if custom_prefix is not None:
+            return custom_prefix
 
         for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
             if regex == elem_path:
@@ -739,25 +970,21 @@ class CaptionManager:
         return None
 
     def GetAllMatchingElemPaths(self):
-        # The display order of the queues/rows follows the order of the regex
-        # OrderedDict (i.e. the order the user set in the customization dialog),
-        # NOT the static order of self.simhier.GetContainerElemPaths(). The regex
-        # dict is therefore the outer loop here.
-        container_elem_paths = self.simhier.GetContainerElemPaths()
+        # The display order follows the regex OrderedDict, but scalar leaves and
+        # queue containers are both valid collectables. We therefore match against
+        # the full item set rather than only container paths.
+        item_elem_paths = self.simhier.GetItemElemPaths()
 
         elem_paths = []
         seen = set()
         for regex, _ in self.regex_replacements_by_elem_path_regex.items():
-            # Exact path match first (the regex is a full element path).
-            if regex in container_elem_paths and regex not in seen:
+            if regex in item_elem_paths and regex not in seen:
                 elem_paths.append(regex)
                 seen.add(regex)
                 continue
 
-            # Otherwise treat it as a regex and append all matching container
-            # paths (in stable simhier order within this single regex group).
             compiled = re.compile(regex)
-            for elem_path in container_elem_paths:
+            for elem_path in item_elem_paths:
                 if elem_path in seen:
                     continue
 
@@ -776,7 +1003,7 @@ class CaptionManager:
 
     def GetMatchingElemPaths(self, regex):
         elem_paths = []
-        for elem_path in self.simhier.GetContainerElemPaths():
+        for elem_path in self.simhier.GetItemElemPaths():
             if re.compile(regex).match(elem_path):
                 elem_paths.append(elem_path)
 

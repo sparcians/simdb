@@ -30,12 +30,6 @@ class SummaryViews(wx.Panel):
     def GetWidgetCreationString(self):
         return 'Summary Views'
 
-    def GetErrorIfDroppedNodeIncompatible(self, elem_path):
-        if elem_path in self.elem_paths:
-            return 'This collectable is already being displayed.', 'Duplicate Collectable'
-
-        return None
-
     def UpdateWidgetData(self):
         self.__Refresh()
 
