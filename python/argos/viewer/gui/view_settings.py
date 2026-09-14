@@ -6,12 +6,17 @@ from viewer.gui.dialogs.save_view_choice import SaveViewChoiceDlg, SAVE_AS_AVF, 
 LAST_KNOWN_VIEW_TABLE = 'ArgosLastKnownView'
 
 class ViewSettings:
-    def __init__(self):
+    def __init__(self, read_only=False):
         self._views_dir = os.getcwd()
         self._view_file = None
         self._frame = None
         self._dirty = False
         self._dirty_reasons = set()
+        self._read_only = read_only
+
+    @property
+    def read_only(self):
+        return self._read_only
 
     @property
     def view_file(self):
@@ -30,6 +35,12 @@ class ViewSettings:
         return self._dirty
 
     def SetDirty(self, dirty=True, reason=None):
+        if self._read_only:
+            self._dirty = False
+            self._dirty_reasons.clear()
+            self.__UpdateTitle()
+            return
+
         self._dirty = dirty
         if dirty and reason is not None:
             assert isinstance(reason, DirtyReasons)
@@ -119,6 +130,9 @@ class ViewSettings:
             return False
 
     def __SaveViewToDatabase(self):
+        if self._read_only:
+            return
+
         settings_yaml = yaml.safe_dump(self.__GetViewSettings())
         with tempfile.NamedTemporaryFile(mode='w', suffix='.alf', prefix='argos_view_',
                                          dir=tempfile.gettempdir(), delete=False) as fout:
@@ -139,6 +153,10 @@ class ViewSettings:
         return result
 
     def CreateNewView(self):
+        if self._read_only:
+            self.__ResetDefaultViewSettings()
+            return
+
         if self._dirty:
             if self.view_file:
                 result = self.__AskToSaveChangesToCurrentView("Save changes to '{}'?".format(os.path.basename(self.view_file)))
@@ -185,7 +203,7 @@ class ViewSettings:
             dlg.Destroy()
             return
         
-        if self._dirty:
+        if self._dirty and not self._read_only:
             if self.view_file:
                 msg = "Save changes to '{}' before opening '{}'?"
                 msg = msg.format(os.path.basename(self.view_file), os.path.basename(view_file))
@@ -221,6 +239,9 @@ class ViewSettings:
             wx.CallAfter(DoLoad, self, view_file)
 
     def SaveView(self, prompt_if_dirty=True):
+        if self._read_only:
+            return True
+
         self.__SaveUserSettings()
 
         if not self._dirty:
@@ -268,6 +289,9 @@ class ViewSettings:
         # Returns True if Argos can be closed after calling this method.
         self.__SaveUserSettings()
 
+        if self._read_only:
+            return True
+
         if self.view_file is None:
             if not self._dirty:
                 return True
@@ -298,6 +322,9 @@ class ViewSettings:
         return True
 
     def __WriteViewSettings(self, view_file):
+        if self._read_only:
+            return
+
         settings = self.__GetViewSettings()
 
         settings_dir = os.path.dirname(view_file)
@@ -308,11 +335,8 @@ class ViewSettings:
             yaml.dump(settings, fout)
 
     def __UpdateTitle(self):
-        if self._frame is None:
-            return
-
         view_file = self.view_file
-        dirty = self._dirty
+        dirty = self._dirty and not self._read_only
 
         if view_file is None:
             view_file = 'unnamed'

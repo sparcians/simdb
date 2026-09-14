@@ -3,10 +3,10 @@ from viewer.model.frame import ArgosFrame
 from viewer.gui.view_settings import ViewSettings
 
 class Workspace:
-    def __init__(self, db_path, view_file):
+    def __init__(self, db_path, view_file, read_only=False):
         if not os.path.isfile(db_path):
             raise ValueError(f"Database file does not exist: {db_path}")
-        self._view_settings = ViewSettings()
+        self._view_settings = ViewSettings(read_only=read_only)
         self._frame = ArgosFrame(db_path, self._view_settings)
         self._frame.PostLoad(view_file)
         self._frame.Show()

@@ -15,12 +15,15 @@ viewer answers *"now that it's captured, how do I look at it?"*
 ```bash
 python argos.py --database path/to/collected.db
 python argos.py --database path/to/collected.db --layout-file layout.alf
+python argos.py --database path/to/collected.db --read-only
 ```
 
 - `--database` (required): the Argos-collected database to open.
 - `--layout-file` (optional): an Argos Layout File (`*.alf`) describing a saved
   layout. If supplied, this view is always used and the database's last-known
   view is ignored.
+- `--read-only` (optional): open in read-only mode where save dialogs and layout
+  persistence are disabled, and the UI title remains non-dirty.
 
 ---
 
