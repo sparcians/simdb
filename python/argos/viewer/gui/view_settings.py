@@ -13,10 +13,15 @@ class ViewSettings:
         self._dirty = False
         self._dirty_reasons = set()
         self._read_only = read_only
+        self._tick_overridden = False
 
     @property
     def read_only(self):
         return self._read_only
+
+    @property
+    def tick_overridden(self):
+        return self._tick_overridden
 
     @property
     def view_file(self):
@@ -57,6 +62,7 @@ class ViewSettings:
         elif not self.__LoadLastKnownView():
             self.__ResetDefaultViewSettings()
 
+        self._tick_overridden = False
         self.__ApplyUserSettings()
     
     def Load(self, view_file, set_as_current=True):
@@ -384,6 +390,7 @@ class ViewSettings:
                 self._frame.data_retriever.ApplyUserSettings(settings['DataRetriever'])
                 self._frame.inspector.ApplyUserSettings(settings['Inspector'])
                 self._frame.widget_renderer.ApplyUserSettings(settings['WidgetRenderer'])
+                self._tick_overridden = True
         except Exception as ex:
             print (f"Error loading user settings. Deleting settings file. Error: '{ex}'")
             os.remove(settings_file)
