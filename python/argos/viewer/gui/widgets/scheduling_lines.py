@@ -505,7 +505,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         for row in range(self.grid.GetNumberRows()):
             for col in range(1, self.grid.GetNumberCols()):
-                if self.grid.GetCellValue(row, col) == '' and self.grid.GetCellBackgroundColour(row, col) == (255, 255, 255):
+                if self.grid.GetCellValue(row, col).strip() == '' and self.grid.GetCellBackgroundColour(row, col) == (255, 255, 255):
                     self.grid.SetCellBackgroundColour(row, col, (240,240,240))
 
         self.grid.AutoSize()

@@ -52,6 +52,10 @@ class ArgosFrame(wx.Frame):
 
     def PostLoad(self, view_file):
         self.view_settings.PostLoad(self, view_file)
+        if not self.view_settings.tick_overridden:
+            time_vals = self.data_retriever.GetAllTimeVals()
+            if time_vals:
+                self.widget_renderer.GoToTick(time_vals[len(time_vals) // 2])
         self.__AutoMaximizeSingleWidget()
 
     def __AutoMaximizeSingleWidget(self):
