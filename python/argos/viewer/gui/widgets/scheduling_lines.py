@@ -13,11 +13,11 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_ENABLE_TOOLTIPS = False
     DEFAULT_SHOW_DID = False
 
-    def __init__(self, parent, frame, elem_paths=None, num_ticks_before=DEFAULT_TICKS_BEFORE, num_ticks_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, show_full_paths=DEFAULT_SHOW_FULL_PATHS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
+    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, show_full_paths=DEFAULT_SHOW_FULL_PATHS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
         super().__init__(parent)
         self.frame = frame
-        self.num_ticks_before = num_ticks_before
-        self.num_ticks_after = num_ticks_after
+        self.num_samples_before = num_samples_before
+        self.num_samples_after = num_samples_after
         self.show_detailed_queue_packets = show_details
         self.hide_empty_rows = hide_empty_rows
         self.show_full_paths = show_full_paths
@@ -122,8 +122,8 @@ class SchedulingLinesWidget(wx.Panel):
         settings = {}
         settings['regexes'] = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
         settings['custom_captions'] = self.caption_mgr.GetCustomCaptions()
-        settings['num_ticks_before'] = self.num_ticks_before
-        settings['num_ticks_after'] = self.num_ticks_after
+        settings['num_samples_before'] = self.num_samples_before
+        settings['num_samples_after'] = self.num_samples_after
         settings['show_detailed_queue_packets'] = self.show_detailed_queue_packets
         settings['hide_empty_rows'] = self.hide_empty_rows
         settings['show_full_paths'] = self.show_full_paths
@@ -139,8 +139,8 @@ class SchedulingLinesWidget(wx.Panel):
         custom_captions = settings.get('custom_captions', {})
         dirty = self.caption_mgr.GetElemPathRegexReplacements(as_list=True) != settings['regexes'] or \
                 self.caption_mgr.GetCustomCaptions() != custom_captions or \
-                self.num_ticks_before != settings['num_ticks_before'] or \
-                self.num_ticks_after != settings['num_ticks_after'] or \
+                self.num_samples_before != settings['num_samples_before'] or \
+                self.num_samples_after != settings['num_samples_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
                 self.hide_empty_rows != settings['hide_empty_rows'] or \
                 self.show_full_paths != settings['show_full_paths'] or \
@@ -153,8 +153,8 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.caption_mgr.SetElemPathRegexReplacements(settings['regexes'])
         self.caption_mgr.SetCustomCaptions(custom_captions)
-        self.num_ticks_before = settings['num_ticks_before']
-        self.num_ticks_after = settings['num_ticks_after']
+        self.num_samples_before = settings['num_samples_before']
+        self.num_samples_after = settings['num_samples_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
         self.hide_empty_rows = settings['hide_empty_rows']
         self.show_full_paths = settings['show_full_paths']
@@ -212,14 +212,15 @@ class SchedulingLinesWidget(wx.Panel):
             # would otherwise reset the scroll position back to the top.
             saved_view_start = self.grid.GetViewStart() if self.grid else None
 
-            selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
-            clock_period = self.frame.playback_bar.clock_periods.get(selected_clock, 1)
             current_tick = self.frame.widget_renderer.tick
-            start_time = current_tick - (self.num_ticks_before + 1) * int(clock_period)
-            end_time = current_tick + self.num_ticks_after * int(clock_period)
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
             self._caption_elem_paths = elem_paths
-            self._ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
+            self._ranges = self.frame.data_retriever.UnpackElementData(
+                current_tick,
+                elem_paths,
+                self.num_samples_before,
+                self.num_samples_after,
+            )
             self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:
@@ -265,7 +266,7 @@ class SchedulingLinesWidget(wx.Panel):
             num_rows += len(layout)
 
         # The number of columns can be calculated as:
-        #  1. Start with the sum of self.num_ticks_before and self.num_ticks_after (A)
+        #  1. Start with the sum of self.num_samples_before and self.num_samples_after (A)
         #  2. Add 2 to (A) to account for the element paths column (captions)
         #     and the current-cycle timeline column
         #  3. If self.show_detailed_queue_packets is True, add 3 to (A) to account for:
@@ -273,7 +274,7 @@ class SchedulingLinesWidget(wx.Panel):
         #     b. A column to duplicate the element paths column (captions)
         #     c. A column to show the stringified packet data e.g. "IntVal(4) DoubleVal(3.14)"
 
-        num_cols = self.num_ticks_before + self.num_ticks_after + 2
+        num_cols = self.num_samples_before + self.num_samples_after + 2
         if self.show_detailed_queue_packets:
             num_cols += 2
 
@@ -290,17 +291,22 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
-        current_tick = self.frame.widget_renderer.tick
-        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
-        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
         current_cycle = self.frame.playback_bar.GetCurrentCycle()
-        col_labels = []
-        range_cycles = sorted({
-            int(time_val) // clock_period
+        sample_time_vals = sorted({
+            int(time_val)
             for elem_data in self._ranges.values()
             for time_val in elem_data['TimeVals']
         })
-        for col in range(1, self.num_ticks_before + self.num_ticks_after + 2):
+        self._sample_col_by_time = {
+            time_val: col + 1
+            for col, time_val in enumerate(sample_time_vals)
+        }
+        range_cycles = list(range(
+            current_cycle - self.num_samples_before,
+            current_cycle + self.num_samples_after + 1,
+        ))
+        col_labels = []
+        for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
             if label_idx < len(range_cycles):
                 label = str(range_cycles[label_idx])
@@ -310,7 +316,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.grid.SetColLabelValue(col, '')
 
         if self.show_detailed_queue_packets:
-            detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 3
+            detailed_pkt_col = self.num_samples_before + self.num_samples_after + 3
             self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
             if current_cycle in range_cycles:
                 self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
@@ -348,7 +354,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.ClearGrid()
 
         current_cycle_col = None
-        for col in range(1, self.num_ticks_before + self.num_ticks_after + 2):
+        for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             try:
                 if int(self.grid.GetColLabelValue(col)) == current_cycle:
                     current_cycle_col = col
@@ -385,7 +391,7 @@ class SchedulingLinesWidget(wx.Panel):
                 selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
                 clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
                 current_cycle = self.frame.playback_bar.GetCurrentCycle()
-                detailed_pkt_col = self.num_ticks_before + self.num_ticks_after + 3 if self.show_detailed_queue_packets else -1
+                detailed_pkt_col = self.num_samples_before + self.num_samples_after + 3 if self.show_detailed_queue_packets else -1
 
                 for i, value in enumerate(vals['DataVals']):
                     if value is None:
@@ -412,12 +418,7 @@ class SchedulingLinesWidget(wx.Panel):
                     for col in range(self.grid.GetNumberCols()):
                         if not self.grid.IsColShown(col):
                             break
-                        col_label = self.grid.GetColLabelValue(col)
-                        try:
-                            col_label = int(col_label)
-                        except ValueError:
-                            continue
-                        if col_label == time_cycle:
+                        if self._sample_col_by_time.get(time_val) == col:
                             self.grid.SetCellValue(row, col, auto_label)
                             self.grid.SetCellBackgroundColour(row, col, auto_color)
                             if self.enable_tooltips:
@@ -445,7 +446,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         # Left-justify the detailed packet column
         if self.show_detailed_queue_packets:
-            col = self.num_ticks_before + self.num_ticks_after + 3
+            col = self.num_samples_before + self.num_samples_after + 3
 
             def GetMaxFieldVarLengths(strings):
                 result = {}
@@ -471,7 +472,11 @@ class SchedulingLinesWidget(wx.Panel):
                     pad = target - len(value)
                     parts.append(part + (' ' * pad))
 
-                return ' '.join(parts)
+                if not parts:
+                    # This is a scalar value, not a struct
+                    return ' ' + label
+
+                return ' ' + ' '.join(parts)
 
             labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
             labels = [label.replace('\t', ' ') for label in labels]
@@ -1056,13 +1061,7 @@ class Rasterizer:
             if not self.grid.IsColShown(col):
                 break
 
-            col_label = self.grid.GetColLabelValue(col)
-            try:
-                col_label = int(col_label)
-            except:
-                continue
-
-            if col_label == time_cycle:
+            if self.widget._sample_col_by_time.get(time_val) == col:
                 self.grid.SetCellValue(self.row, col, auto_label)
                 self.grid.SetCellBackgroundColour(self.row, col, auto_color)
                 if self.widget.enable_tooltips:
