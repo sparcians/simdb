@@ -65,7 +65,7 @@ class ArgosFrame(wx.Frame):
 
         btn = self.__FindMaximizeButton(widgets[0])
         if btn is not None:
-            self.inspector.SetSelection(1)
+            self.inspector.SelectTab(self.inspector.tabs[0])
             event = wx.CommandEvent(wx.EVT_BUTTON.typeId, btn.GetId())
             event.SetEventObject(btn)
             btn.GetEventHandler().ProcessEvent(event)

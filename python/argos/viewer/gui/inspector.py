@@ -70,6 +70,10 @@ class DataInspector(wx.aui.AuiNotebook):
     def GetTabNames(self):
         return [self.GetPageText(i) for i in range(self.__FirstUserTabIndex(), self.GetPageCount() - 1)]
 
+    def SelectTab(self, tab):
+        # Look up the page index rather than assuming one, since it shifts depending on whether the Logs tab exists.
+        self.SetSelection(self.GetPageIndex(tab))
+
     def GetCurrentViewSettings(self):
         settings = {}
         # Skip the fixed "Logs" tab (when present) and the trailing "Add Tab" page.
