@@ -317,5 +317,20 @@ class DataRetriever:
 
         return unpacked
 
+    def UnpackTicks(self, ticks, elem_paths=None):
+        # Ticks must be strictly increasing with no duplicates; empty input is invalid.
+        assert ticks
+        assert all(ticks[i] < ticks[i + 1] for i in range(len(ticks) - 1))
+
+        unpacked = {}
+        for tick in ticks:
+            tick_data = self.UnpackRange(tick, tick, elem_paths)
+            for elem_path, vals in tick_data.items():
+                entry = unpacked.setdefault(elem_path, {'TimeVals': [], 'DataVals': []})
+                entry['TimeVals'].extend(vals['TimeVals'])
+                entry['DataVals'].extend(vals['DataVals'])
+
+        return unpacked
+
     def GetAllTimeVals(self):
         return copy.deepcopy(self._time_vals)
