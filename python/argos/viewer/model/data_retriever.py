@@ -1,4 +1,4 @@
-import zlib, copy, sqlite3
+import zlib, copy, sqlite3, bisect
 from viewer.model.dirty_reasons import DirtyReasons
 from viewer.model.data_deserializers import ContigContainerDeserializer
 from viewer.model.data_deserializers import SparseContainerDeserializer
@@ -317,6 +317,41 @@ class DataRetriever:
 
         return unpacked
 
+    def GetTickAnchor(self, tick, elem_paths=None):
+        tick = int(tick)
+
+        def GlobalAnchor():
+            idx = bisect.bisect_right(self._time_vals, tick) - 1
+            return self._time_vals[idx] if idx >= 0 else tick
+
+        if not elem_paths or not self._database_has_multiple_clocks():
+            return GlobalAnchor()
+
+        clock_ids = set()
+        for elem_path in elem_paths:
+            clk_id = self.simhier.GetMetaAtPath(elem_path, 'ClkID')
+            if clk_id is not None:
+                clock_ids.add(int(clk_id))
+
+        if not clock_ids:
+            return GlobalAnchor()
+
+        # The slowest clock (largest Period) needs to look back the furthest to find
+        # its last real collection point; anchoring there covers every faster clock too.
+        placeholders = ','.join('?' for _ in clock_ids)
+        self.cursor.execute(f'SELECT Id, Period FROM Clocks WHERE Id IN ({placeholders})', tuple(clock_ids))
+        periods = dict(self.cursor.fetchall())
+        slowest_clock_id = max(clock_ids, key=lambda cid: periods.get(cid, 0))
+
+        self.cursor.execute(
+            'SELECT MAX(CAST(t.Timestamp AS INTEGER)) FROM Timestamps t '
+            'INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id '
+            'WHERE tc.ClockID = ? AND CAST(t.Timestamp AS INTEGER) <= ?',
+            (slowest_clock_id, tick)
+        )
+        row = self.cursor.fetchone()
+        return row[0] if row and row[0] is not None else tick
+
     def UnpackTicks(self, ticks, elem_paths=None):
         # Ticks must be strictly increasing with no duplicates; empty input is invalid.
         assert ticks
@@ -324,27 +359,116 @@ class DataRetriever:
 
         if elem_paths is None:
             elem_paths = self.simhier.GetItemElemPaths()
-        cids = {self.simhier.GetCollectionID(p) for p in elem_paths}
-        clock_ids = self._clock_ids_for_elem_paths(elem_paths)
 
-        unpacked = {elem_path: {'TimeVals': [], 'DataVals': []} for elem_path in elem_paths}
+        anchor = self.GetTickAnchor(ticks[0], elem_paths)
+        range_data = self.UnpackRange(anchor, ticks[-1], elem_paths)
 
-        for requested_tick in ticks:
-            iterator = BlobIterator(self.dtype_inspector, self.simhier)
-            handler = DataExtractionHandler(self.simhier, snapshot_cids=cids)
-            iterator.Iterate(handler, [requested_tick, requested_tick], lookback=True, clock_ids=clock_ids)
+        unpacked = {}
+        for elem_path in elem_paths:
+            vals = range_data.get(elem_path, {'TimeVals': [], 'DataVals': []})
+            real_ticks = vals['TimeVals']
+            real_vals = vals['DataVals']
 
-            for elem_path in elem_paths:
-                values_by_tick = handler.GetValuesByTick(elem_path)
+            time_vals, data_vals = [], []
+            for requested_tick in ticks:
                 # No exact-collection gate here: carry forward the last real value, even
                 # when this clock didn't collect exactly at requested_tick.
-                point_ticks = [tick for tick in values_by_tick if tick <= requested_tick]
-                if point_ticks:
-                    real_tick = max(point_ticks)
-                    unpacked[elem_path]['TimeVals'].append(requested_tick)
-                    unpacked[elem_path]['DataVals'].append(values_by_tick[real_tick])
+                idx = bisect.bisect_right(real_ticks, requested_tick) - 1
+                if idx >= 0:
+                    time_vals.append(requested_tick)
+                    data_vals.append(real_vals[idx])
 
+            unpacked[elem_path] = {'TimeVals': time_vals, 'DataVals': data_vals}
+
+        return unpacked
+
+    def UnpackElementData(self, tick, elem_paths=None, num_samples_before=0, num_samples_after=0):
+        if elem_paths is None:
+            elem_paths = self.simhier.GetItemElemPaths()
+
+        paths_by_clk_id = {}
+        for p in elem_paths:
+            clk_id = self.simhier.GetMetaAtPath(p, 'ClkID')
+            paths = paths_by_clk_id.get(clk_id, [])
+            paths.append(p)
+            paths_by_clk_id[clk_id] = paths
+
+        assert num_samples_before >= 0
+        assert num_samples_after >= 0
+
+        timestamp_value = str(int(tick)).zfill(20)
+        unpacked = {}
+        for clk_id in paths_by_clk_id:
+            if clk_id is None:
+                clock_join = ''
+                clock_filter = ''
+                clock_params = ()
+            else:
+                clock_join = 'INNER JOIN TimestampClocks tc ON tc.TimestampID = t.Id'
+                clock_filter = 'WHERE tc.ClockID = ?'
+                clock_params = (int(clk_id),)
+
+            query = f'''
+                WITH candidate AS (
+                    SELECT DISTINCT t.Id AS timestamp_id, t.Timestamp AS timestamp_value
+                    FROM Timestamps t
+                    INNER JOIN CollectionRecords cr ON cr.TimestampID = t.Id
+                    {clock_join}
+                    {clock_filter}
+                ), anchor AS (
+                    SELECT timestamp_id, timestamp_value
+                    FROM candidate
+                    WHERE timestamp_value <= ?
+                    ORDER BY timestamp_value DESC, timestamp_id DESC
+                    LIMIT 1
+                ), before_rows AS (
+                    SELECT timestamp_id, timestamp_value
+                    FROM candidate
+                    WHERE timestamp_value < (SELECT timestamp_value FROM anchor)
+                    ORDER BY timestamp_value DESC, timestamp_id DESC
+                    LIMIT ?
+                ), after_rows AS (
+                    SELECT timestamp_id, timestamp_value
+                    FROM candidate
+                    WHERE timestamp_value > (SELECT timestamp_value FROM anchor)
+                    ORDER BY timestamp_value ASC, timestamp_id ASC
+                    LIMIT ?
+                )
+                SELECT timestamp_id
+                FROM (
+                    SELECT timestamp_id, timestamp_value FROM before_rows
+                    UNION ALL
+                    SELECT timestamp_id, timestamp_value FROM anchor
+                    UNION ALL
+                    SELECT timestamp_id, timestamp_value FROM after_rows
+                )
+                ORDER BY timestamp_value ASC, timestamp_id ASC
+            '''
+            params = clock_params + (timestamp_value, num_samples_before, num_samples_after)
+            self.cursor.execute(query, params)
+            record_ids = [row[0] for row in self.cursor.fetchall()]
+            if not record_ids:
+                unpacked.update({
+                    path: {'TimeVals': [], 'DataVals': []}
+                    for path in paths
+                })
+                continue
+
+            placeholders = ','.join('?' for _ in record_ids)
+            self.cursor.execute(
+                f'SELECT MIN(CAST(Timestamp AS INTEGER)), MAX(CAST(Timestamp AS INTEGER)) '
+                f'FROM Timestamps WHERE Id IN ({placeholders})',
+                tuple(record_ids),
+            )
+            min_tick, max_tick = self.cursor.fetchone()
+            unpacked.update(self.UnpackRange(min_tick, max_tick, paths))
+
+        #import pdb; pdb.set_trace()
         return unpacked
 
     def GetAllTimeVals(self):
         return copy.deepcopy(self._time_vals)
+
+    # TODO cnyce:
+    # We have too many Unpack* apis and it's getting out of hand. There is no
+    # reason to have anymore than one method which suffices for all widgets.

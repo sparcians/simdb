@@ -212,15 +212,15 @@ class SchedulingLinesWidget(wx.Panel):
             # would otherwise reset the scroll position back to the top.
             saved_view_start = self.grid.GetViewStart() if self.grid else None
 
-            selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
-            clock_period = self.frame.playback_bar.clock_periods.get(selected_clock, 1)
             current_tick = self.frame.widget_renderer.tick
-            start_time = current_tick - self.num_samples_before * int(clock_period)
-            end_time = current_tick + (self.num_samples_after + 1) * int(clock_period)
-            all_ticks = list(range(start_time, end_time))
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
             self._caption_elem_paths = elem_paths
-            self._ranges = self.frame.data_retriever.UnpackTicks(all_ticks, elem_paths)
+            self._ranges = self.frame.data_retriever.UnpackElementData(
+                current_tick,
+                elem_paths,
+                self.num_samples_before,
+                self.num_samples_after,
+            )
             self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:
@@ -291,16 +291,21 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
-        current_tick = self.frame.widget_renderer.tick
-        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
-        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
         current_cycle = self.frame.playback_bar.GetCurrentCycle()
-        col_labels = []
-        range_cycles = sorted({
-            int(time_val) // clock_period
+        sample_time_vals = sorted({
+            int(time_val)
             for elem_data in self._ranges.values()
             for time_val in elem_data['TimeVals']
         })
+        self._sample_col_by_time = {
+            time_val: col + 1
+            for col, time_val in enumerate(sample_time_vals)
+        }
+        range_cycles = list(range(
+            current_cycle - self.num_samples_before,
+            current_cycle + self.num_samples_after + 1,
+        ))
+        col_labels = []
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
             if label_idx < len(range_cycles):
@@ -413,12 +418,7 @@ class SchedulingLinesWidget(wx.Panel):
                     for col in range(self.grid.GetNumberCols()):
                         if not self.grid.IsColShown(col):
                             break
-                        col_label = self.grid.GetColLabelValue(col)
-                        try:
-                            col_label = int(col_label)
-                        except ValueError:
-                            continue
-                        if col_label == time_cycle:
+                        if self._sample_col_by_time.get(time_val) == col:
                             self.grid.SetCellValue(row, col, auto_label)
                             self.grid.SetCellBackgroundColour(row, col, auto_color)
                             if self.enable_tooltips:
@@ -472,7 +472,11 @@ class SchedulingLinesWidget(wx.Panel):
                     pad = target - len(value)
                     parts.append(part + (' ' * pad))
 
-                return ' '.join(parts)
+                if not parts:
+                    # This is a scalar value, not a struct
+                    return ' ' + label
+
+                return ' ' + ' '.join(parts)
 
             labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
             labels = [label.replace('\t', ' ') for label in labels]
@@ -1057,13 +1061,7 @@ class Rasterizer:
             if not self.grid.IsColShown(col):
                 break
 
-            col_label = self.grid.GetColLabelValue(col)
-            try:
-                col_label = int(col_label)
-            except:
-                continue
-
-            if col_label == time_cycle:
+            if self.widget._sample_col_by_time.get(time_val) == col:
                 self.grid.SetCellValue(self.row, col, auto_label)
                 self.grid.SetCellBackgroundColour(self.row, col, auto_color)
                 if self.widget.enable_tooltips:
