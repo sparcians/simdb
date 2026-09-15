@@ -555,10 +555,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     SHOW_DID_LABEL = 'Show DID'
 
     def __init__(
-        self, parent, frame, elem_paths, num_ticks_before, num_ticks_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did, title="Edit Data Selections",
+        self, parent, frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did, title="Edit Data Selections",
     ):
-        self._num_ticks_before = num_ticks_before
-        self._num_ticks_after = num_ticks_after
+        self._num_samples_before = num_samples_before
+        self._num_samples_after = num_samples_after
         chkboxes = [
             (self.SHOW_DETAILS_LABEL, show_details),
             (self.HIDE_EMPTY_ROWS_LABEL, hide_empty_rows),
@@ -571,18 +571,18 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
         )
 
     def _BuildSettingsArea(self, sizer):
-        assert self._num_ticks_before >= 1 and self._num_ticks_before <= 25
+        assert self._num_samples_before >= 1 and self._num_samples_before <= 25
         info_ticks_before = wx.StaticText(self, label='Num samples before current cycle:')
-        self._label_ticks_before = wx.StaticText(self, label=f'({self._num_ticks_before})')
+        self._label_ticks_before = wx.StaticText(self, label=f'({self._num_samples_before})')
         self._slider_ticks_before = wx.Slider(
-            self, value=self._num_ticks_before, minValue=1, maxValue=25)
+            self, value=self._num_samples_before, minValue=1, maxValue=25)
         self._slider_ticks_before.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
 
-        assert self._num_ticks_after >= 1 and self._num_ticks_after <= 25
+        assert self._num_samples_after >= 1 and self._num_samples_after <= 25
         info_ticks_after = wx.StaticText(self, label='Num samples after current cycle:')
-        self._label_ticks_after = wx.StaticText(self, label=f'({self._num_ticks_after})')
+        self._label_ticks_after = wx.StaticText(self, label=f'({self._num_samples_after})')
         self._slider_ticks_after = wx.Slider(
-            self, value=self._num_ticks_after, minValue=1, maxValue=25)
+            self, value=self._num_samples_after, minValue=1, maxValue=25)
         self._slider_ticks_after.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
 
         gb_sizer = wx.GridBagSizer(vgap=10, hgap=12)
@@ -603,11 +603,11 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
         pass
 
     @property
-    def num_ticks_before(self):
+    def num_samples_before(self):
         return self._slider_ticks_before.GetValue()
 
     @property
-    def num_ticks_after(self):
+    def num_samples_after(self):
         return self._slider_ticks_after.GetValue()
 
     @property

@@ -215,11 +215,12 @@ class SchedulingLinesWidget(wx.Panel):
             selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
             clock_period = self.frame.playback_bar.clock_periods.get(selected_clock, 1)
             current_tick = self.frame.widget_renderer.tick
-            start_time = current_tick - (self.num_samples_before + 1) * int(clock_period)
-            end_time = current_tick + self.num_samples_after * int(clock_period)
+            start_time = current_tick - self.num_samples_before * int(clock_period)
+            end_time = current_tick + (self.num_samples_after + 1) * int(clock_period)
+            all_ticks = list(range(start_time, end_time))
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
             self._caption_elem_paths = elem_paths
-            self._ranges = self.frame.data_retriever.UnpackRange(start_time, end_time, elem_paths)
+            self._ranges = self.frame.data_retriever.UnpackTicks(all_ticks, elem_paths)
             self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:

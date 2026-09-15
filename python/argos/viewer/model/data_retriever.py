@@ -322,13 +322,27 @@ class DataRetriever:
         assert ticks
         assert all(ticks[i] < ticks[i + 1] for i in range(len(ticks) - 1))
 
-        unpacked = {}
-        for tick in ticks:
-            tick_data = self.UnpackRange(tick, tick, elem_paths)
-            for elem_path, vals in tick_data.items():
-                entry = unpacked.setdefault(elem_path, {'TimeVals': [], 'DataVals': []})
-                entry['TimeVals'].extend(vals['TimeVals'])
-                entry['DataVals'].extend(vals['DataVals'])
+        if elem_paths is None:
+            elem_paths = self.simhier.GetItemElemPaths()
+        cids = {self.simhier.GetCollectionID(p) for p in elem_paths}
+        clock_ids = self._clock_ids_for_elem_paths(elem_paths)
+
+        unpacked = {elem_path: {'TimeVals': [], 'DataVals': []} for elem_path in elem_paths}
+
+        for requested_tick in ticks:
+            iterator = BlobIterator(self.dtype_inspector, self.simhier)
+            handler = DataExtractionHandler(self.simhier, snapshot_cids=cids)
+            iterator.Iterate(handler, [requested_tick, requested_tick], lookback=True, clock_ids=clock_ids)
+
+            for elem_path in elem_paths:
+                values_by_tick = handler.GetValuesByTick(elem_path)
+                # No exact-collection gate here: carry forward the last real value, even
+                # when this clock didn't collect exactly at requested_tick.
+                point_ticks = [tick for tick in values_by_tick if tick <= requested_tick]
+                if point_ticks:
+                    real_tick = max(point_ticks)
+                    unpacked[elem_path]['TimeVals'].append(requested_tick)
+                    unpacked[elem_path]['DataVals'].append(values_by_tick[real_tick])
 
         return unpacked
 
