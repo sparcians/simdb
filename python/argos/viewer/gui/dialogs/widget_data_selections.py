@@ -288,7 +288,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             arrow_btns_sizer.Add(self.add_row_btn, 0, wx.TOP, 5)
             arrow_btns_sizer.Add(self.remove_row_btn, 0, wx.TOP, 5)
             list_sizer.Add(arrow_btns_sizer)
-            sizer.Add(list_sizer)
+            sizer.Add(list_sizer, 1, wx.EXPAND)
 
         self._BuildSettingsArea(sizer)
 
@@ -966,7 +966,8 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
 
         edit_captions_btn = wx.Button(self, label='Edit Captions')
         edit_captions_btn.Bind(wx.EVT_BUTTON, self.__OnEditCaptions)
-        sizer.Add(edit_captions_btn, 0, wx.TOP, 5)
+        sizer.AddSpacer(5)
+        sizer.Add(edit_captions_btn, 0, wx.LEFT, 5)
 
     def __OnEditCaptions(self, evt):
         dlg = CaptionsEditDlg(self, self.GetCustomCaptions())
