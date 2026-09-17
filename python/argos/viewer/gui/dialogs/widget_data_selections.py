@@ -1,5 +1,196 @@
+import re
+
 import wx
 from functools import partial
+
+
+class CaptionsEditDlg(wx.Dialog):
+    def __init__(self, parent, custom_captions):
+        super().__init__(parent, title='Edit Captions', size=(600, 450))
+
+        self._preserved_captions = {
+            path: caption
+            for path, caption in custom_captions.items()
+            if self.__IsRangeKey(path)
+        }
+        self._custom_captions = {}
+        self._edit_ctrl = None
+        self._edit_item = None
+        self._edit_col = None
+
+        self.captions_list = wx.ListCtrl(
+            self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL,
+        )
+        self.captions_list.InsertColumn(0, 'Elem Path', width=400)
+        self.captions_list.InsertColumn(1, 'Caption', width=150)
+
+        for path, caption in custom_captions.items():
+            if self.__IsRangeKey(path) or caption in (None, '', '<default>'):
+                continue
+            item = self.captions_list.InsertItem(
+                self.captions_list.GetItemCount(), path,
+            )
+            self.captions_list.SetItem(item, 1, caption)
+
+        add_btn = wx.Button(self, label='+')
+        self.remove_btn = wx.Button(self, label='X', size=add_btn.GetSize())
+        add_btn.Bind(wx.EVT_BUTTON, self.__OnAddRow)
+        self.remove_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveRow)
+
+        row_buttons = wx.BoxSizer(wx.VERTICAL)
+        row_buttons.Add(add_btn)
+        row_buttons.Add(self.remove_btn, 0, wx.TOP, 5)
+
+        list_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        list_sizer.Add(self.captions_list, 1, wx.EXPAND)
+        list_sizer.Add(row_buttons, 0, wx.LEFT, 5)
+
+        dialog_buttons = wx.StdDialogButtonSizer()
+        ok_btn = wx.Button(self, wx.ID_OK)
+        dialog_buttons.AddButton(ok_btn)
+        dialog_buttons.AddButton(wx.Button(self, wx.ID_CANCEL))
+        dialog_buttons.Realize()
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(list_sizer, 1, wx.ALL | wx.EXPAND, 10)
+        sizer.Add(dialog_buttons, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_RIGHT, 10)
+        self.SetSizer(sizer)
+
+        self.captions_list.Bind(wx.EVT_LEFT_DCLICK, self.__OnCellDoubleClick)
+        self.captions_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.__UpdateButtonStates)
+        self.captions_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.__UpdateButtonStates)
+        ok_btn.Bind(wx.EVT_BUTTON, self.__OnOk)
+        self.__UpdateButtonStates()
+
+    def GetCustomCaptions(self):
+        captions = dict(self._preserved_captions)
+        captions.update(self._custom_captions)
+        return captions
+
+    def __OnAddRow(self, evt):
+        self.__CommitCellEdit()
+        item = self.captions_list.InsertItem(self.captions_list.GetItemCount(), '')
+        self.captions_list.SetItem(item, 1, '')
+        self.captions_list.Select(item)
+        self.captions_list.EnsureVisible(item)
+        self.__BeginCellEdit(item, 0)
+
+    def __OnRemoveRow(self, evt):
+        self.__CommitCellEdit()
+        item = self.captions_list.GetFirstSelected()
+        if item != wx.NOT_FOUND:
+            self.captions_list.DeleteItem(item)
+        self.__UpdateButtonStates()
+
+    def __OnCellDoubleClick(self, evt):
+        item, _, col = self.captions_list.HitTestSubItem(evt.GetPosition())
+        if item == wx.NOT_FOUND or col not in (0, 1):
+            evt.Skip()
+            return
+        self.__BeginCellEdit(item, col)
+
+    def __BeginCellEdit(self, item, col):
+        self.__CommitCellEdit()
+
+        rect = wx.Rect()
+        self.captions_list.GetSubItemRect(item, col, rect)
+        self._edit_item = item
+        self._edit_col = col
+        self._edit_ctrl = wx.TextCtrl(
+            self.captions_list,
+            value=self.captions_list.GetItemText(item, col),
+            style=wx.TE_PROCESS_ENTER,
+            pos=rect.GetTopLeft(),
+            size=rect.GetSize(),
+        )
+        self._edit_ctrl.Bind(wx.EVT_TEXT_ENTER, self.__OnCellEditEnter)
+        self._edit_ctrl.Bind(wx.EVT_KILL_FOCUS, self.__OnCellEditKillFocus)
+        self._edit_ctrl.Bind(wx.EVT_CHAR_HOOK, self.__OnCellEditCharHook)
+        self._edit_ctrl.SetFocus()
+        self._edit_ctrl.SelectAll()
+
+    def __OnCellEditEnter(self, evt):
+        self.__CommitCellEdit()
+
+    def __OnCellEditKillFocus(self, evt):
+        self.__CommitCellEdit()
+        evt.Skip()
+
+    def __OnCellEditCharHook(self, evt):
+        if evt.GetKeyCode() == wx.WXK_ESCAPE:
+            self.__DestroyCellEditCtrl()
+        else:
+            evt.Skip()
+
+    def __CommitCellEdit(self):
+        if self._edit_ctrl is None:
+            return
+
+        self.captions_list.SetItem(
+            self._edit_item, self._edit_col, self._edit_ctrl.GetValue().strip(),
+        )
+        self.__DestroyCellEditCtrl()
+
+    def __DestroyCellEditCtrl(self):
+        ctrl = self._edit_ctrl
+        self._edit_ctrl = None
+        self._edit_item = None
+        self._edit_col = None
+        if ctrl is not None:
+            wx.CallAfter(ctrl.Destroy)
+
+    def __OnOk(self, evt):
+        self.__CommitCellEdit()
+
+        captions = {}
+        seen_paths = set()
+        for item in range(self.captions_list.GetItemCount()):
+            path = self.captions_list.GetItemText(item, 0).strip()
+            caption = self.captions_list.GetItemText(item, 1).strip()
+            if not path and not caption:
+                continue
+            if not path:
+                wx.MessageBox(
+                    'Enter an element path for every caption.',
+                    'Invalid Path', wx.OK | wx.ICON_ERROR,
+                )
+                return
+            if not self.__IsValidCaptionKey(path):
+                wx.MessageBox(
+                    "'{}' is not a valid caption path. Use a dot-delimited path "
+                    "with an optional single bin, e.g. 'top.foo' or 'top.foo[4]'.".format(path),
+                    'Invalid Path', wx.OK | wx.ICON_ERROR,
+                )
+                return
+            if path in seen_paths:
+                wx.MessageBox(
+                    "'{}' appears more than once.".format(path),
+                    'Duplicate Path', wx.OK | wx.ICON_ERROR,
+                )
+                return
+            seen_paths.add(path)
+            if caption:
+                captions[path] = caption
+
+        self._custom_captions = captions
+        self.EndModal(wx.ID_OK)
+
+    def __UpdateButtonStates(self, *args):
+        self.remove_btn.Enable(self.captions_list.GetFirstSelected() != wx.NOT_FOUND)
+
+    @staticmethod
+    def __IsRangeKey(path):
+        return re.search(r'\[\d+-\d+\]$', path) is not None
+
+    @classmethod
+    def __IsValidCaptionKey(cls, path):
+        if cls.__IsRangeKey(path):
+            return False
+
+        base_path = re.sub(r'\[\d+\]$', '', path)
+        if '[' in base_path or ']' in base_path:
+            return False
+        return bool(base_path) and all(base_path.split('.'))
 
 class WidgetDataSelectionsDlg(wx.Dialog):
     def __init__(
@@ -129,6 +320,23 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         if caption in (None, '', '<default>'):
             return None
         return caption
+
+    def GetCustomCaptions(self):
+        return {
+            path: caption
+            for path, caption in self._captions_by_path.items()
+            if caption not in (None, '', '<default>')
+        }
+
+    def _SetCustomCaptions(self, custom_captions):
+        self._captions_by_path = dict(custom_captions)
+        if not self._editable_captions or self._single_selection:
+            return
+
+        for item in range(self.selections_list.GetItemCount()):
+            path = self.selections_list.GetItemText(item, 0)
+            caption = self._captions_by_path.get(path, '<default>')
+            self.selections_list.SetItem(item, 1, caption)
 
     def _BuildSettingsArea(self, sizer):
         if not self._settings_chkboxes:
@@ -755,6 +963,16 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
         sizer.Add(gb_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
 
         WidgetDataSelectionsDlg._BuildSettingsArea(self, sizer)
+
+        edit_captions_btn = wx.Button(self, label='Edit Captions')
+        edit_captions_btn.Bind(wx.EVT_BUTTON, self.__OnEditCaptions)
+        sizer.Add(edit_captions_btn, 0, wx.TOP, 5)
+
+    def __OnEditCaptions(self, evt):
+        dlg = CaptionsEditDlg(self, self.GetCustomCaptions())
+        if dlg.ShowModal() == wx.ID_OK:
+            self._SetCustomCaptions(dlg.GetCustomCaptions())
+        dlg.Destroy()
 
     def _OnWidgetCheckbox(self, label, checked):
         pass

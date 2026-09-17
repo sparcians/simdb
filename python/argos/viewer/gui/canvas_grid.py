@@ -352,11 +352,7 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = self._widget.hide_empty_rows
             enable_tooltips = self._widget.enable_tooltips
             show_did = self._widget.show_did
-            initial_captions = {
-                elem_path: self._widget.caption_mgr.GetCustomCaption(elem_path)
-                for elem_path in elem_paths
-                if self._widget.caption_mgr.GetCustomCaption(elem_path) is not None
-            }
+            initial_captions = self._widget.caption_mgr.GetCustomCaptions()
         else:
             elem_paths = []
             num_samples_before = SchedulingLinesWidget.DEFAULT_TICKS_BEFORE
@@ -382,10 +378,7 @@ class WidgetContainer(wx.Panel):
             show_did = dlg.show_did
             if len(elem_paths) > 0:
                 widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did)
-                for elem_path in elem_paths:
-                    custom_caption = dlg.GetCustomCaption(elem_path)
-                    if custom_caption is not None:
-                        widget.caption_mgr.SetCustomCaption(elem_path, custom_caption)
+                widget.caption_mgr.SetCustomCaptions(dlg.GetCustomCaptions())
                 self.SetWidget(widget)
             else:
                 wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)

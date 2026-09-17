@@ -811,55 +811,30 @@ class CaptionManager:
     def GetCaption(self, elem_path, bin_idx):
         is_scalar = elem_path in self.simhier.GetScalarStatsElemPaths() or elem_path in self.simhier.GetScalarStructsElemPaths()
 
-        for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
-            if regex == elem_path:
-                # No regex was supplied in the settings dialog. The full path was given e.g.
-                #   "top.cpu.core0.rob.stats.num_insts_retired"
-                # 
-                # Instead of something like:
-                #   "top.cpu.core([0-9]+).rob.stats.num_insts_retired"
-                #
-                # We will just return the full path as the caption prefix e.g.
-                # "top.cpu.core0.rob.stats.num_insts_retired[3]"
-                prefix = self.GetCaptionPrefix(elem_path)
-                if is_scalar:
-                    return prefix
-                return prefix + '[{}]'.format(bin_idx)
-
-            if re.compile(regex).match(elem_path):
-                # This matched an elem path e.g.
-                #   "top.cpu.core1.rob.stats.num_insts_retired"
-                #
-                # With a regex e.g.
-                #   "top.cpu.core([0-9]+).rob.stats.num_insts_retired"
-                #
-                # We will return something like "NumInstsRetired1[3]"
-                #                                               ^ ^
-                #                                               | |
-                #                                               | bin index
-                #                                               core index
-                caption = re.sub(regex, replacements, elem_path)
-                if is_scalar:
-                    return caption
-                return caption + '[{}]'.format(bin_idx)
-
-        prefix = elem_path
+        prefix = self.GetCaptionPrefix(elem_path)
         if is_scalar:
             return prefix
         return f'{prefix}[{bin_idx}]'
-    
+
     def GetCaptionPrefix(self, elem_path):
         # Check custom container-level caption first
         custom_prefix = self.GetCustomCaption(elem_path)
         if custom_prefix is not None:
             return custom_prefix
 
-        for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
-            if regex == elem_path:
-                if replacements == elem_path:
-                    return elem_path
-                return replacements
+        # An elem_path that was added as-is (not a regex covering other paths)
+        # registers itself as its own key/replacement. That exact self-match
+        # must win before scanning other entries' regexes below, otherwise an
+        # unrelated elem_path that happens to be a literal prefix of this one
+        # (e.g. "top.sqb" vs "top.sqb_age_ordered") can match first, since "."
+        # in a regex matches any character, not just a literal dot.
+        if elem_path in self.regex_replacements_by_elem_path_regex:
+            replacements = self.regex_replacements_by_elem_path_regex[elem_path]
+            if replacements == elem_path:
+                return elem_path
+            return replacements
 
+        for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
             if re.compile(regex).match(elem_path):
                 return re.sub(regex, replacements, elem_path)
 
