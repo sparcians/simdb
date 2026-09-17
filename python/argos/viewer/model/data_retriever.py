@@ -65,6 +65,9 @@ class DataRetriever:
         for elem_path, displayed_columns in self._displayed_columns_by_elem_path.items():
             assert len(displayed_columns) > 0 or elem_path in self._auto_colorize_column_by_elem_path
             settings[elem_path] = {'auto_colorize_column': None}
+            _, struct_deserializer = self.__GetStructViewMeta(elem_path)
+            if struct_deserializer is not None and displayed_columns == struct_deserializer.GetAllFieldNames():
+                displayed_columns = '<ALL_COLUMNS>'
             settings[elem_path]['displayed_columns'] = copy.deepcopy(displayed_columns)
 
         for elem_path, auto_colorize_column in self._auto_colorize_column_by_elem_path.items():

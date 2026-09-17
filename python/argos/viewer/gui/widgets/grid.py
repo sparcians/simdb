@@ -68,6 +68,12 @@ class Grid(wx.grid.Grid):
             self.Refresh()
             self.AutoSize()
 
+    def SetCellDrawX(self, row, col, draw_x=True, immediate_refresh=False):
+        self.renderer.SetCellDrawX(row, col, draw_x)
+        if immediate_refresh:
+            self.Refresh()
+            self.AutoSize()
+
     def RemoveCellBorder(self, row, col, immediate_refresh=False):
         self.SetCellBorder(row, col, 0, wx.ALL, immediate_refresh)
 
@@ -90,6 +96,7 @@ class Grid(wx.grid.Grid):
                 self.SetCellBackgroundColour(row, col, (255, 255, 255))
                 self.RemoveCellBorder(row, col)
                 self.UnsetCellToolTip(row, col)
+                self.SetCellDrawX(row, col, False)
 
         self.Refresh()
         self.AutoSize()
@@ -129,6 +136,9 @@ class GridCellRenderer(wx.grid.GridCellRenderer):
     def SetCellBorderSide(self, row, col, border_side):
         self.cells[row][col].SetBorderSide(border_side)
 
+    def SetCellDrawX(self, row, col, draw_x):
+        self.cells[row][col].SetDrawX(draw_x)
+
     def SetCellFont(self, row, col, font):
         self.cells[row][col].SetFont(font)
 
@@ -156,6 +166,7 @@ class GridCell:
         self.border_width = 0
         self.border_side = wx.ALL
         self.tooltip = None
+        self.draw_x = False
 
     def SetText(self, text):
         self.text = text
@@ -191,6 +202,9 @@ class GridCell:
     def SetBorderSide(self, border_side):
         self.border_side = border_side
 
+    def SetDrawX(self, draw_x):
+        self.draw_x = draw_x
+
     def SetToolTip(self, tooltip):
         if tooltip in (None, ''):
             self.UnsetToolTip()
@@ -207,6 +221,11 @@ class GridCell:
         dc.SetBrush(wx.Brush(self.background_colour))
         dc.SetPen(wx.Pen(wx.TRANSPARENT_PEN))
         dc.DrawRectangle(rect)
+
+        if self.draw_x:
+            dc.SetPen(wx.Pen(wx.Colour(150, 150, 150), 1))
+            dc.DrawLine(rect.GetLeft(), rect.GetTop(), rect.GetRight(), rect.GetBottom())
+            dc.DrawLine(rect.GetLeft(), rect.GetBottom(), rect.GetRight(), rect.GetTop())
 
         if self.text:
             dc.SetFont(self.font)

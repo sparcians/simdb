@@ -14,7 +14,8 @@ from viewer.gui.view_settings import DirtyReasons
 class ArgosFrame(wx.Frame):
     def __init__(self, db_path, view_settings):
         super().__init__(None, title=db_path)
-        
+
+        self.db_path = db_path
         self.db = sqlite3.connect(db_path)
         self.view_settings = view_settings
         self.dtype_inspector = DataTypeInspector(db_path)

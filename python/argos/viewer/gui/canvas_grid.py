@@ -350,20 +350,23 @@ class WidgetContainer(wx.Panel):
             num_samples_after = self._widget.num_samples_after
             show_details = self._widget.show_detailed_queue_packets
             hide_empty_rows = self._widget.hide_empty_rows
-            show_full_paths = self._widget.show_full_paths
             enable_tooltips = self._widget.enable_tooltips
             show_did = self._widget.show_did
+            initial_captions = self._widget.caption_mgr.GetCustomCaptions()
         else:
             elem_paths = []
             num_samples_before = SchedulingLinesWidget.DEFAULT_TICKS_BEFORE
             num_samples_after = SchedulingLinesWidget.DEFAULT_TICKS_AFTER
             show_details = SchedulingLinesWidget.DEFAULT_SHOW_DETAILS
             hide_empty_rows = SchedulingLinesWidget.DEFAULT_HIDE_EMPTY_ROWS
-            show_full_paths = SchedulingLinesWidget.DEFAULT_SHOW_FULL_PATHS
             enable_tooltips = SchedulingLinesWidget.DEFAULT_ENABLE_TOOLTIPS
             show_did = SchedulingLinesWidget.DEFAULT_SHOW_DID
+            initial_captions = {}
 
-        dlg = SchedulingLinesEditDlg(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did)
+        dlg = SchedulingLinesEditDlg(
+            self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did,
+            initial_captions=initial_captions,
+        )
         result = dlg.ShowModal()
         if result == wx.ID_OK:
             elem_paths = dlg.GetSelectedElemPaths()
@@ -371,11 +374,11 @@ class WidgetContainer(wx.Panel):
             num_samples_after = dlg.num_samples_after
             show_details = dlg.show_details
             hide_empty_rows = dlg.hide_empty_rows
-            show_full_paths = dlg.show_full_paths
             enable_tooltips = dlg.enable_tooltips
             show_did = dlg.show_did
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, show_full_paths, enable_tooltips, show_did)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did)
+                widget.caption_mgr.SetCustomCaptions(dlg.GetCustomCaptions())
                 self.SetWidget(widget)
             else:
                 wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)

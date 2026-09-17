@@ -1,26 +1,23 @@
-import wx, copy, re
+import wx, copy, re, os
 from collections import OrderedDict
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.grid import Grid
-from functools import partial
 
 class SchedulingLinesWidget(wx.Panel):
     DEFAULT_TICKS_BEFORE = 10
     DEFAULT_TICKS_AFTER = 10
     DEFAULT_SHOW_DETAILS = True
     DEFAULT_HIDE_EMPTY_ROWS = True
-    DEFAULT_SHOW_FULL_PATHS = False
-    DEFAULT_ENABLE_TOOLTIPS = False
+    DEFAULT_ENABLE_TOOLTIPS = True
     DEFAULT_SHOW_DID = False
 
-    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, show_full_paths=DEFAULT_SHOW_FULL_PATHS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
+    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
         super().__init__(parent)
         self.frame = frame
         self.num_samples_before = num_samples_before
         self.num_samples_after = num_samples_after
         self.show_detailed_queue_packets = show_details
         self.hide_empty_rows = hide_empty_rows
-        self.show_full_paths = show_full_paths
         self.enable_tooltips = enable_tooltips
         self.show_did = show_did
         self.caption_mgr = CaptionManager(frame.simhier)
@@ -86,27 +83,8 @@ class SchedulingLinesWidget(wx.Panel):
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
 
     def SetElements(self, elem_paths):
-        # Filter out all the collectables that did not collect any data
-        warning = []
-        elem_paths_with_data = []
-        for elem_path in elem_paths:
-            elem_cid = self.frame.simhier.GetCollectionID(elem_path)
-            has_data = self.queue_max_sizes_by_collection_id.get(elem_cid, 0) > 0
-            if elem_path in self.scalar_elem_paths:
-                has_data = True
-            if has_data:
-                elem_paths_with_data.append(elem_path)
-            else:
-                if not warning:
-                    warning.append('No data collected and will not be displayed:')
-                warning.append('  - ' + elem_path)
-
-        if warning:
-            warning = '\n'.join(warning)
-            wx.MessageBox(warning, 'Warning', wx.OK | wx.ICON_WARNING)
-
         self.caption_mgr.ClearSelections()
-        for elem_path in elem_paths_with_data:
+        for elem_path in elem_paths:
             self.__AddElement(elem_path)
 
         self.__Refresh()
@@ -126,7 +104,6 @@ class SchedulingLinesWidget(wx.Panel):
         settings['num_samples_after'] = self.num_samples_after
         settings['show_detailed_queue_packets'] = self.show_detailed_queue_packets
         settings['hide_empty_rows'] = self.hide_empty_rows
-        settings['show_full_paths'] = self.show_full_paths
         settings['enable_tooltips'] = self.enable_tooltips
         settings['show_did'] = self.show_did
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
@@ -143,7 +120,6 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_samples_after != settings['num_samples_after'] or \
                 self.show_detailed_queue_packets != settings['show_detailed_queue_packets'] or \
                 self.hide_empty_rows != settings['hide_empty_rows'] or \
-                self.show_full_paths != settings['show_full_paths'] or \
                 self.enable_tooltips != settings['enable_tooltips'] or \
                 self.show_did != settings['show_did'] or \
                 self.tracked_annos != settings['tracked_annos']
@@ -157,7 +133,6 @@ class SchedulingLinesWidget(wx.Panel):
         self.num_samples_after = settings['num_samples_after']
         self.show_detailed_queue_packets = settings['show_detailed_queue_packets']
         self.hide_empty_rows = settings['hide_empty_rows']
-        self.show_full_paths = settings['show_full_paths']
         self.enable_tooltips = settings['enable_tooltips']
         self.show_did = settings['show_did']
         self.tracked_annos = settings['tracked_annos']
@@ -215,17 +190,26 @@ class SchedulingLinesWidget(wx.Panel):
             current_tick = self.frame.widget_renderer.tick
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
             self._caption_elem_paths = elem_paths
+
+            # Paths that don't exist in the simulation hierarchy (e.g. typed in
+            # manually and never collected) can't be queried for data; they are
+            # still shown as a row, just without any data to rasterize.
+            known_elem_paths = [p for p in elem_paths if self.__IsKnownElemPath(p)]
+
             self._ranges = self.frame.data_retriever.UnpackElementData(
                 current_tick,
-                elem_paths,
+                known_elem_paths,
                 self.num_samples_before,
                 self.num_samples_after,
             )
-            self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, elem_paths)
+            self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, known_elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:
-                bins_with_data = self._bins_with_data_by_elem_path[elem_path]
-                self._layouts_by_elem_path[elem_path] = self.__BuildRowLayout(elem_path, bins_with_data)
+                if elem_path in self._bins_with_data_by_elem_path:
+                    bins_with_data = self._bins_with_data_by_elem_path[elem_path]
+                    self._layouts_by_elem_path[elem_path] = self.__BuildRowLayout(elem_path, bins_with_data)
+                else:
+                    self._layouts_by_elem_path[elem_path] = [{'kind': 'bad_path'}]
 
             self.SetBackgroundColour('white')
             self.__RegenerateSchedulingLinesGrid(new_grid)
@@ -237,6 +221,11 @@ class SchedulingLinesWidget(wx.Panel):
                 #wx.CallAfter(self.grid.Scroll, saved_view_start[0], saved_view_start[1])
                 self.grid.Scroll(saved_view_start[0], saved_view_start[1])
 
+    def __IsKnownElemPath(self, elem_path):
+        if elem_path in self.scalar_elem_paths:
+            return True
+        return self.frame.simhier.GetCollectionID(elem_path) is not None
+
     def __RegenerateSchedulingLinesGrid(self, new_grid):
         sizer = self.GetSizer()
         if self.grid:
@@ -246,11 +235,13 @@ class SchedulingLinesWidget(wx.Panel):
 
         self._struct_dtypes_by_row = {}
         num_rows = 0
+        self._bad_path_rows = set()
+        self._bad_path_elem_path_by_row = {}
         for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
             collection_id = self.frame.simhier.GetCollectionID(elem_path)
             layout = self._layouts_by_elem_path[elem_path]
 
-            dtype = self.frame.dtype_inspector.GetDataTypeForCollectionID(collection_id)
+            dtype = self.frame.dtype_inspector.GetDataTypeForCollectionID(collection_id) or ''
             idx = dtype.find('_sparse_capacity')
             if idx != -1:
                 dtype = dtype[:idx]
@@ -262,6 +253,9 @@ class SchedulingLinesWidget(wx.Panel):
             for i, segment in enumerate(layout):
                 row = num_rows + i
                 self._struct_dtypes_by_row[row] = dtype
+                if segment['kind'] == 'bad_path':
+                    self._bad_path_rows.add(row)
+                    self._bad_path_elem_path_by_row[row] = elem_path
 
             num_rows += len(layout)
 
@@ -287,7 +281,6 @@ class SchedulingLinesWidget(wx.Panel):
         if new_grid or self.grid is None:
             self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
         self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
-        self.grid.GetGridWindow().Bind(wx.EVT_RIGHT_DOWN, self.__OnGridRightDown)
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
 
@@ -353,6 +346,15 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.grid.ClearGrid()
 
+        # Mark the data cells of rows for unrecognized ("bad") paths with an X
+        # rather than trying to rasterize data that doesn't exist.
+        max_data_col = self.grid.GetNumberCols() - 1
+        if self.show_detailed_queue_packets:
+            max_data_col -= 2
+        for row in self._bad_path_rows:
+            for col in range(1, max_data_col+1):
+                self.grid.SetCellDrawX(row, col, True)
+
         current_cycle_col = None
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             try:
@@ -382,6 +384,17 @@ class SchedulingLinesWidget(wx.Panel):
         return str(value)
 
     def __RasterizeAllCells(self):
+        if self.enable_tooltips and self._bad_path_rows:
+            max_data_col = self.grid.GetNumberCols() - 1
+            if self.show_detailed_queue_packets:
+                max_data_col -= 2
+            db_name = os.path.basename(self.frame.db_path)
+            for row in self._bad_path_rows:
+                elem_path = self._bad_path_elem_path_by_row[row]
+                tooltip = f'{elem_path} not in {db_name}'
+                for col in range(1, max_data_col+1):
+                    self.grid.SetCellToolTip(row, col, tooltip)
+
         for elem_path, vals in self._ranges.items():
             if elem_path in self.scalar_elem_paths:
                 row = self.scalar_row_by_elem_path.get(elem_path)
@@ -656,26 +669,24 @@ class SchedulingLinesWidget(wx.Panel):
             return custom_caption
 
         if segment['kind'] == 'scalar':
-            return self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths) or self.caption_mgr.GetMinimumUniqueSuffix(elem_path, elem_paths)
+            return self.caption_mgr.GetCaptionPrefix(elem_path)
         if segment['kind'] == 'no_data':
-            return '{}(no data)'.format(
-                self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths))
+            return '{}(no data)'.format(self.caption_mgr.GetCaptionPrefix(elem_path))
+        if segment['kind'] == 'bad_path':
+            return self.caption_mgr.GetCaptionPrefix(elem_path)
         if segment['kind'] == 'range':
-            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path, elem_paths, self.show_full_paths)
+            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
             lo = segment['lo']
             hi = segment['hi']
             if lo == hi:
                 return '{}[{}]'.format(caption_prefix, lo)
             return '{}[{}-{}]'.format(caption_prefix, lo, hi)
-        return self.caption_mgr.GetCaption(elem_path, segment['bin'], elem_paths, self.show_full_paths)
+        return self.caption_mgr.GetCaption(elem_path, segment['bin'])
 
     def __GetCaptionColumnTooltip(self, elem_path, segment, caption):
         full_tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
         if caption.rstrip() == full_tooltip:
             return None
-
-        if not self.show_full_paths:
-            return full_tooltip
 
         if self.enable_tooltips:
             return full_tooltip
@@ -684,7 +695,7 @@ class SchedulingLinesWidget(wx.Panel):
     def __SegmentElemPathTooltip(self, elem_path, segment):
         if segment['kind'] == 'scalar':
             return elem_path
-        if segment['kind'] == 'no_data':
+        if segment['kind'] in ('no_data', 'bad_path'):
             return elem_path
         if segment['kind'] == 'range':
             lo = segment['lo']
@@ -707,118 +718,6 @@ class SchedulingLinesWidget(wx.Panel):
             self.grid.SetToolTip(tooltip)
         else:
             self.grid.UnsetToolTip()
-
-    def __OnGridRightDown(self, evt):
-        x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
-        row, col = self.grid.XYToCell(x, y)
-
-        if col != 0 or row < 0 or row >= self.grid.GetNumberRows():
-            evt.Skip()
-            return
-
-        # Find the (elem_path, segment) corresponding to this row
-        current_row = 0
-        target_info = None
-        for elem_path in self.caption_mgr.GetAllMatchingElemPaths():
-            layouts = self._layouts_by_elem_path.get(elem_path, [])
-            if current_row <= row < current_row + len(layouts):
-                segment = layouts[row - current_row]
-                target_info = (elem_path, segment)
-                break
-            current_row += len(layouts)
-
-        if not target_info:
-            evt.Skip()
-            return
-
-        elem_path, segment = target_info
-        is_container = segment['kind'] in ('bin', 'range', 'no_data')
-        current_caption = self.grid.GetCellValue(row, 0).strip()
-
-        menu = wx.Menu()
-        if is_container:
-            item_single = menu.Append(wx.ID_ANY, "Edit caption (just this one)")
-            self.Bind(
-                wx.EVT_MENU,
-                partial(self.__OnEditSingleCaption, elem_path=elem_path, segment=segment, current_caption=current_caption),
-                item_single
-            )
-
-            item_container = menu.Append(wx.ID_ANY, "Edit captions in this container")
-            self.Bind(
-                wx.EVT_MENU,
-                partial(self.__OnEditContainerCaptions, elem_path=elem_path),
-                item_container
-            )
-        else:
-            item_scalar = menu.Append(wx.ID_ANY, "Edit caption")
-            self.Bind(
-                wx.EVT_MENU,
-                partial(self.__OnEditScalarCaption, elem_path=elem_path, current_caption=current_caption),
-                item_scalar
-            )
-
-        self.PopupMenu(menu)
-        menu.Destroy()
-
-    def __OnEditSingleCaption(self, evt, elem_path, segment, current_caption):
-        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
-        dlg = wx.TextEntryDialog(
-            self,
-            f"Enter new caption for '{segment_key}':\n(Leave blank to reset to default)",
-            "Edit Caption",
-            value=current_caption
-        )
-        if dlg.ShowModal() == wx.ID_OK:
-            new_caption = dlg.GetValue().strip()
-            if new_caption:
-                self.caption_mgr.SetCustomCaption(segment_key, new_caption)
-            else:
-                self.caption_mgr.RemoveCustomCaption(segment_key)
-            self.__Refresh()
-            self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
-        dlg.Destroy()
-
-    def __OnEditContainerCaptions(self, evt, elem_path):
-        custom_prefix = self.caption_mgr.GetCustomCaption(elem_path)
-        if custom_prefix is not None:
-            default_value = custom_prefix
-        else:
-            prefix = self.caption_mgr.GetCaptionPrefix(elem_path, self._caption_elem_paths, self.show_full_paths)
-            default_value = prefix if prefix else ''
-
-        dlg = wx.TextEntryDialog(
-            self,
-            f"Enter new caption for container '{elem_path}':\n(Leave blank to reset to default)",
-            "Edit Container Captions",
-            value=default_value
-        )
-        if dlg.ShowModal() == wx.ID_OK:
-            new_caption = dlg.GetValue().strip()
-            if new_caption:
-                self.caption_mgr.SetCustomCaption(elem_path, new_caption)
-            else:
-                self.caption_mgr.RemoveContainerCustomCaptions(elem_path)
-            self.__Refresh()
-            self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
-        dlg.Destroy()
-
-    def __OnEditScalarCaption(self, evt, elem_path, current_caption):
-        dlg = wx.TextEntryDialog(
-            self,
-            f"Enter new caption for '{elem_path}':\n(Leave blank to reset to default)",
-            "Edit Caption",
-            value=current_caption
-        )
-        if dlg.ShowModal() == wx.ID_OK:
-            new_caption = dlg.GetValue().strip()
-            if new_caption:
-                self.caption_mgr.SetCustomCaption(elem_path, new_caption)
-            else:
-                self.caption_mgr.RemoveCustomCaption(elem_path)
-            self.__Refresh()
-            self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
-        dlg.Destroy()
 
     def __EditWidget(self, evt):
         widget_container = self.GetParent()
@@ -909,70 +808,37 @@ class CaptionManager:
 
         return d
 
-    def GetCaption(self, elem_path, bin_idx, elem_paths=None, show_full_paths=False):
-        if elem_paths is None:
-            elem_paths = self.GetAllMatchingElemPaths()
-
+    def GetCaption(self, elem_path, bin_idx):
         is_scalar = elem_path in self.simhier.GetScalarStatsElemPaths() or elem_path in self.simhier.GetScalarStructsElemPaths()
 
-        for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
-            if regex == elem_path:
-                # No regex was supplied in the settings dialog. The full path was given e.g.
-                #   "top.cpu.core0.rob.stats.num_insts_retired"
-                # 
-                # Instead of something like:
-                #   "top.cpu.core([0-9]+).rob.stats.num_insts_retired"
-                #
-                # We will just return the last part of the path as the caption using
-                # heads-up camel case e.g. "NumInstsRetired[3]"
-                prefix = self.GetCaptionPrefix(elem_path, elem_paths, show_full_paths)
-                if is_scalar:
-                    return prefix
-                return prefix + '[{}]'.format(bin_idx)
-
-            if re.compile(regex).match(elem_path):
-                # This matched an elem path e.g.
-                #   "top.cpu.core1.rob.stats.num_insts_retired"
-                #
-                # With a regex e.g.
-                #   "top.cpu.core([0-9]+).rob.stats.num_insts_retired"
-                #
-                # We will return something like "NumInstsRetired1[3]"
-                #                                               ^ ^
-                #                                               | |
-                #                                               | bin index
-                #                                               core index
-                caption = re.sub(regex, replacements, elem_path)
-                if is_scalar:
-                    return caption
-                return caption + '[{}]'.format(bin_idx)
-
-        prefix = elem_path if show_full_paths else self.GetMinimumUniqueSuffix(elem_path, elem_paths)
+        prefix = self.GetCaptionPrefix(elem_path)
         if is_scalar:
             return prefix
         return f'{prefix}[{bin_idx}]'
-    
-    def GetCaptionPrefix(self, elem_path, elem_paths=None, show_full_paths=False):
-        if elem_paths is None:
-            elem_paths = self.GetAllMatchingElemPaths()
 
+    def GetCaptionPrefix(self, elem_path):
         # Check custom container-level caption first
         custom_prefix = self.GetCustomCaption(elem_path)
         if custom_prefix is not None:
             return custom_prefix
 
-        for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
-            if regex == elem_path:
-                if replacements == elem_path:
-                    if show_full_paths:
-                        return elem_path
-                    return self.GetMinimumUniqueSuffix(elem_path, elem_paths)
-                return replacements
+        # An elem_path that was added as-is (not a regex covering other paths)
+        # registers itself as its own key/replacement. That exact self-match
+        # must win before scanning other entries' regexes below, otherwise an
+        # unrelated elem_path that happens to be a literal prefix of this one
+        # (e.g. "top.sqb" vs "top.sqb_age_ordered") can match first, since "."
+        # in a regex matches any character, not just a literal dot.
+        if elem_path in self.regex_replacements_by_elem_path_regex:
+            replacements = self.regex_replacements_by_elem_path_regex[elem_path]
+            if replacements == elem_path:
+                return elem_path
+            return replacements
 
+        for regex, replacements in self.regex_replacements_by_elem_path_regex.items():
             if re.compile(regex).match(elem_path):
                 return re.sub(regex, replacements, elem_path)
 
-        return None
+        return elem_path
 
     def GetAllMatchingElemPaths(self):
         # The display order follows the regex OrderedDict, but scalar leaves and
@@ -983,12 +849,14 @@ class CaptionManager:
         elem_paths = []
         seen = set()
         for regex, _ in self.regex_replacements_by_elem_path_regex.items():
-            if regex in item_elem_paths and regex not in seen:
-                elem_paths.append(regex)
-                seen.add(regex)
+            if regex in item_elem_paths:
+                if regex not in seen:
+                    elem_paths.append(regex)
+                    seen.add(regex)
                 continue
 
             compiled = re.compile(regex)
+            matched_any = False
             for elem_path in item_elem_paths:
                 if elem_path in seen:
                     continue
@@ -996,6 +864,14 @@ class CaptionManager:
                 if compiled.match(elem_path):
                     elem_paths.append(elem_path)
                     seen.add(elem_path)
+                    matched_any = True
+
+            # Not a known elem path and doesn't match anything in the hierarchy either;
+            # show it as-is (e.g. a bad/unknown path typed in manually) instead of
+            # silently dropping it.
+            if not matched_any and regex not in seen:
+                elem_paths.append(regex)
+                seen.add(regex)
 
         return elem_paths
 
