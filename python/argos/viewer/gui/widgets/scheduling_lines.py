@@ -207,7 +207,12 @@ class SchedulingLinesWidget(wx.Panel):
             for elem_path in elem_paths:
                 if elem_path in self._bins_with_data_by_elem_path:
                     bins_with_data = self._bins_with_data_by_elem_path[elem_path]
-                    self._layouts_by_elem_path[elem_path] = self.__BuildRowLayout(elem_path, bins_with_data)
+                    layout = self.__BuildRowLayout(elem_path, bins_with_data)
+                    self._layouts_by_elem_path[elem_path] = [
+                        segment
+                        for segment in layout
+                        if not self.__IsSegmentHidden(elem_path, segment)
+                    ]
                 else:
                     self._layouts_by_elem_path[elem_path] = [{'kind': 'bad_path'}]
 
@@ -302,7 +307,8 @@ class SchedulingLinesWidget(wx.Panel):
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
             if label_idx < len(range_cycles):
-                label = str(range_cycles[label_idx])
+                cycle_offset = label_idx - self.num_samples_before
+                label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
                 self.grid.SetColLabelValue(col, label)
                 col_labels.append(label)
             else:
@@ -355,21 +361,33 @@ class SchedulingLinesWidget(wx.Panel):
             for col in range(1, max_data_col+1):
                 self.grid.SetCellDrawX(row, col, True)
 
-        current_cycle_col = None
-        for col in range(1, self.num_samples_before + self.num_samples_after + 2):
-            try:
-                if int(self.grid.GetColLabelValue(col)) == current_cycle:
-                    current_cycle_col = col
-                    break
-            except ValueError:
-                continue
+        current_cycle_col = self.num_samples_before + 1
 
         # Draw thick black lines on both sides of the current cycle.
         for row in range(num_rows):
             if current_cycle_col is not None:
-                self.grid.SetCellBorder(row, current_cycle_col, 1, wx.LEFT | wx.RIGHT)
+                self.__AddCellBorderSides(row, current_cycle_col, wx.LEFT | wx.RIGHT)
+
+        self.__DrawElementSeparatorBorders()
 
         self.__SetElementCaptions(0)
+
+    def __AddCellBorderSides(self, row, col, border_side):
+        current_width = self.grid.GetCellBorderWidth(row, col)
+        current_side = self.grid.GetCellBorderSide(row, col) if current_width else 0
+        self.grid.SetCellBorder(row, col, max(current_width, 1), current_side | border_side)
+
+    def __DrawElementSeparatorBorders(self):
+        elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
+        if len(elem_paths) < 2:
+            return
+
+        row_offset = 0
+        for elem_path in elem_paths[:-1]:
+            row_offset += len(self._layouts_by_elem_path[elem_path])
+            separator_row = row_offset - 1
+            for col in range(self.grid.GetNumberCols()):
+                self.__AddCellBorderSides(separator_row, col, wx.BOTTOM)
 
     def __ScalarValueToString(self, value):
         if value is None:
@@ -555,7 +573,7 @@ class SchedulingLinesWidget(wx.Panel):
                     self.grid.UnsetCellToolTip(row, col)
                 row += 1
 
-        max_num_chars = max([len(caption) for caption in captions])
+        max_num_chars = max([len(caption) for caption in captions], default=0)
 
         if self.show_detailed_queue_packets:
             num_visible_columns = 0
@@ -614,13 +632,19 @@ class SchedulingLinesWidget(wx.Panel):
             return self.__BuildDynamicRowLayout(elem_path, bins_with_data)
         return self.__BuildStaticRowLayout(elem_path)
 
+    def __IsSegmentHidden(self, elem_path, segment):
+        if segment['kind'] != 'bin':
+            return False
+        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
+        return self.caption_mgr.GetCustomCaption(segment_key) == '<hide>'
+
     def __BuildStaticRowLayout(self, elem_path):
         if elem_path in self.scalar_elem_paths:
             return [{'kind': 'scalar'}]
 
         collection_id = self.frame.simhier.GetCollectionID(elem_path)
         num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
-        max_size = self.queue_max_sizes_by_collection_id[collection_id]
+        max_size = self.queue_max_sizes_by_collection_id.get(collection_id, 0)
 
         if max_size == 0:
             return [{'kind': 'no_data'}]

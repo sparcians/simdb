@@ -6,7 +6,7 @@ from functools import partial
 
 class CaptionsEditDlg(wx.Dialog):
     def __init__(self, parent, custom_captions):
-        super().__init__(parent, title='Edit Captions', size=(600, 450))
+        super().__init__(parent, title='Edit Captions', size=(1000, 450))
 
         self._preserved_captions = {
             path: caption
@@ -201,7 +201,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         assert not editable_captions or not single_selection
 
         _, screen_h = wx.GetDisplaySize()
-        super().__init__(parent, title=title, size=(600, int(screen_h * 0.75)))
+        super().__init__(parent, title=title, size=(1000, int(screen_h * 0.75)))
 
         self.frame = frame
         self.simhier = frame.simhier
