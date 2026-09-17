@@ -914,7 +914,7 @@ class SummaryViewsEditDlg(WidgetDataSelectionsDlg):
 
 class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     SHOW_DETAILS_LABEL = 'Show detailed queue packets'
-    HIDE_EMPTY_ROWS_LABEL = 'Hide empty rows'
+    HIDE_EMPTY_ROWS_LABEL = 'Hide always-empty queue bins'
     ENABLE_TOOLTIPS_LABEL = 'Enable tooltips'
     SHOW_DID_LABEL = 'Show DID'
 

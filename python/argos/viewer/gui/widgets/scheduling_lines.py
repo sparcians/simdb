@@ -202,12 +202,11 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_samples_before,
                 self.num_samples_after,
             )
-            self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, known_elem_paths)
+            known_elem_paths = set(known_elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:
-                if elem_path in self._bins_with_data_by_elem_path:
-                    bins_with_data = self._bins_with_data_by_elem_path[elem_path]
-                    layout = self.__BuildRowLayout(elem_path, bins_with_data)
+                if elem_path in known_elem_paths:
+                    layout = self.__BuildRowLayout(elem_path)
                     self._layouts_by_elem_path[elem_path] = [
                         segment
                         for segment in layout
@@ -607,38 +606,7 @@ class SchedulingLinesWidget(wx.Panel):
 
         return len(layout)
 
-    def __GetBinsWithDataByElemPath(self, ranges, elem_paths):
-        bins_with_data_by_elem_path = {}
-        for elem_path in elem_paths:
-            bins_with_data = set()
-            vals = ranges.get(elem_path, {'DataVals': []})
-            if elem_path in self.scalar_elem_paths:
-                for data_val in vals.get('DataVals', []):
-                    if data_val is not None:
-                        bins_with_data.add(0)
-                bins_with_data_by_elem_path[elem_path] = bins_with_data
-                continue
-            for data_dicts in vals['DataVals']:
-                if data_dicts is None:
-                    continue
-                for bin_idx, annos in enumerate(data_dicts):
-                    if annos is not None:
-                        bins_with_data.add(bin_idx)
-            bins_with_data_by_elem_path[elem_path] = bins_with_data
-        return bins_with_data_by_elem_path
-
-    def __BuildRowLayout(self, elem_path, bins_with_data):
-        if self.hide_empty_rows:
-            return self.__BuildDynamicRowLayout(elem_path, bins_with_data)
-        return self.__BuildStaticRowLayout(elem_path)
-
-    def __IsSegmentHidden(self, elem_path, segment):
-        if segment['kind'] != 'bin':
-            return False
-        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
-        return self.caption_mgr.GetCustomCaption(segment_key) == '<hide>'
-
-    def __BuildStaticRowLayout(self, elem_path):
+    def __BuildRowLayout(self, elem_path):
         if elem_path in self.scalar_elem_paths:
             return [{'kind': 'scalar'}]
 
@@ -646,42 +614,19 @@ class SchedulingLinesWidget(wx.Panel):
         num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
         max_size = self.queue_max_sizes_by_collection_id.get(collection_id, 0)
 
-        if max_size == 0:
+        # hide_empty_rows caps the row count at the queue's overall max size ever
+        # reached; otherwise every bin up to the full capacity is shown.
+        upper = max_size if self.hide_empty_rows else num_bins
+        if upper == 0:
             return [{'kind': 'no_data'}]
 
-        segments = []
-        if max_size < num_bins:
-            segments.append({'kind': 'range', 'lo': max_size - 1, 'hi': num_bins - 1})
-            for i in range(1, max_size):
-                bin_idx = max_size - i - 1
-                segments.append({'kind': 'bin', 'bin': bin_idx})
-        else:
-            for i in range(num_bins):
-                bin_idx = num_bins - i - 1
-                segments.append({'kind': 'bin', 'bin': bin_idx})
-        return segments
+        return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in range(upper - 1, -1, -1)]
 
-    def __BuildDynamicRowLayout(self, elem_path, bins_with_data):
-        if elem_path in self.scalar_elem_paths:
-            return [{'kind': 'scalar'}]
-
-        collection_id = self.frame.simhier.GetCollectionID(elem_path)
-        num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
-
-        segments = []
-        run_hi = None
-        for bin_idx in range(num_bins - 1, -1, -1):
-            if bin_idx in bins_with_data:
-                if run_hi is not None:
-                    segments.append({'kind': 'range', 'lo': bin_idx + 1, 'hi': run_hi})
-                    run_hi = None
-                segments.append({'kind': 'bin', 'bin': bin_idx})
-            elif run_hi is None:
-                run_hi = bin_idx
-
-        if run_hi is not None:
-            segments.append({'kind': 'range', 'lo': 0, 'hi': run_hi})
-        return segments
+    def __IsSegmentHidden(self, elem_path, segment):
+        if segment['kind'] != 'bin':
+            return False
+        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
+        return self.caption_mgr.GetCustomCaption(segment_key) == '<hide>'
 
     def __FormatSegmentCaption(self, elem_path, segment, elem_paths=None):
         if elem_paths is None:
@@ -698,13 +643,6 @@ class SchedulingLinesWidget(wx.Panel):
             return '{}(no data)'.format(self.caption_mgr.GetCaptionPrefix(elem_path))
         if segment['kind'] == 'bad_path':
             return self.caption_mgr.GetCaptionPrefix(elem_path)
-        if segment['kind'] == 'range':
-            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
-            lo = segment['lo']
-            hi = segment['hi']
-            if lo == hi:
-                return '{}[{}]'.format(caption_prefix, lo)
-            return '{}[{}-{}]'.format(caption_prefix, lo, hi)
         return self.caption_mgr.GetCaption(elem_path, segment['bin'])
 
     def __GetCaptionColumnTooltip(self, elem_path, segment, caption):
@@ -721,12 +659,6 @@ class SchedulingLinesWidget(wx.Panel):
             return elem_path
         if segment['kind'] in ('no_data', 'bad_path'):
             return elem_path
-        if segment['kind'] == 'range':
-            lo = segment['lo']
-            hi = segment['hi']
-            if lo == hi:
-                return '{}[{}]'.format(elem_path, lo)
-            return '{}[{}-{}]'.format(elem_path, lo, hi)
         return '{}[{}]'.format(elem_path, segment['bin'])
     
     def __OnGridMouseMotion(self, evt):
