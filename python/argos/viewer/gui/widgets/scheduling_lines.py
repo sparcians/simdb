@@ -322,19 +322,21 @@ class SchedulingLinesWidget(wx.Panel):
             if label_idx < len(range_cycles):
                 cycle_offset = label_idx - self.num_samples_before
                 label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
-                self.grid.SetColLabelValue(col, label)
+                #self.grid.SetColLabelValue(col, label)
                 col_labels.append(label)
             else:
-                self.grid.SetColLabelValue(col, '')
+                #self.grid.SetColLabelValue(col, '')
+                pass
 
         if self.show_detailed_queue_packets:
             detailed_pkt_col = self.num_samples_before + self.num_samples_after + 3
-            self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
+            #self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
             if current_cycle in range_cycles:
-                self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
+                #self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
                 col_labels.append(str(current_cycle))
             else:
-                self.grid.SetColLabelValue(detailed_pkt_col, '')
+                #self.grid.SetColLabelValue(detailed_pkt_col, '')
+                pass
 
         # Use a DC to get the length of the longest col label
         dc = wx.ScreenDC()
@@ -342,9 +344,10 @@ class SchedulingLinesWidget(wx.Panel):
         max_col_label_len = max([dc.GetTextExtent(col_label)[0] for col_label in col_labels]) if col_labels else 0
         self.grid.SetColLabelSize(max_col_label_len + 4)
 
-        self.grid.SetColLabelValue(0, '')
+        #self.grid.SetColLabelValue(0, '')
         self.grid.SetColLabelTextOrientation(wx.VERTICAL)
         self.grid.HideRowLabels()
+        self.grid.HideColLabels()
 
         if sizer is None:
             sizer = wx.BoxSizer(wx.VERTICAL)

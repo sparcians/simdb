@@ -126,7 +126,7 @@ class QueueUtilizWidget(wx.Panel):
             CaptionManager.ApplyPartialPathTooltip(
                 label_ctrl, elem_path, label_text, self.show_full_paths)
             self._elem_path_text_boxes.append(label_ctrl)
-        self._utiliz_bars = [UtilizBar(self.panel, self.frame) for _ in range(len(self.container_elem_paths))]
+        self._utiliz_bars = [UtilizBar(self.panel, self.frame, elem_path) for elem_path in self.container_elem_paths]
 
         for elem_path, utiliz_bar in zip(self._elem_path_text_boxes, self._utiliz_bars):
             sizer.Add(elem_path)
@@ -143,9 +143,11 @@ class QueueUtilizWidget(wx.Panel):
         self.Refresh()
 
 class UtilizBar(wx.Panel):
-    def __init__(self, parent, frame):
+    def __init__(self, parent, frame, elem_path):
         super().__init__(parent, size=(200, 20))
         self.frame = frame
+        self.elem_path = elem_path
+        self.capacity = frame.simhier.GetCapacityByElemPath(elem_path)
         self.static_text = wx.StaticText(self, label='0%')
         font = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         self.static_text.SetFont(font)
@@ -155,9 +157,15 @@ class UtilizBar(wx.Panel):
         self.SetSizer(sizer)
 
     def UpdateUtilizPct(self, utiliz_pct):
-        self.static_text.SetLabel('{}%'.format(round(utiliz_pct * 100)))
+        pct = round(utiliz_pct * 100)
+        self.static_text.SetLabel('{}%'.format(pct))
         color = self.frame.widget_renderer.utiliz_handler.ConvertUtilizPctToColor(utiliz_pct)
         self.SetBackgroundColour(color)
+
+        bins_filled = round(utiliz_pct * self.capacity)
+        tooltip_text = '{}% ({}/{} bins filled)'.format(pct, bins_filled, self.capacity)
+        self.SetToolTip(tooltip_text)
+        self.static_text.SetToolTip(tooltip_text)
 
         height = 20
         width = round(utiliz_pct * 200)
