@@ -100,7 +100,10 @@ class SchedulingLinesWidget(wx.Panel):
 
     def GetCurrentViewSettings(self):
         settings = {}
-        settings['regexes'] = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
+
+        # TODO cnyce: The regex replacements are from an older design which no longer applies.
+        # We should clean up the CaptionManager to just use a flat list of elem paths.
+        settings['displayed_elems'] = self.__GetDisplayedElemPaths()
         settings['custom_captions'] = self.caption_mgr.GetCustomCaptions()
         settings['num_samples_before'] = self.num_samples_before
         settings['num_samples_after'] = self.num_samples_after
@@ -117,7 +120,7 @@ class SchedulingLinesWidget(wx.Panel):
 
     def ApplyViewSettings(self, settings):
         custom_captions = settings.get('custom_captions', {})
-        dirty = self.caption_mgr.GetElemPathRegexReplacements(as_list=True) != settings['regexes'] or \
+        dirty = self.__GetDisplayedElemPaths() != settings['displayed_elems'] or \
                 self.caption_mgr.GetCustomCaptions() != custom_captions or \
                 self.num_samples_before != settings['num_samples_before'] or \
                 self.num_samples_after != settings['num_samples_after'] or \
@@ -131,7 +134,7 @@ class SchedulingLinesWidget(wx.Panel):
         if not dirty:
             return
 
-        self.caption_mgr.SetElemPathRegexReplacements(settings['regexes'])
+        self.caption_mgr.SetElemPathRegexReplacements(settings['displayed_elems'])
         self.caption_mgr.SetCustomCaptions(custom_captions)
         self.num_samples_before = settings['num_samples_before']
         self.num_samples_after = settings['num_samples_after']
@@ -322,21 +325,19 @@ class SchedulingLinesWidget(wx.Panel):
             if label_idx < len(range_cycles):
                 cycle_offset = label_idx - self.num_samples_before
                 label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
-                #self.grid.SetColLabelValue(col, label)
+                self.grid.SetColLabelValue(col, label)
                 col_labels.append(label)
             else:
-                #self.grid.SetColLabelValue(col, '')
-                pass
+                self.grid.SetColLabelValue(col, '')
 
         if self.show_detailed_queue_packets:
             detailed_pkt_col = self.num_samples_before + self.num_samples_after + 3
-            #self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
+            self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
             if current_cycle in range_cycles:
-                #self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
+                self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
                 col_labels.append(str(current_cycle))
             else:
-                #self.grid.SetColLabelValue(detailed_pkt_col, '')
-                pass
+                self.grid.SetColLabelValue(detailed_pkt_col, '')
 
         # Use a DC to get the length of the longest col label
         dc = wx.ScreenDC()
@@ -344,10 +345,9 @@ class SchedulingLinesWidget(wx.Panel):
         max_col_label_len = max([dc.GetTextExtent(col_label)[0] for col_label in col_labels]) if col_labels else 0
         self.grid.SetColLabelSize(max_col_label_len + 4)
 
-        #self.grid.SetColLabelValue(0, '')
+        self.grid.SetColLabelValue(0, '')
         self.grid.SetColLabelTextOrientation(wx.VERTICAL)
         self.grid.HideRowLabels()
-        self.grid.HideColLabels()
 
         if sizer is None:
             sizer = wx.BoxSizer(wx.VERTICAL)
@@ -675,6 +675,11 @@ class SchedulingLinesWidget(wx.Panel):
             return self.caption_mgr.GetCaptionPrefix(elem_path)
         return self.caption_mgr.GetCaption(elem_path, segment['bin'])
 
+    def __GetDisplayedElemPaths(self):
+        regexes = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
+        displayed_elems = [r[0] for r in regexes]
+        return displayed_elems
+
     def __GetCaptionColumnTooltip(self, elem_path, segment, caption):
         full_tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
         if caption.rstrip() == full_tooltip:
@@ -781,7 +786,7 @@ class CaptionManager:
 
     def SetElemPathRegexReplacements(self, regex_replacements_by_elem_path_regex):
         if isinstance(regex_replacements_by_elem_path_regex, list):
-            regex_replacements_by_elem_path_regex = OrderedDict(regex_replacements_by_elem_path_regex)
+            regex_replacements_by_elem_path_regex = OrderedDict({x:x for x in regex_replacements_by_elem_path_regex})
         elif not isinstance(regex_replacements_by_elem_path_regex, OrderedDict):
             raise TypeError('Must be a list or an OrderedDict, not a regular unordered python dict.')
 
