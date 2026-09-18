@@ -80,6 +80,15 @@ class Grid(wx.grid.Grid):
     def SetCellFont(self, row, col, font):
         self.renderer.SetCellFont(row, col, font)
 
+    def UsePadding(self, row, col, pad):
+        self.renderer.UsePadding(row, col, pad)
+
+    def UsePaddingEverywhere(self, pad, immediate_refresh=False):
+        self.renderer.UsePaddingEverywhere(pad)
+        if immediate_refresh:
+            self.Refresh()
+            self.AutoSize()
+
     def SetCellToolTip(self, row, col, tooltip):
         self.renderer.SetCellToolTip(row, col, tooltip)
 
@@ -142,6 +151,14 @@ class GridCellRenderer(wx.grid.GridCellRenderer):
     def SetCellFont(self, row, col, font):
         self.cells[row][col].SetFont(font)
 
+    def UsePadding(self, row, col, pad):
+        self.cells[row][col].UsePadding(pad)
+
+    def UsePaddingEverywhere(self, pad):
+        for row in self.cells:
+            for cell in row:
+                cell.UsePadding(pad)
+
     def SetCellToolTip(self, row, col, tooltip):
         self.cells[row][col].SetToolTip(tooltip)
 
@@ -167,6 +184,7 @@ class GridCell:
         self.border_side = wx.ALL
         self.tooltip = None
         self.draw_x = False
+        self.use_padding = True
 
     def SetText(self, text):
         self.text = text
@@ -205,6 +223,9 @@ class GridCell:
     def SetDrawX(self, draw_x):
         self.draw_x = draw_x
 
+    def UsePadding(self, pad):
+        self.use_padding = pad
+
     def SetToolTip(self, tooltip):
         if tooltip in (None, ''):
             self.UnsetToolTip()
@@ -229,7 +250,10 @@ class GridCell:
 
         if self.text:
             dc.SetFont(self.font)
-            dc.DrawLabel(self.text, rect, self.text_alignment)
+            if self.use_padding:
+                dc.DrawLabel(self.text, rect, self.text_alignment)
+            else:
+                dc.DrawText(self.text, rect.GetLeft(), rect.GetTop())
 
         if self.border_width:
             dc.SetPen(wx.Pen(wx.BLACK, self.border_width))
@@ -248,6 +272,7 @@ class GridCell:
 
         dc.SetFont(self.font)
         w,h = dc.GetTextExtent(self.text)
-        w += 2
-        h += 2
+        if self.use_padding:
+            w += 2
+            h += 2
         return wx.Size(w, h)

@@ -10,8 +10,9 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_HIDE_EMPTY_ROWS = True
     DEFAULT_ENABLE_TOOLTIPS = True
     DEFAULT_SHOW_DID = False
+    DEFAULT_MINIMIZE_GRID_CELLS = False
 
-    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
+    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID, minimize_grid_cells=DEFAULT_MINIMIZE_GRID_CELLS):
         super().__init__(parent)
         self.frame = frame
         self.num_samples_before = num_samples_before
@@ -20,6 +21,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.hide_empty_rows = hide_empty_rows
         self.enable_tooltips = enable_tooltips
         self.show_did = show_did
+        self.minimize_grid_cells = minimize_grid_cells
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
         self.grid = None
@@ -98,7 +100,10 @@ class SchedulingLinesWidget(wx.Panel):
 
     def GetCurrentViewSettings(self):
         settings = {}
-        settings['regexes'] = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
+
+        # TODO cnyce: The regex replacements are from an older design which no longer applies.
+        # We should clean up the CaptionManager to just use a flat list of elem paths.
+        settings['displayed_elems'] = self.__GetDisplayedElemPaths()
         settings['custom_captions'] = self.caption_mgr.GetCustomCaptions()
         settings['num_samples_before'] = self.num_samples_before
         settings['num_samples_after'] = self.num_samples_after
@@ -106,6 +111,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['hide_empty_rows'] = self.hide_empty_rows
         settings['enable_tooltips'] = self.enable_tooltips
         settings['show_did'] = self.show_did
+        settings['minimize_grid_cells'] = self.minimize_grid_cells
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
     
@@ -114,7 +120,7 @@ class SchedulingLinesWidget(wx.Panel):
 
     def ApplyViewSettings(self, settings):
         custom_captions = settings.get('custom_captions', {})
-        dirty = self.caption_mgr.GetElemPathRegexReplacements(as_list=True) != settings['regexes'] or \
+        dirty = self.__GetDisplayedElemPaths() != settings['displayed_elems'] or \
                 self.caption_mgr.GetCustomCaptions() != custom_captions or \
                 self.num_samples_before != settings['num_samples_before'] or \
                 self.num_samples_after != settings['num_samples_after'] or \
@@ -122,12 +128,13 @@ class SchedulingLinesWidget(wx.Panel):
                 self.hide_empty_rows != settings['hide_empty_rows'] or \
                 self.enable_tooltips != settings['enable_tooltips'] or \
                 self.show_did != settings['show_did'] or \
+                self.minimize_grid_cells != settings['minimize_grid_cells'] or \
                 self.tracked_annos != settings['tracked_annos']
 
         if not dirty:
             return
 
-        self.caption_mgr.SetElemPathRegexReplacements(settings['regexes'])
+        self.caption_mgr.SetElemPathRegexReplacements(settings['displayed_elems'])
         self.caption_mgr.SetCustomCaptions(custom_captions)
         self.num_samples_before = settings['num_samples_before']
         self.num_samples_after = settings['num_samples_after']
@@ -135,6 +142,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.hide_empty_rows = settings['hide_empty_rows']
         self.enable_tooltips = settings['enable_tooltips']
         self.show_did = settings['show_did']
+        self.minimize_grid_cells = settings['minimize_grid_cells']
         self.tracked_annos = settings['tracked_annos']
 
         self.__Refresh()
@@ -202,12 +210,16 @@ class SchedulingLinesWidget(wx.Panel):
                 self.num_samples_before,
                 self.num_samples_after,
             )
-            self._bins_with_data_by_elem_path = self.__GetBinsWithDataByElemPath(self._ranges, known_elem_paths)
+            known_elem_paths = set(known_elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:
-                if elem_path in self._bins_with_data_by_elem_path:
-                    bins_with_data = self._bins_with_data_by_elem_path[elem_path]
-                    self._layouts_by_elem_path[elem_path] = self.__BuildRowLayout(elem_path, bins_with_data)
+                if elem_path in known_elem_paths:
+                    layout = self.__BuildRowLayout(elem_path)
+                    self._layouts_by_elem_path[elem_path] = [
+                        segment
+                        for segment in layout
+                        if not self.__IsSegmentHidden(elem_path, segment)
+                    ]
                 else:
                     self._layouts_by_elem_path[elem_path] = [{'kind': 'bad_path'}]
 
@@ -278,11 +290,20 @@ class SchedulingLinesWidget(wx.Panel):
         # Create 10-point font for the grid column labels
         font10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
 
+        cell_font = font8 if self.minimize_grid_cells else font10
+        label_font = font8 if self.minimize_grid_cells else font10
+
         if new_grid or self.grid is None:
-            self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
+            self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
+        else:
+            self.grid.SetLabelFont(label_font)
+            for row in range(num_rows):
+                for col in range(num_cols):
+                    self.grid.SetCellFont(row, col, cell_font)
         self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
+        self.grid.UsePaddingEverywhere(not self.minimize_grid_cells)
 
         current_cycle = self.frame.playback_bar.GetCurrentCycle()
         sample_time_vals = sorted({
@@ -302,7 +323,8 @@ class SchedulingLinesWidget(wx.Panel):
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
             if label_idx < len(range_cycles):
-                label = str(range_cycles[label_idx])
+                cycle_offset = label_idx - self.num_samples_before
+                label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
                 self.grid.SetColLabelValue(col, label)
                 col_labels.append(label)
             else:
@@ -355,21 +377,33 @@ class SchedulingLinesWidget(wx.Panel):
             for col in range(1, max_data_col+1):
                 self.grid.SetCellDrawX(row, col, True)
 
-        current_cycle_col = None
-        for col in range(1, self.num_samples_before + self.num_samples_after + 2):
-            try:
-                if int(self.grid.GetColLabelValue(col)) == current_cycle:
-                    current_cycle_col = col
-                    break
-            except ValueError:
-                continue
+        current_cycle_col = self.num_samples_before + 1
 
         # Draw thick black lines on both sides of the current cycle.
         for row in range(num_rows):
             if current_cycle_col is not None:
-                self.grid.SetCellBorder(row, current_cycle_col, 1, wx.LEFT | wx.RIGHT)
+                self.__AddCellBorderSides(row, current_cycle_col, wx.LEFT | wx.RIGHT)
+
+        self.__DrawElementSeparatorBorders()
 
         self.__SetElementCaptions(0)
+
+    def __AddCellBorderSides(self, row, col, border_side):
+        current_width = self.grid.GetCellBorderWidth(row, col)
+        current_side = self.grid.GetCellBorderSide(row, col) if current_width else 0
+        self.grid.SetCellBorder(row, col, max(current_width, 1), current_side | border_side)
+
+    def __DrawElementSeparatorBorders(self):
+        elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
+        if len(elem_paths) < 2:
+            return
+
+        row_offset = 0
+        for elem_path in elem_paths[:-1]:
+            row_offset += len(self._layouts_by_elem_path[elem_path])
+            separator_row = row_offset - 1
+            for col in range(self.grid.GetNumberCols()):
+                self.__AddCellBorderSides(separator_row, col, wx.BOTTOM)
 
     def __ScalarValueToString(self, value):
         if value is None:
@@ -522,6 +556,8 @@ class SchedulingLinesWidget(wx.Panel):
                     self.grid.SetCellBackgroundColour(row, col, (240,240,240))
 
         self.grid.AutoSize()
+        if self.minimize_grid_cells:
+            self.__SetMinimizedRowHeights()
         self.Layout()
         self.Update()
         self.Refresh()
@@ -531,11 +567,22 @@ class SchedulingLinesWidget(wx.Panel):
         if key in self.rasterizers:
             self.rasterizers[key].Draw(elem_path, bin_idx, time_val, annos)
 
+    def __SetMinimizedRowHeights(self):
+        dc = wx.ScreenDC()
+        dc.SetFont(wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        _, height = dc.GetTextExtent('Ag')
+        self.grid.SetRowMinimalAcceptableHeight(height)
+        self.grid.SetDefaultRowSize(height, True)
+        for row in range(self.grid.GetNumberRows()):
+            self.grid.SetRowMinimalHeight(row, height)
+            self.grid.SetRowSize(row, height)
+
     def __SetElementCaptions(self, col):
         if col == 0:
             self.rasterizers = {}
 
-        font = self.grid.GetLabelFont()
+        font_size = 8 if self.minimize_grid_cells else 10
+        font = wx.Font(font_size, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         for row in range(self.grid.GetNumberRows()):
             self.grid.SetCellFont(row, col, font)
             if col > 0:
@@ -555,7 +602,7 @@ class SchedulingLinesWidget(wx.Panel):
                     self.grid.UnsetCellToolTip(row, col)
                 row += 1
 
-        max_num_chars = max([len(caption) for caption in captions])
+        max_num_chars = max([len(caption) for caption in captions], default=0)
 
         if self.show_detailed_queue_packets:
             num_visible_columns = 0
@@ -589,75 +636,27 @@ class SchedulingLinesWidget(wx.Panel):
 
         return len(layout)
 
-    def __GetBinsWithDataByElemPath(self, ranges, elem_paths):
-        bins_with_data_by_elem_path = {}
-        for elem_path in elem_paths:
-            bins_with_data = set()
-            vals = ranges.get(elem_path, {'DataVals': []})
-            if elem_path in self.scalar_elem_paths:
-                for data_val in vals.get('DataVals', []):
-                    if data_val is not None:
-                        bins_with_data.add(0)
-                bins_with_data_by_elem_path[elem_path] = bins_with_data
-                continue
-            for data_dicts in vals['DataVals']:
-                if data_dicts is None:
-                    continue
-                for bin_idx, annos in enumerate(data_dicts):
-                    if annos is not None:
-                        bins_with_data.add(bin_idx)
-            bins_with_data_by_elem_path[elem_path] = bins_with_data
-        return bins_with_data_by_elem_path
-
-    def __BuildRowLayout(self, elem_path, bins_with_data):
-        if self.hide_empty_rows:
-            return self.__BuildDynamicRowLayout(elem_path, bins_with_data)
-        return self.__BuildStaticRowLayout(elem_path)
-
-    def __BuildStaticRowLayout(self, elem_path):
+    def __BuildRowLayout(self, elem_path):
         if elem_path in self.scalar_elem_paths:
             return [{'kind': 'scalar'}]
 
         collection_id = self.frame.simhier.GetCollectionID(elem_path)
         num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
-        max_size = self.queue_max_sizes_by_collection_id[collection_id]
+        max_size = self.queue_max_sizes_by_collection_id.get(collection_id, 0)
 
-        if max_size == 0:
+        # hide_empty_rows caps the row count at the queue's overall max size ever
+        # reached; otherwise every bin up to the full capacity is shown.
+        upper = max_size if self.hide_empty_rows else num_bins
+        if upper == 0:
             return [{'kind': 'no_data'}]
 
-        segments = []
-        if max_size < num_bins:
-            segments.append({'kind': 'range', 'lo': max_size - 1, 'hi': num_bins - 1})
-            for i in range(1, max_size):
-                bin_idx = max_size - i - 1
-                segments.append({'kind': 'bin', 'bin': bin_idx})
-        else:
-            for i in range(num_bins):
-                bin_idx = num_bins - i - 1
-                segments.append({'kind': 'bin', 'bin': bin_idx})
-        return segments
+        return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in range(upper - 1, -1, -1)]
 
-    def __BuildDynamicRowLayout(self, elem_path, bins_with_data):
-        if elem_path in self.scalar_elem_paths:
-            return [{'kind': 'scalar'}]
-
-        collection_id = self.frame.simhier.GetCollectionID(elem_path)
-        num_bins = self.frame.simhier.GetCapacityByCollectionID(collection_id)
-
-        segments = []
-        run_hi = None
-        for bin_idx in range(num_bins - 1, -1, -1):
-            if bin_idx in bins_with_data:
-                if run_hi is not None:
-                    segments.append({'kind': 'range', 'lo': bin_idx + 1, 'hi': run_hi})
-                    run_hi = None
-                segments.append({'kind': 'bin', 'bin': bin_idx})
-            elif run_hi is None:
-                run_hi = bin_idx
-
-        if run_hi is not None:
-            segments.append({'kind': 'range', 'lo': 0, 'hi': run_hi})
-        return segments
+    def __IsSegmentHidden(self, elem_path, segment):
+        if segment['kind'] != 'bin':
+            return False
+        segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
+        return self.caption_mgr.GetCustomCaption(segment_key) == '<hide>'
 
     def __FormatSegmentCaption(self, elem_path, segment, elem_paths=None):
         if elem_paths is None:
@@ -674,14 +673,12 @@ class SchedulingLinesWidget(wx.Panel):
             return '{}(no data)'.format(self.caption_mgr.GetCaptionPrefix(elem_path))
         if segment['kind'] == 'bad_path':
             return self.caption_mgr.GetCaptionPrefix(elem_path)
-        if segment['kind'] == 'range':
-            caption_prefix = self.caption_mgr.GetCaptionPrefix(elem_path)
-            lo = segment['lo']
-            hi = segment['hi']
-            if lo == hi:
-                return '{}[{}]'.format(caption_prefix, lo)
-            return '{}[{}-{}]'.format(caption_prefix, lo, hi)
         return self.caption_mgr.GetCaption(elem_path, segment['bin'])
+
+    def __GetDisplayedElemPaths(self):
+        regexes = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
+        displayed_elems = [r[0] for r in regexes]
+        return displayed_elems
 
     def __GetCaptionColumnTooltip(self, elem_path, segment, caption):
         full_tooltip = self.__SegmentElemPathTooltip(elem_path, segment)
@@ -697,12 +694,6 @@ class SchedulingLinesWidget(wx.Panel):
             return elem_path
         if segment['kind'] in ('no_data', 'bad_path'):
             return elem_path
-        if segment['kind'] == 'range':
-            lo = segment['lo']
-            hi = segment['hi']
-            if lo == hi:
-                return '{}[{}]'.format(elem_path, lo)
-            return '{}[{}-{}]'.format(elem_path, lo, hi)
         return '{}[{}]'.format(elem_path, segment['bin'])
     
     def __OnGridMouseMotion(self, evt):
@@ -795,7 +786,7 @@ class CaptionManager:
 
     def SetElemPathRegexReplacements(self, regex_replacements_by_elem_path_regex):
         if isinstance(regex_replacements_by_elem_path_regex, list):
-            regex_replacements_by_elem_path_regex = OrderedDict(regex_replacements_by_elem_path_regex)
+            regex_replacements_by_elem_path_regex = OrderedDict({x:x for x in regex_replacements_by_elem_path_regex})
         elif not isinstance(regex_replacements_by_elem_path_regex, OrderedDict):
             raise TypeError('Must be a list or an OrderedDict, not a regular unordered python dict.')
 

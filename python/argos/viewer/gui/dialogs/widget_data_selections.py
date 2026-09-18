@@ -6,7 +6,7 @@ from functools import partial
 
 class CaptionsEditDlg(wx.Dialog):
     def __init__(self, parent, custom_captions):
-        super().__init__(parent, title='Edit Captions', size=(600, 450))
+        super().__init__(parent, title='Edit Captions', size=(1000, 450))
 
         self._preserved_captions = {
             path: caption
@@ -32,8 +32,8 @@ class CaptionsEditDlg(wx.Dialog):
             )
             self.captions_list.SetItem(item, 1, caption)
 
-        add_btn = wx.Button(self, label='+')
-        self.remove_btn = wx.Button(self, label='X', size=add_btn.GetSize())
+        add_btn = wx.Button(self, wx.ID_ADD)
+        self.remove_btn = wx.Button(self, wx.ID_REMOVE, size=add_btn.GetSize())
         add_btn.Bind(wx.EVT_BUTTON, self.__OnAddRow)
         self.remove_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveRow)
 
@@ -201,7 +201,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         assert not editable_captions or not single_selection
 
         _, screen_h = wx.GetDisplaySize()
-        super().__init__(parent, title=title, size=(600, int(screen_h * 0.75)))
+        super().__init__(parent, title=title, size=(1000, int(screen_h * 0.75)))
 
         self.frame = frame
         self.simhier = frame.simhier
@@ -914,13 +914,14 @@ class SummaryViewsEditDlg(WidgetDataSelectionsDlg):
 
 class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     SHOW_DETAILS_LABEL = 'Show detailed queue packets'
-    HIDE_EMPTY_ROWS_LABEL = 'Hide empty rows'
+    HIDE_EMPTY_ROWS_LABEL = 'Hide always-empty queue bins'
     ENABLE_TOOLTIPS_LABEL = 'Enable tooltips'
     SHOW_DID_LABEL = 'Show DID'
+    MINIMIZE_GRID_CELLS_LABEL = 'Minimize grid cells'
 
     def __init__(
         self, parent, frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did, title="Edit Data Selections",
-        initial_captions=None,
+        initial_captions=None, minimize_grid_cells=False,
     ):
         self._num_samples_before = num_samples_before
         self._num_samples_after = num_samples_after
@@ -929,6 +930,7 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
             (self.HIDE_EMPTY_ROWS_LABEL, hide_empty_rows),
             (self.ENABLE_TOOLTIPS_LABEL, enable_tooltips),
             (self.SHOW_DID_LABEL, show_did),
+            (self.MINIMIZE_GRID_CELLS_LABEL, minimize_grid_cells),
         ]
         WidgetDataSelectionsDlg.__init__(
             self, parent, frame, elem_paths, queues_only=False, settings_chkboxes=chkboxes,
@@ -1001,6 +1003,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     @property
     def show_did(self):
         return self.GetSettingCheckbox(self.SHOW_DID_LABEL)
+
+    @property
+    def minimize_grid_cells(self):
+        return self.GetSettingCheckbox(self.MINIMIZE_GRID_CELLS_LABEL)
 
     def __UpdateButtonStates(self, *args):
         WidgetDataSelectionsDlg.__UpdateButtonStates(self, *args)
