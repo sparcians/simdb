@@ -10,8 +10,9 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_HIDE_EMPTY_ROWS = True
     DEFAULT_ENABLE_TOOLTIPS = True
     DEFAULT_SHOW_DID = False
+    DEFAULT_MINIMIZE_GRID_CELLS = False
 
-    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID):
+    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID, minimize_grid_cells=DEFAULT_MINIMIZE_GRID_CELLS):
         super().__init__(parent)
         self.frame = frame
         self.num_samples_before = num_samples_before
@@ -20,6 +21,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.hide_empty_rows = hide_empty_rows
         self.enable_tooltips = enable_tooltips
         self.show_did = show_did
+        self.minimize_grid_cells = minimize_grid_cells
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
         self.grid = None
@@ -106,6 +108,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['hide_empty_rows'] = self.hide_empty_rows
         settings['enable_tooltips'] = self.enable_tooltips
         settings['show_did'] = self.show_did
+        settings['minimize_grid_cells'] = self.minimize_grid_cells
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
     
@@ -122,6 +125,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.hide_empty_rows != settings['hide_empty_rows'] or \
                 self.enable_tooltips != settings['enable_tooltips'] or \
                 self.show_did != settings['show_did'] or \
+                self.minimize_grid_cells != settings['minimize_grid_cells'] or \
                 self.tracked_annos != settings['tracked_annos']
 
         if not dirty:
@@ -135,6 +139,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.hide_empty_rows = settings['hide_empty_rows']
         self.enable_tooltips = settings['enable_tooltips']
         self.show_did = settings['show_did']
+        self.minimize_grid_cells = settings['minimize_grid_cells']
         self.tracked_annos = settings['tracked_annos']
 
         self.__Refresh()
@@ -282,11 +287,20 @@ class SchedulingLinesWidget(wx.Panel):
         # Create 10-point font for the grid column labels
         font10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
 
+        cell_font = font8 if self.minimize_grid_cells else font10
+        label_font = font8 if self.minimize_grid_cells else font10
+
         if new_grid or self.grid is None:
-            self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=font8, label_font=font10, cell_selection_allowed=False)
+            self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
+        else:
+            self.grid.SetLabelFont(label_font)
+            for row in range(num_rows):
+                for col in range(num_cols):
+                    self.grid.SetCellFont(row, col, cell_font)
         self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
         self.grid.EnableGridLines(False)
         self.grid.SetLabelBackgroundColour('white')
+        self.grid.UsePaddingEverywhere(not self.minimize_grid_cells)
 
         current_cycle = self.frame.playback_bar.GetCurrentCycle()
         sample_time_vals = sorted({
@@ -539,6 +553,8 @@ class SchedulingLinesWidget(wx.Panel):
                     self.grid.SetCellBackgroundColour(row, col, (240,240,240))
 
         self.grid.AutoSize()
+        if self.minimize_grid_cells:
+            self.__SetMinimizedRowHeights()
         self.Layout()
         self.Update()
         self.Refresh()
@@ -548,11 +564,22 @@ class SchedulingLinesWidget(wx.Panel):
         if key in self.rasterizers:
             self.rasterizers[key].Draw(elem_path, bin_idx, time_val, annos)
 
+    def __SetMinimizedRowHeights(self):
+        dc = wx.ScreenDC()
+        dc.SetFont(wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        _, height = dc.GetTextExtent('Ag')
+        self.grid.SetRowMinimalAcceptableHeight(height)
+        self.grid.SetDefaultRowSize(height, True)
+        for row in range(self.grid.GetNumberRows()):
+            self.grid.SetRowMinimalHeight(row, height)
+            self.grid.SetRowSize(row, height)
+
     def __SetElementCaptions(self, col):
         if col == 0:
             self.rasterizers = {}
 
-        font = self.grid.GetLabelFont()
+        font_size = 8 if self.minimize_grid_cells else 10
+        font = wx.Font(font_size, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         for row in range(self.grid.GetNumberRows()):
             self.grid.SetCellFont(row, col, font)
             if col > 0:

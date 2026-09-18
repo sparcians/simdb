@@ -352,6 +352,7 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = self._widget.hide_empty_rows
             enable_tooltips = self._widget.enable_tooltips
             show_did = self._widget.show_did
+            minimize_grid_cells = self._widget.minimize_grid_cells
             initial_captions = self._widget.caption_mgr.GetCustomCaptions()
         else:
             elem_paths = []
@@ -361,11 +362,12 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = SchedulingLinesWidget.DEFAULT_HIDE_EMPTY_ROWS
             enable_tooltips = SchedulingLinesWidget.DEFAULT_ENABLE_TOOLTIPS
             show_did = SchedulingLinesWidget.DEFAULT_SHOW_DID
+            minimize_grid_cells = SchedulingLinesWidget.DEFAULT_MINIMIZE_GRID_CELLS
             initial_captions = {}
 
         dlg = SchedulingLinesEditDlg(
             self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did,
-            initial_captions=initial_captions,
+            initial_captions=initial_captions, minimize_grid_cells=minimize_grid_cells,
         )
         result = dlg.ShowModal()
         if result == wx.ID_OK:
@@ -376,8 +378,9 @@ class WidgetContainer(wx.Panel):
             hide_empty_rows = dlg.hide_empty_rows
             enable_tooltips = dlg.enable_tooltips
             show_did = dlg.show_did
+            minimize_grid_cells = dlg.minimize_grid_cells
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did, minimize_grid_cells)
                 widget.caption_mgr.SetCustomCaptions(dlg.GetCustomCaptions())
                 self.SetWidget(widget)
             else:
