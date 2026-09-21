@@ -51,6 +51,11 @@ public:
     //! the input data structure).
     void setScalarValueBytes(std::vector<char>&& scalar_bytes)
     {
+        if (scalar_bytes.empty())
+        {
+            closeRecord();
+            return;
+        }
         closed_ = false;
         stager_interface_->stage(getID(), std::move(scalar_bytes));
     }
@@ -58,6 +63,11 @@ public:
     //! \see setScalarValueBytes
     void setContigContainerBinBytes(std::vector<std::vector<char>>&& contig_bin_bytes)
     {
+        if (contig_bin_bytes.empty())
+        {
+            closeRecord();
+            return;
+        }
         closed_ = false;
         stager_interface_->stage(getID(), std::move(contig_bin_bytes));
     }
@@ -65,6 +75,11 @@ public:
     //! \see setScalarValueBytes
     void setSparseContainerBinBytes(std::map<uint16_t, std::vector<char>>&& sparse_bin_bytes)
     {
+        if (sparse_bin_bytes.empty())
+        {
+            closeRecord();
+            return;
+        }
         closed_ = false;
         stager_interface_->stage(getID(), std::move(sparse_bin_bytes));
     }
@@ -83,7 +98,7 @@ private:
     const uint16_t cid_{nextCID_()};
 
     /// Suppress heartbeat re-emission while true
-    bool closed_ = false;
+    bool closed_ = true;
 
     /// Most of what EntryPoint does is forward to the stager (ledger)
     PipelineStagerInterface* const stager_interface_;
