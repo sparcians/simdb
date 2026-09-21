@@ -204,11 +204,16 @@ class SchedulingLinesWidget(wx.Panel):
             # still shown as a row, just without any data to rasterize.
             known_elem_paths = [p for p in elem_paths if self.__IsKnownElemPath(p)]
 
+            current_cycle = self.frame.playback_bar.GetCurrentCycle()
+            timeline_cycles = self.__GetSchedulingTimelineCycles(current_cycle)
+            num_samples_before = current_cycle - timeline_cycles[0]
+            num_samples_after = timeline_cycles[-1] - current_cycle
+
             self._ranges = self.frame.data_retriever.UnpackElementData(
                 current_tick,
                 known_elem_paths,
-                self.num_samples_before,
-                self.num_samples_after,
+                num_samples_before,
+                num_samples_after,
             )
             known_elem_paths = set(known_elem_paths)
             self._layouts_by_elem_path = {}
@@ -237,6 +242,14 @@ class SchedulingLinesWidget(wx.Panel):
         if elem_path in self.scalar_elem_paths:
             return True
         return self.frame.simhier.GetCollectionID(elem_path) is not None
+
+    def __GetSchedulingTimelineCycles(self, current_cycle):
+        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
+        first_valid_cycle = int(self.frame.widget_renderer.start_tick) // clock_period
+        num_sample_cols = self.num_samples_before + self.num_samples_after + 1
+        first_cycle = max(first_valid_cycle, current_cycle - self.num_samples_before)
+        return list(range(first_cycle, first_cycle + num_sample_cols))
 
     def __RegenerateSchedulingLinesGrid(self, new_grid):
         sizer = self.GetSizer()
@@ -306,24 +319,29 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.UsePaddingEverywhere(not self.minimize_grid_cells)
 
         current_cycle = self.frame.playback_bar.GetCurrentCycle()
+        timeline_cycles = self.__GetSchedulingTimelineCycles(current_cycle)
+        cycle_col_by_cycle = {
+            cycle: col + 1
+            for col, cycle in enumerate(timeline_cycles)
+        }
         sample_time_vals = sorted({
             int(time_val)
             for elem_data in self._ranges.values()
             for time_val in elem_data['TimeVals']
         })
+        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
         self._sample_col_by_time = {
-            time_val: col + 1
-            for col, time_val in enumerate(sample_time_vals)
+            time_val: cycle_col_by_cycle[time_val // clock_period]
+            for time_val in sample_time_vals
+            if time_val // clock_period in cycle_col_by_cycle
         }
-        range_cycles = list(range(
-            current_cycle - self.num_samples_before,
-            current_cycle + self.num_samples_after + 1,
-        ))
+        current_cycle_col = cycle_col_by_cycle.get(current_cycle)
         col_labels = []
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
-            if label_idx < len(range_cycles):
-                cycle_offset = label_idx - self.num_samples_before
+            if label_idx < len(timeline_cycles):
+                cycle_offset = timeline_cycles[label_idx] - current_cycle
                 label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
                 self.grid.SetColLabelValue(col, label)
                 col_labels.append(label)
@@ -333,7 +351,7 @@ class SchedulingLinesWidget(wx.Panel):
         if self.show_detailed_queue_packets:
             detailed_pkt_col = self.num_samples_before + self.num_samples_after + 3
             self.grid.SetColLabelValue(detailed_pkt_col - 1, '')
-            if current_cycle in range_cycles:
+            if current_cycle_col is not None:
                 self.grid.SetColLabelValue(detailed_pkt_col, str(current_cycle))
                 col_labels.append(str(current_cycle))
             else:
@@ -376,8 +394,6 @@ class SchedulingLinesWidget(wx.Panel):
         for row in self._bad_path_rows:
             for col in range(1, max_data_col+1):
                 self.grid.SetCellDrawX(row, col, True)
-
-        current_cycle_col = self.num_samples_before + 1
 
         # Draw thick black lines on both sides of the current cycle.
         for row in range(num_rows):
