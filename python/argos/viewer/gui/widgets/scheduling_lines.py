@@ -746,7 +746,11 @@ class SchedulingLinesWidget(wx.Panel):
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
 
-        if col == 0 or self.enable_tooltips:
+        # XYToCell returns -1 for positions outside any real cell (e.g. past the
+        # last column); negative indices would otherwise alias to the last row/col.
+        in_bounds = 0 <= row < self.grid.GetNumberRows() and 0 <= col < self.grid.GetNumberCols()
+
+        if in_bounds and (col == 0 or self.enable_tooltips):
             tooltip = self.grid.GetCellToolTip(row, col)
         else:
             tooltip = None
