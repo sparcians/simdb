@@ -195,7 +195,6 @@ class SchedulingLinesWidget(wx.Panel):
             # would otherwise reset the scroll position back to the top.
             saved_view_start = self.grid.GetViewStart() if self.grid else None
 
-            current_tick = self.frame.widget_renderer.tick
             elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
             self._caption_elem_paths = elem_paths
 
@@ -206,15 +205,7 @@ class SchedulingLinesWidget(wx.Panel):
 
             current_cycle = self.frame.playback_bar.GetCurrentCycle()
             timeline_cycles = self.__GetSchedulingTimelineCycles(current_cycle)
-            num_samples_before = current_cycle - timeline_cycles[0]
-            num_samples_after = timeline_cycles[-1] - current_cycle
-
-            self._ranges = self.frame.data_retriever.UnpackElementData(
-                current_tick,
-                known_elem_paths,
-                num_samples_before,
-                num_samples_after,
-            )
+            self._ranges = self.__UnpackTimelineData(timeline_cycles, known_elem_paths)
             known_elem_paths = set(known_elem_paths)
             self._layouts_by_elem_path = {}
             for elem_path in elem_paths:
@@ -242,6 +233,13 @@ class SchedulingLinesWidget(wx.Panel):
         if elem_path in self.scalar_elem_paths:
             return True
         return self.frame.simhier.GetCollectionID(elem_path) is not None
+
+    def __UnpackTimelineData(self, timeline_cycles, elem_paths):
+        selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
+        clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
+        start_tick = int(self.frame.widget_renderer.start_tick)
+        timeline_ticks = [max(cycle * clock_period, start_tick) for cycle in timeline_cycles]
+        return self.frame.data_retriever.UnpackTicks(timeline_ticks, elem_paths)
 
     def __GetSchedulingTimelineCycles(self, current_cycle):
         selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
