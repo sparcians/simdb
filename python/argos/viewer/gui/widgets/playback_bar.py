@@ -219,16 +219,10 @@ class PlaybackBar(wx.Panel):
     def GetCurrentUserSettings(self):
         settings = {}
         settings['current_tick'] = self.cyc_slider.GetValue()
-        settings['selected_clk'] = self.clock_combobox.GetValue()
         return settings
     
     def ApplyUserSettings(self, settings, update_widgets=True):
         current_tick = settings['current_tick']
-        selected_clk = settings.get('selected_clk')
-        if selected_clk is not None:
-            self.clock_combobox.SetValue(selected_clk)
-            self._selected_clock = selected_clk
-            self.__UpdateRangeLabels()
         widget_renderer = self.frame.widget_renderer
         widget_renderer.GoToTick(current_tick, update_widgets)
 
@@ -242,8 +236,12 @@ class PlaybackBar(wx.Panel):
         widget_renderer = self.frame.widget_renderer
         cur_tick = widget_renderer.tick
         period = self.clock_periods.get(self.clock_combobox.GetValue())
-        step_ticks = step * int(period) if period else step
-        widget_renderer.GoToTick(cur_tick + step_ticks)
+        if period:
+            # snap to the clock's cycle grid before stepping, matching v2 semantics
+            cur_cycle = cur_tick // int(period)
+            widget_renderer.GoToTick((cur_cycle + step) * int(period))
+        else:
+            widget_renderer.GoToTick(cur_tick + step)
 
     def __OnCycSlider(self, event):
         widget_renderer = self.frame.widget_renderer

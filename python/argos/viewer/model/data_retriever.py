@@ -466,7 +466,6 @@ class DataRetriever:
             min_tick, max_tick = self.cursor.fetchone()
             unpacked.update(self.UnpackRange(min_tick, max_tick, paths))
 
-        #import pdb; pdb.set_trace()
         return unpacked
 
     def GetAllTimeVals(self):
