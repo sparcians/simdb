@@ -867,7 +867,7 @@ class CaptionManager:
         # registers itself as its own key/replacement. That exact self-match
         # must win before scanning other entries' regexes below, otherwise an
         # unrelated elem_path that happens to be a literal prefix of this one
-        # (e.g. "top.sqb" vs "top.sqb_age_ordered") can match first, since "."
+        # (e.g. "top.foo" vs "top.foo_bar") can match first, since "."
         # in a regex matches any character, not just a literal dot.
         if elem_path in self.regex_replacements_by_elem_path_regex:
             replacements = self.regex_replacements_by_elem_path_regex[elem_path]
