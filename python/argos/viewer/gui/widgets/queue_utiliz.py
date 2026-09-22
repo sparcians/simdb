@@ -1,4 +1,5 @@
 import wx, copy
+from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.dialogs.widget_data_selections import QueueUtilizEditDlg
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.scheduling_lines import CaptionManager
@@ -123,6 +124,7 @@ class QueueUtilizWidget(wx.Panel):
         for elem_path in self.container_elem_paths:
             label_text = self.__FormatElemPathLabel(elem_path)
             label_ctrl = wx.StaticText(self.panel, label=label_text)
+            BindCopyPathMenu(label_ctrl, elem_path)
             CaptionManager.ApplyPartialPathTooltip(
                 label_ctrl, elem_path, label_text, self.show_full_paths)
             self._elem_path_text_boxes.append(label_ctrl)

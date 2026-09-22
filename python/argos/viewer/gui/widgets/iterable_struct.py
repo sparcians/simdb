@@ -1,5 +1,6 @@
 import wx, wx.grid
 from collections.abc import Iterable
+from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 
 class IterableStruct(wx.Panel):
@@ -32,6 +33,7 @@ class IterableStruct(wx.Panel):
 
         self.utiliz_elem = UtilizElement(self, frame, self.capacity)
         location_elem = wx.StaticText(self, label=elem_path)
+        BindCopyPathMenu(location_elem, elem_path)
 
         font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         location_elem.SetFont(font)
