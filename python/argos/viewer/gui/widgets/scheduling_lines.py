@@ -1000,7 +1000,5 @@ class Rasterizer:
             self.grid.SetCellValue(self.row, self.detailed_pkt_col, stringized_anno)
             self.grid.SetCellAlignment(self.row, self.detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
             self.grid.SetCellBackgroundColour(self.row, self.detailed_pkt_col, auto_color)
-            if self.widget.enable_tooltips:
-                self.grid.SetCellToolTip(self.row, self.detailed_pkt_col, stringized_tooltip)
             if show_border:
                 self.grid.SetCellBorder(self.row, self.detailed_pkt_col, 1, wx.ALL)
