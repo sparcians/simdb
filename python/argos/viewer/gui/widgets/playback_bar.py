@@ -83,7 +83,8 @@ class PlaybackBar(wx.Panel):
         self.plus_10_button.Bind(wx.EVT_BUTTON, partial(self.__OnStep, step=10))
         self.plus_30_button.Bind(wx.EVT_BUTTON, partial(self.__OnStep, step=30))
 
-        self.cyc_slider.Bind(wx.EVT_SCROLL, self.__OnCycSlider)
+        self.cyc_slider.Bind(wx.EVT_SCROLL_THUMBTRACK, self.__OnCycSliderTrack)
+        self.cyc_slider.Bind(wx.EVT_SCROLL_CHANGED, self.__OnCycSliderChanged)
 
         self.cyc_start_text = wx.StaticText(self, label='start-tick:{}'.format(widget_renderer.start_tick))
         self.cyc_start_text.SetForegroundColour(wx.BLUE)
@@ -243,7 +244,11 @@ class PlaybackBar(wx.Panel):
         else:
             widget_renderer.GoToTick(cur_tick + step)
 
-    def __OnCycSlider(self, event):
+    def __OnCycSliderTrack(self, event):
+        # Live label preview while dragging; widgets are only refreshed on release.
+        self.__UpdateTimeLabels(self.cyc_slider.GetValue())
+
+    def __OnCycSliderChanged(self, event):
         widget_renderer = self.frame.widget_renderer
         widget_renderer.GoToTick(self.cyc_slider.GetValue())
 

@@ -25,6 +25,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
         self.grid = None
+        self._prev_current_cycle_col = None
         self.rasterizers = {}
         self.scalar_row_by_elem_path = {}
         self.scalar_elem_paths = set(frame.simhier.GetScalarStatsElemPaths()) | set(frame.simhier.GetScalarStructsElemPaths())
@@ -251,10 +252,6 @@ class SchedulingLinesWidget(wx.Panel):
 
     def __RegenerateSchedulingLinesGrid(self, new_grid):
         sizer = self.GetSizer()
-        if self.grid:
-            sizer.Detach(self.grid)
-            self.grid.Destroy()
-            self.grid = None
 
         self._struct_dtypes_by_row = {}
         num_rows = 0
@@ -295,6 +292,13 @@ class SchedulingLinesWidget(wx.Panel):
         if self.show_detailed_queue_packets:
             num_cols += 2
 
+        # A playback step only changes which cycle is "current"; reuse the existing
+        # grid instead of destroying/recreating it unless its shape must change.
+        needs_full_rebuild = (
+            new_grid or self.grid is None or
+            self.grid.GetNumberRows() != num_rows or self.grid.GetNumberCols() != num_cols
+        )
+
         # Create 8-point monospace font for the grid cells
         font8 = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
 
@@ -304,17 +308,17 @@ class SchedulingLinesWidget(wx.Panel):
         cell_font = font8 if self.minimize_grid_cells else font10
         label_font = font8 if self.minimize_grid_cells else font10
 
-        if new_grid or self.grid is None:
+        if needs_full_rebuild:
+            if self.grid:
+                sizer.Detach(self.grid)
+                self.grid.Destroy()
+            self._prev_current_cycle_col = None
+
             self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
-        else:
-            self.grid.SetLabelFont(label_font)
-            for row in range(num_rows):
-                for col in range(num_cols):
-                    self.grid.SetCellFont(row, col, cell_font)
-        self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
-        self.grid.EnableGridLines(False)
-        self.grid.SetLabelBackgroundColour('white')
-        self.grid.UsePaddingEverywhere(not self.minimize_grid_cells)
+            self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
+            self.grid.EnableGridLines(False)
+            self.grid.SetLabelBackgroundColour('white')
+            self.grid.UsePaddingEverywhere(not self.minimize_grid_cells)
 
         current_cycle = self.frame.playback_bar.GetCurrentCycle()
         timeline_cycles = self.__GetSchedulingTimelineCycles(current_cycle)
@@ -361,51 +365,79 @@ class SchedulingLinesWidget(wx.Panel):
         max_col_label_len = max([dc.GetTextExtent(col_label)[0] for col_label in col_labels]) if col_labels else 0
         self.grid.SetColLabelSize(max_col_label_len + 4)
 
-        self.grid.SetColLabelValue(0, '')
-        self.grid.SetColLabelTextOrientation(wx.VERTICAL)
-        self.grid.HideRowLabels()
-
-        if sizer is None:
-            sizer = wx.BoxSizer(wx.VERTICAL)
-
-            gear_btn, clear_btn, split_lr, split_tb, maximize_btn = self.frame.CreateWidgetStandardButtons(
-                self, self.__EditWidget, 'Edit widget settings')
-
-            btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT | wx.LEFT, 5)
-            btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
-            btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
-            btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
-            btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
-            sizer.Add(btn_sizer, 0, wx.BOTTOM, 5)
-            self.SetSizer(sizer)
-
-        sizer.Add(self.grid, 0, wx.EXPAND)
-
-        self.grid.ClearGrid()
-
-        # Mark the data cells of rows for unrecognized ("bad") paths with an X
-        # rather than trying to rasterize data that doesn't exist.
-        max_data_col = self.grid.GetNumberCols() - 1
+        max_data_col = num_cols - 1
         if self.show_detailed_queue_packets:
             max_data_col -= 2
-        for row in self._bad_path_rows:
-            for col in range(1, max_data_col+1):
-                self.grid.SetCellDrawX(row, col, True)
 
-        # Draw thick black lines on both sides of the current cycle.
-        for row in range(num_rows):
-            if current_cycle_col is not None:
+        if needs_full_rebuild:
+            self.grid.SetColLabelValue(0, '')
+            self.grid.SetColLabelTextOrientation(wx.VERTICAL)
+            self.grid.HideRowLabels()
+
+            if sizer is None:
+                sizer = wx.BoxSizer(wx.VERTICAL)
+
+                gear_btn, clear_btn, split_lr, split_tb, maximize_btn = self.frame.CreateWidgetStandardButtons(
+                    self, self.__EditWidget, 'Edit widget settings')
+
+                btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+                btn_sizer.Add(gear_btn, 0, wx.TOP | wx.RIGHT | wx.LEFT, 5)
+                btn_sizer.Add(clear_btn, 0, wx.TOP | wx.RIGHT, 5)
+                btn_sizer.Add(split_lr, 0, wx.TOP | wx.RIGHT, 5)
+                btn_sizer.Add(split_tb, 0, wx.TOP | wx.RIGHT, 5)
+                btn_sizer.Add(maximize_btn, 0, wx.TOP, 5)
+                sizer.Add(btn_sizer, 0, wx.BOTTOM, 5)
+                self.SetSizer(sizer)
+
+            sizer.Add(self.grid, 0, wx.EXPAND)
+
+            # Mark the data cells of rows for unrecognized ("bad") paths with an X
+            # rather than trying to rasterize data that doesn't exist.
+            for row in self._bad_path_rows:
+                for col in range(1, max_data_col+1):
+                    self.grid.SetCellDrawX(row, col, True)
+
+            self.__DrawElementSeparatorBorders()
+
+            self.__SetElementCaptions(0)
+        else:
+            # Grid shape is unchanged: only clear the cycle-dependent data cells so
+            # values from cycles that scrolled out of the sample window don't linger.
+            for row in range(num_rows):
+                for col in range(1, max_data_col + 1):
+                    self.grid.SetCellValue(row, col, '')
+                    self.grid.SetCellBackgroundColour(row, col, (255, 255, 255))
+                    self.grid.UnsetCellToolTip(row, col)
+            if self.show_detailed_queue_packets:
+                detailed_pkt_col = self.num_samples_before + self.num_samples_after + 3
+                for row in range(num_rows):
+                    self.grid.SetCellValue(row, detailed_pkt_col, '')
+                    self.grid.SetCellBackgroundColour(row, detailed_pkt_col, (255, 255, 255))
+                    self.grid.UnsetCellToolTip(row, detailed_pkt_col)
+
+        # Move the current-cycle border instead of redrawing borders for every row/col.
+        if self._prev_current_cycle_col is not None and self._prev_current_cycle_col != current_cycle_col:
+            for row in range(num_rows):
+                self.__RemoveCellBorderSides(row, self._prev_current_cycle_col, wx.LEFT | wx.RIGHT)
+        if current_cycle_col is not None and current_cycle_col != self._prev_current_cycle_col:
+            for row in range(num_rows):
                 self.__AddCellBorderSides(row, current_cycle_col, wx.LEFT | wx.RIGHT)
-
-        self.__DrawElementSeparatorBorders()
-
-        self.__SetElementCaptions(0)
+        self._prev_current_cycle_col = current_cycle_col
 
     def __AddCellBorderSides(self, row, col, border_side):
         current_width = self.grid.GetCellBorderWidth(row, col)
         current_side = self.grid.GetCellBorderSide(row, col) if current_width else 0
         self.grid.SetCellBorder(row, col, max(current_width, 1), current_side | border_side)
+
+    def __RemoveCellBorderSides(self, row, col, border_side):
+        current_width = self.grid.GetCellBorderWidth(row, col)
+        if not current_width:
+            return
+        new_side = self.grid.GetCellBorderSide(row, col) & ~border_side
+        if new_side:
+            self.grid.SetCellBorder(row, col, current_width, new_side)
+        else:
+            self.grid.RemoveCellBorder(row, col)
 
     def __DrawElementSeparatorBorders(self):
         elem_paths = self.caption_mgr.GetAllMatchingElemPaths()
@@ -714,7 +746,11 @@ class SchedulingLinesWidget(wx.Panel):
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
 
-        if col == 0 or self.enable_tooltips:
+        # XYToCell returns -1 for positions outside any real cell (e.g. past the
+        # last column); negative indices would otherwise alias to the last row/col.
+        in_bounds = 0 <= row < self.grid.GetNumberRows() and 0 <= col < self.grid.GetNumberCols()
+
+        if in_bounds and (col == 0 or self.enable_tooltips):
             tooltip = self.grid.GetCellToolTip(row, col)
         else:
             tooltip = None
@@ -964,7 +1000,5 @@ class Rasterizer:
             self.grid.SetCellValue(self.row, self.detailed_pkt_col, stringized_anno)
             self.grid.SetCellAlignment(self.row, self.detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
             self.grid.SetCellBackgroundColour(self.row, self.detailed_pkt_col, auto_color)
-            if self.widget.enable_tooltips:
-                self.grid.SetCellToolTip(self.row, self.detailed_pkt_col, stringized_tooltip)
             if show_border:
                 self.grid.SetCellBorder(self.row, self.detailed_pkt_col, 1, wx.ALL)
