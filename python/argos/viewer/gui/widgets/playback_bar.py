@@ -236,8 +236,12 @@ class PlaybackBar(wx.Panel):
         widget_renderer = self.frame.widget_renderer
         cur_tick = widget_renderer.tick
         period = self.clock_periods.get(self.clock_combobox.GetValue())
-        step_ticks = step * int(period) if period else step
-        widget_renderer.GoToTick(cur_tick + step_ticks)
+        if period:
+            # snap to the clock's cycle grid before stepping, matching v2 semantics
+            cur_cycle = cur_tick // int(period)
+            widget_renderer.GoToTick((cur_cycle + step) * int(period))
+        else:
+            widget_renderer.GoToTick(cur_tick + step)
 
     def __OnCycSlider(self, event):
         widget_renderer = self.frame.widget_renderer
