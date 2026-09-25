@@ -35,7 +35,7 @@ public:
     {
     }
 
-    virtual ~PollingThread() noexcept = default;
+    virtual ~PollingThread() noexcept { close(); }
 
     /// \brief Return the sleep interval in milliseconds (when no work is done).
     size_t getIntervalMilliseconds() const { return interval_ms_; }

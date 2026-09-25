@@ -1,6 +1,7 @@
 import wx, re
 from collections import OrderedDict
 from viewer.model.data_deserializers import StructDeserializer
+from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
 from viewer.gui.widgets.scheduling_lines import CaptionManager
@@ -220,6 +221,7 @@ class SummaryGrid(wx.Panel):
                     label = ''
                 label += leaf
                 leaf_label = wx.StaticText(self, label=label)
+                BindCopyPathMenu(leaf_label, full_path)
                 leaf_label.SetFont(mono10)
                 CaptionManager.ApplyPartialPathTooltip(
                     leaf_label, full_path, label, summary_views.show_full_paths)

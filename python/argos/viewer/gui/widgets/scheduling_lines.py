@@ -1,5 +1,6 @@
 import wx, copy, re, os
 from collections import OrderedDict
+from viewer.gui.copy_path_menu import ShowCopyPathMenu
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.grid import Grid
 
@@ -315,6 +316,7 @@ class SchedulingLinesWidget(wx.Panel):
             self._prev_current_cycle_col = None
 
             self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
+            self.grid.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.__OnGridCellRightClick)
             self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
             self.grid.EnableGridLines(False)
             self.grid.SetLabelBackgroundColour('white')
@@ -626,6 +628,7 @@ class SchedulingLinesWidget(wx.Panel):
     def __SetElementCaptions(self, col):
         if col == 0:
             self.rasterizers = {}
+            self._caption_path_by_row = {}
 
         font_size = 8 if self.minimize_grid_cells else 10
         font = wx.Font(font_size, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
@@ -642,6 +645,8 @@ class SchedulingLinesWidget(wx.Panel):
                 tooltip = self.__GetCaptionColumnTooltip(elem_path, segment, caption)
 
                 captions.append(caption)
+                if col == 0:
+                    self._caption_path_by_row[row] = self.__SegmentElemPathTooltip(elem_path, segment)
                 if tooltip:
                     self.grid.SetCellToolTip(row, col, tooltip)
                 else:
@@ -741,6 +746,12 @@ class SchedulingLinesWidget(wx.Panel):
         if segment['kind'] in ('no_data', 'bad_path'):
             return elem_path
         return '{}[{}]'.format(elem_path, segment['bin'])
+
+    def __OnGridCellRightClick(self, event):
+        if event.GetCol() == 0:
+            path = self._caption_path_by_row.get(event.GetRow())
+            if path is not None:
+                ShowCopyPathMenu(self.grid, path)
     
     def __OnGridMouseMotion(self, evt):
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
