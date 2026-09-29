@@ -438,12 +438,19 @@ private:
             {
                 auto window_id = ledger->getWindowId();
 
+                // Keep track of the CIDs that are used to call createCheckpoint(),
+                // and skip those CIDs in the calls to closeRecord(). If we allow
+                // the closeRecord() API call, the collected data does not show
+                // up in the UI.
+                std::unordered_set<uint16_t> chkpt_cids;
+
                 auto scalars = ledger->releaseScalarEntries();
                 for (auto& scalar : scalars)
                 {
                     auto cid = scalar.cid;
                     auto data = std::move(scalar.scalar_bytes);
                     checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
+                    chkpt_cids.insert(cid);
                 }
 
                 auto contigs = ledger->releaseContigEntries();
@@ -453,6 +460,7 @@ private:
                     auto data = std::move(contig.contig_bin_bytes);
                     updateContainerMaxSize_(cid, detail::getContainerSize(data));
                     checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
+                    chkpt_cids.insert(cid);
                 }
 
                 auto sparses = ledger->releaseSparseEntries();
@@ -462,11 +470,15 @@ private:
                     auto data = std::move(sparse.sparse_bin_bytes);
                     updateContainerMaxSize_(cid, detail::getContainerSize(data));
                     checkpointers_.at(cid)->createCheckpoint(window_id, std::move(data));
+                    chkpt_cids.insert(cid);
                 }
 
                 for (const auto cid : ledger->getClosedCIDs())
                 {
-                    checkpointers_.at(cid)->closeRecord(window_id);
+                    if (chkpt_cids.count(cid) == 0)
+                    {
+                        checkpointers_.at(cid)->closeRecord(window_id);
+                    }
                 }
 
                 CollectionEntries to_send;
