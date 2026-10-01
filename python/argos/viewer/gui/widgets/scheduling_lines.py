@@ -397,7 +397,7 @@ class SchedulingLinesWidget(wx.Panel):
             # Mark the data cells of rows for unrecognized ("bad") paths with an X
             # rather than trying to rasterize data that doesn't exist.
             for row in self._bad_path_rows:
-                for col in range(1, max_data_col+1):
+                for col in range(1, self.grid.GetNumberCols()):
                     self.grid.SetCellDrawX(row, col, True)
 
             self.__DrawElementSeparatorBorders()
@@ -475,7 +475,7 @@ class SchedulingLinesWidget(wx.Panel):
             for row in self._bad_path_rows:
                 elem_path = self._bad_path_elem_path_by_row[row]
                 tooltip = f'{elem_path} not in {db_name}'
-                for col in range(1, max_data_col+1):
+                for col in range(1, self.grid.GetNumberCols()):
                     self.grid.SetCellToolTip(row, col, tooltip)
 
         for elem_path, vals in self._ranges.items():
@@ -702,6 +702,7 @@ class SchedulingLinesWidget(wx.Panel):
         for i, segment in enumerate(layout):
             caption = self.__FormatSegmentCaption(elem_path, segment)
             caption += ' ' * (max_num_chars - len(caption))
+            caption += '  '
             row = row_offset + i
             self.grid.SetCellValue(row, col, caption)
 
