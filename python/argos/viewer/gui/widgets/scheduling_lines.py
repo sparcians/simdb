@@ -606,6 +606,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.AutoSize()
         if self.minimize_grid_cells:
             self.__SetMinimizedRowHeights()
+            self.__SetMinimizedColWidths()
         self.Layout()
         self.Update()
         self.Refresh()
@@ -624,6 +625,27 @@ class SchedulingLinesWidget(wx.Panel):
         for row in range(self.grid.GetNumberRows()):
             self.grid.SetRowMinimalHeight(row, height)
             self.grid.SetRowSize(row, height)
+
+    def __SetMinimizedColWidths(self):
+        dc = wx.ScreenDC()
+        dc.SetFont(self.grid.GetLabelFont())
+        # Column labels are drawn vertically, so their text height sets the minimum width.
+        min_width = dc.GetTextExtent('Ag')[1]
+
+        dc.SetFont(wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        self.grid.SetColMinimalAcceptableWidth(1)
+        for col in range(self.grid.GetNumberCols()):
+            if not self.grid.IsColShown(col):
+                continue
+
+            width = min_width
+            for row in range(self.grid.GetNumberRows()):
+                text = self.grid.GetCellValue(row, col)
+                if text:
+                    width = max(width, dc.GetTextExtent(text)[0] + 2)
+
+            self.grid.SetColMinimalWidth(col, width)
+            self.grid.SetColSize(col, width)
 
     def __SetElementCaptions(self, col):
         if col == 0:

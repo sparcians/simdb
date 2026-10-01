@@ -382,6 +382,7 @@ class WidgetContainer(wx.Panel):
             if len(elem_paths) > 0:
                 widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did, minimize_grid_cells)
                 widget.caption_mgr.SetCustomCaptions(dlg.GetCustomCaptions())
+                widget.UpdateWidgetData(regenerate_grid=True)
                 self.SetWidget(widget)
             else:
                 wx.MessageBox("No data selected", "Error", wx.OK | wx.ICON_ERROR)

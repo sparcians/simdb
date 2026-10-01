@@ -25,10 +25,9 @@ class WidgetRenderer:
         for char in range(ord('A'), ord('Z') + 1):
             self._auto_tag_list.append(chr(char))
 
-        # Second part: Aa to Zz
-        for char in range(ord('A'), ord('Z') + 1):
-            for suffix in range(ord('a'), ord('z') + 1):
-                self._auto_tag_list.append(chr(char) + chr(suffix))
+        # Second part: a to z
+        for char in range(ord('a'), ord('z') + 1):
+            self._auto_tag_list.append(chr(char))
 
     @property
     def tick(self):
@@ -56,27 +55,13 @@ class WidgetRenderer:
         pass
 
     def GetCurrentUserSettings(self):
-        settings = {}
-        settings['auto_colors_by_key'] = copy.deepcopy(self._auto_colors_by_key)
-        settings['auto_tags_by_key'] = copy.deepcopy(self._auto_tags_by_key)
-        return settings
+        return {}
     
     def ApplyUserSettings(self, settings):
-        auto_colors_by_key = settings.get('auto_colors_by_key', {})
-        auto_tags_by_key = settings.get('auto_tags_by_key', {})
-
-        if auto_colors_by_key == self._auto_colors_by_key and auto_tags_by_key == self._auto_tags_by_key:
-            return
-
-        self._auto_colors_by_key = copy.deepcopy(settings.get('auto_colors_by_key', {}))
-        self._auto_tags_by_key = copy.deepcopy(settings.get('auto_tags_by_key', {}))
-        self.frame.inspector.RefreshWidgetsOnAllTabs()
+        pass
 
     def ResetToDefaultViewSettings(self, update_widgets=True):
-        self._auto_colors_by_key = {}
-        self._auto_tags_by_key = {}
-        if update_widgets:
-            self.frame.inspector.RefreshWidgetsOnAllTabs()
+        pass
 
     def GoToTick(self, tick, update_widgets=True):
         tick = min(max(tick, self._start_tick), self._end_tick)
