@@ -299,8 +299,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
             self.selections_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.__UpdateButtonStates)
             self.selections_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.__UpdateButtonStates)
-            if self._editable_captions:
-                self.selections_list.Bind(wx.EVT_LEFT_DCLICK, self.__OnCaptionCellDoubleClick)
+            self.selections_list.Bind(wx.EVT_LEFT_DCLICK, self.__OnListCellDoubleClick)
         else:
             self.hier_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnTreeSelectionChanged)
             self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
@@ -622,13 +621,18 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         finally:
             self.selections_list.Thaw()
 
-    def __OnCaptionCellDoubleClick(self, evt):
-        hit = self.selections_list.HitTestSubItem(evt.GetPosition())
-        item, _, col = hit[0], hit[1], hit[2]
-        if item == wx.NOT_FOUND or col != 1:
+    def __OnListCellDoubleClick(self, evt):
+        item, _, col = self.selections_list.HitTestSubItem(evt.GetPosition())
+        if item == wx.NOT_FOUND:
             evt.Skip()
-            return
+        elif col == 0:
+            self.__BeginPathCellEdit(item)
+        elif col == 1 and self._editable_captions:
+            self.__BeginCaptionCellEdit(item)
+        else:
+            evt.Skip()
 
+    def __BeginCaptionCellEdit(self, item):
         self.__CommitPathEdit()
         self.__CommitCaptionEdit()
 
@@ -763,10 +767,16 @@ class WidgetDataSelectionsDlg(wx.Dialog):
                 )
                 return
 
+        old_value = self.selections_list.GetItemText(item, 0)
         self.selections_list.SetItemText(item, value)
+        self._list_indices_by_path.pop(old_value, None)
         self._list_indices_by_path[value] = item
-        if value not in self._selected_paths:
+        if old_value in self._selected_paths:
+            self._selected_paths[self._selected_paths.index(old_value)] = value
+        elif value not in self._selected_paths:
             self._selected_paths.append(value)
+        if old_value and old_value != value and old_value in self._captions_by_path:
+            self._captions_by_path[value] = self._captions_by_path.pop(old_value)
 
         self.__DestroyPathEditCtrl()
         self.__UpdateButtonStates()
