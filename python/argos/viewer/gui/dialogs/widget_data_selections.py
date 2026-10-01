@@ -321,10 +321,12 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         return caption
 
     def GetCustomCaptions(self):
+        selected_paths = set(self._selected_paths)
         return {
             path: caption
             for path, caption in self._captions_by_path.items()
             if caption not in (None, '', '<default>')
+            and re.sub(r'\[[^\]]*\]$', '', path) in selected_paths
         }
 
     def _SetCustomCaptions(self, custom_captions):
