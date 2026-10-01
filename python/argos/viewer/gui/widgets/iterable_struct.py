@@ -180,7 +180,8 @@ class UtilizElement(wx.StaticText):
         self.SetFont(font)
 
     def UpdateUtilizPct(self, utiliz_pct):
-        self.SetLabel('{}%'.format(round(utiliz_pct * 100)))
+        label = '{}% ({}/{})'.format(round(utiliz_pct * 100), int(utiliz_pct * self.capacity), self.capacity)
+        self.SetLabel(label)
         color = self.frame.widget_renderer.utiliz_handler.ConvertUtilizPctToColor(utiliz_pct)
         self.SetBackgroundColour(color)
 
