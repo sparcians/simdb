@@ -731,10 +731,19 @@ class SchedulingLinesWidget(wx.Panel):
         # hide_empty_rows caps the row count at the queue's overall max size ever
         # reached; otherwise every bin up to the full capacity is shown.
         upper = max_size if self.hide_empty_rows else num_bins
-        if upper == 0:
+        bin_indices = set(range(upper))
+
+        # Bins with a custom caption are always shown, even if never filled.
+        bin_key_regex = re.compile(re.escape(elem_path) + r'\[(\d+)\]$')
+        for key in self.caption_mgr.GetCustomCaptions():
+            match = bin_key_regex.match(key)
+            if match and int(match.group(1)) < num_bins:
+                bin_indices.add(int(match.group(1)))
+
+        if not bin_indices:
             return [{'kind': 'no_data'}]
 
-        return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in range(upper - 1, -1, -1)]
+        return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in sorted(bin_indices, reverse=True)]
 
     def __IsSegmentHidden(self, elem_path, segment):
         if segment['kind'] != 'bin':
