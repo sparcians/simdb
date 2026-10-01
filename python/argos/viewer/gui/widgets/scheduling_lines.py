@@ -341,6 +341,7 @@ class SchedulingLinesWidget(wx.Panel):
             if time_val // clock_period in cycle_col_by_cycle
         }
         current_cycle_col = cycle_col_by_cycle.get(current_cycle)
+        self._current_cycle_col = current_cycle_col
         col_labels = []
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
@@ -582,7 +583,7 @@ class SchedulingLinesWidget(wx.Panel):
                 labels_by_dtype[dtype].append(labels[row])
 
             for row, label in enumerate(labels):
-                if not self.show_did and 'DID' in label:
+                if not self.show_did and 'DID(' in label:
                     parts = label.split()
                     new_label_parts = []
                     for p in parts:
@@ -596,6 +597,10 @@ class SchedulingLinesWidget(wx.Panel):
                     max_varlens_by_field = GetMaxFieldVarLengths(row_align_labels)
                     label = AlignLabel(label, max_varlens_by_field)
 
+                # Prepend the letter code to the detailed packet column label
+                auto_label = self.grid.GetCellValue(row, self._current_cycle_col) if self._current_cycle_col is not None else ''
+                if auto_label:
+                    label = f' {auto_label}{label}  '
                 self.grid.SetCellValue(row, col, label)
 
         for row in range(self.grid.GetNumberRows()):

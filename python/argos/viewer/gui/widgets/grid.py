@@ -253,7 +253,7 @@ class GridCell:
             if self.use_padding:
                 dc.DrawLabel(self.text, rect, self.text_alignment)
             else:
-                dc.DrawText(self.text, rect.GetLeft(), rect.GetTop())
+                dc.DrawText(self.text, rect.GetLeft()+3, rect.GetTop())
 
         if self.border_width:
             dc.SetPen(wx.Pen(wx.BLACK, self.border_width))
