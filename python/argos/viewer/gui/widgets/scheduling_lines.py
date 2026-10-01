@@ -393,6 +393,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.SetSizer(sizer)
 
             sizer.Add(self.grid, 0, wx.EXPAND)
+            sizer.AddSpacer(5)
 
             # Mark the data cells of rows for unrecognized ("bad") paths with an X
             # rather than trying to rasterize data that doesn't exist.
@@ -453,6 +454,10 @@ class SchedulingLinesWidget(wx.Panel):
             separator_row = row_offset - 1
             for col in range(self.grid.GetNumberCols()):
                 self.__AddCellBorderSides(separator_row, col, wx.BOTTOM)
+
+        last_row = self.grid.GetNumberRows() - 1
+        for col in range(self.grid.GetNumberCols()):
+            self.__AddCellBorderSides(last_row, col, wx.BOTTOM)
 
     def __ScalarValueToString(self, value):
         if value is None:
