@@ -341,6 +341,7 @@ class SchedulingLinesWidget(wx.Panel):
             if time_val // clock_period in cycle_col_by_cycle
         }
         current_cycle_col = cycle_col_by_cycle.get(current_cycle)
+        self._current_cycle_col = current_cycle_col
         col_labels = []
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
@@ -392,11 +393,12 @@ class SchedulingLinesWidget(wx.Panel):
                 self.SetSizer(sizer)
 
             sizer.Add(self.grid, 0, wx.EXPAND)
+            sizer.AddSpacer(5)
 
             # Mark the data cells of rows for unrecognized ("bad") paths with an X
             # rather than trying to rasterize data that doesn't exist.
             for row in self._bad_path_rows:
-                for col in range(1, max_data_col+1):
+                for col in range(1, self.grid.GetNumberCols()):
                     self.grid.SetCellDrawX(row, col, True)
 
             self.__DrawElementSeparatorBorders()
@@ -453,6 +455,10 @@ class SchedulingLinesWidget(wx.Panel):
             for col in range(self.grid.GetNumberCols()):
                 self.__AddCellBorderSides(separator_row, col, wx.BOTTOM)
 
+        last_row = self.grid.GetNumberRows() - 1
+        for col in range(self.grid.GetNumberCols()):
+            self.__AddCellBorderSides(last_row, col, wx.BOTTOM)
+
     def __ScalarValueToString(self, value):
         if value is None:
             return ''
@@ -474,7 +480,7 @@ class SchedulingLinesWidget(wx.Panel):
             for row in self._bad_path_rows:
                 elem_path = self._bad_path_elem_path_by_row[row]
                 tooltip = f'{elem_path} not in {db_name}'
-                for col in range(1, max_data_col+1):
+                for col in range(1, self.grid.GetNumberCols()):
                     self.grid.SetCellToolTip(row, col, tooltip)
 
         for elem_path, vals in self._ranges.items():
@@ -582,7 +588,7 @@ class SchedulingLinesWidget(wx.Panel):
                 labels_by_dtype[dtype].append(labels[row])
 
             for row, label in enumerate(labels):
-                if not self.show_did and 'DID' in label:
+                if not self.show_did and 'DID(' in label:
                     parts = label.split()
                     new_label_parts = []
                     for p in parts:
@@ -596,6 +602,10 @@ class SchedulingLinesWidget(wx.Panel):
                     max_varlens_by_field = GetMaxFieldVarLengths(row_align_labels)
                     label = AlignLabel(label, max_varlens_by_field)
 
+                # Prepend the letter code to the detailed packet column label
+                auto_label = self.grid.GetCellValue(row, self._current_cycle_col) if self._current_cycle_col is not None else ''
+                if auto_label:
+                    label = f' {auto_label}{label}  '
                 self.grid.SetCellValue(row, col, label)
 
         for row in range(self.grid.GetNumberRows()):
@@ -606,6 +616,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid.AutoSize()
         if self.minimize_grid_cells:
             self.__SetMinimizedRowHeights()
+            self.__SetMinimizedColWidths()
         self.Layout()
         self.Update()
         self.Refresh()
@@ -624,6 +635,27 @@ class SchedulingLinesWidget(wx.Panel):
         for row in range(self.grid.GetNumberRows()):
             self.grid.SetRowMinimalHeight(row, height)
             self.grid.SetRowSize(row, height)
+
+    def __SetMinimizedColWidths(self):
+        dc = wx.ScreenDC()
+        dc.SetFont(self.grid.GetLabelFont())
+        # Column labels are drawn vertically, so their text height sets the minimum width.
+        min_width = dc.GetTextExtent('Ag')[1]
+
+        dc.SetFont(wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        self.grid.SetColMinimalAcceptableWidth(1)
+        for col in range(self.grid.GetNumberCols()):
+            if not self.grid.IsColShown(col):
+                continue
+
+            width = min_width
+            for row in range(self.grid.GetNumberRows()):
+                text = self.grid.GetCellValue(row, col)
+                if text:
+                    width = max(width, dc.GetTextExtent(text)[0] + 2)
+
+            self.grid.SetColMinimalWidth(col, width)
+            self.grid.SetColSize(col, width)
 
     def __SetElementCaptions(self, col):
         if col == 0:
@@ -675,6 +707,7 @@ class SchedulingLinesWidget(wx.Panel):
         for i, segment in enumerate(layout):
             caption = self.__FormatSegmentCaption(elem_path, segment)
             caption += ' ' * (max_num_chars - len(caption))
+            caption += '  '
             row = row_offset + i
             self.grid.SetCellValue(row, col, caption)
 
@@ -698,10 +731,19 @@ class SchedulingLinesWidget(wx.Panel):
         # hide_empty_rows caps the row count at the queue's overall max size ever
         # reached; otherwise every bin up to the full capacity is shown.
         upper = max_size if self.hide_empty_rows else num_bins
-        if upper == 0:
+        bin_indices = set(range(upper))
+
+        # Bins with a custom caption are always shown, even if never filled.
+        bin_key_regex = re.compile(re.escape(elem_path) + r'\[(\d+)\]$')
+        for key in self.caption_mgr.GetCustomCaptions():
+            match = bin_key_regex.match(key)
+            if match and int(match.group(1)) < num_bins:
+                bin_indices.add(int(match.group(1)))
+
+        if not bin_indices:
             return [{'kind': 'no_data'}]
 
-        return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in range(upper - 1, -1, -1)]
+        return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in sorted(bin_indices, reverse=True)]
 
     def __IsSegmentHidden(self, elem_path, segment):
         if segment['kind'] != 'bin':

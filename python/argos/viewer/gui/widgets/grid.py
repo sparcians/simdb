@@ -244,16 +244,17 @@ class GridCell:
         dc.DrawRectangle(rect)
 
         if self.draw_x:
-            dc.SetPen(wx.Pen(wx.Colour(150, 150, 150), 1))
-            dc.DrawLine(rect.GetLeft(), rect.GetTop(), rect.GetRight(), rect.GetBottom())
-            dc.DrawLine(rect.GetLeft(), rect.GetBottom(), rect.GetRight(), rect.GetTop())
+            # Transparent background mode keeps the gaps between hatch lines showing the cell colour.
+            dc.SetBackgroundMode(wx.TRANSPARENT)
+            dc.SetBrush(wx.Brush(wx.Colour(150, 150, 150), wx.CROSSDIAG_HATCH))
+            dc.DrawRectangle(rect)
 
         if self.text:
             dc.SetFont(self.font)
             if self.use_padding:
                 dc.DrawLabel(self.text, rect, self.text_alignment)
             else:
-                dc.DrawText(self.text, rect.GetLeft(), rect.GetTop())
+                dc.DrawText(self.text, rect.GetLeft()+3, rect.GetTop())
 
         if self.border_width:
             dc.SetPen(wx.Pen(wx.BLACK, self.border_width))
