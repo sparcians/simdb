@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import wx, sys, argparse
 from viewer.model.workspace import Workspace
 
