@@ -45,10 +45,15 @@ class PlaybackBar(wx.Panel):
         self.clock_periods = {r[0]:r[1] for r in cursor.fetchall()}
         clk_names = list(self.clock_periods.keys())
         clk_names.sort()
-        clk_names.insert(0, '<any clk edge>')
+        assert clk_names
 
-        self.clock_combobox = wx.ComboCtrl(self, value='<any clk edge>', style=wx.CB_READONLY)
-        self._selected_clock = '<any clk edge>'
+        if len(clk_names) == 1:
+            self._selected_clock = clk_names[0]
+        else:
+            self._selected_clock = '<any clk edge>'
+            clk_names.insert(0, '<any clk edge>')
+
+        self.clock_combobox = wx.ComboCtrl(self, value=self._selected_clock, style=wx.CB_READONLY)
         clock_popup = ClockPopup(clk_names, self.__OnClockSelected)
         self.clock_combobox.SetPopupControl(clock_popup)
         self.clock_combobox.SetPopupMaxHeight(10 * self.clock_combobox.GetCharHeight() + 8)
@@ -202,9 +207,13 @@ class PlaybackBar(wx.Panel):
                 load_errors.append(err)
 
     def ApplyViewSettings(self, settings, update_widgets=True):
-        selected_clock = settings['selected_clock']
-        self.clock_combobox.SetValue(selected_clock)
-        self._selected_clock = selected_clock
+        if len(self.clock_periods) > 1:
+            selected_clock = settings['selected_clock']
+            self.clock_combobox.SetValue(selected_clock)
+            self._selected_clock = selected_clock
+        else:
+            selected_clock = self._selected_clock
+
         widget_renderer = self.frame.widget_renderer
         current_tick = widget_renderer.tick
         period = self.clock_periods.get(selected_clock)
