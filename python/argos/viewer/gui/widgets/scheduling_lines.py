@@ -652,7 +652,7 @@ class SchedulingLinesWidget(wx.Panel):
             for row in range(self.grid.GetNumberRows()):
                 text = self.grid.GetCellValue(row, col)
                 if text:
-                    width = max(width, dc.GetTextExtent(text)[0] + 2)
+                    width = max(width, dc.GetTextExtent(text)[0])
 
             self.grid.SetColMinimalWidth(col, width)
             self.grid.SetColSize(col, width)

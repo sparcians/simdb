@@ -921,32 +921,28 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
             self, parent, frame, elem_paths, queues_only=False, settings_chkboxes=chkboxes,
             editable_captions=True, initial_captions=initial_captions,
         )
+        self.ok_btn.Bind(wx.EVT_BUTTON, self.__OnOk)
 
     def _BuildSettingsArea(self, sizer):
-        assert self._num_samples_before >= 1 and self._num_samples_before <= 25
+        assert 1 <= self._num_samples_before <= 200
         info_ticks_before = wx.StaticText(self, label='Num samples before current cycle:')
-        self._label_ticks_before = wx.StaticText(self, label=f'({self._num_samples_before})')
-        self._slider_ticks_before = wx.Slider(
-            self, value=self._num_samples_before, minValue=1, maxValue=25)
-        self._slider_ticks_before.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
+        self._spin_ticks_before = wx.SpinCtrl(
+            self, min=1, max=200, initial=self._num_samples_before,
+        )
 
-        assert self._num_samples_after >= 1 and self._num_samples_after <= 25
+        assert 1 <= self._num_samples_after <= 200
         info_ticks_after = wx.StaticText(self, label='Num samples after current cycle:')
-        self._label_ticks_after = wx.StaticText(self, label=f'({self._num_samples_after})')
-        self._slider_ticks_after = wx.Slider(
-            self, value=self._num_samples_after, minValue=1, maxValue=25)
-        self._slider_ticks_after.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
+        self._spin_ticks_after = wx.SpinCtrl(
+            self, min=1, max=200, initial=self._num_samples_after,
+        )
 
         gb_sizer = wx.GridBagSizer(vgap=10, hgap=12)
-        gb_sizer.Add(info_ticks_before, pos=(0, 0))
-        gb_sizer.Add(self._slider_ticks_before, pos=(0, 1), flag=wx.EXPAND)
-        gb_sizer.Add(self._label_ticks_before, pos=(0, 2))
+        gb_sizer.Add(info_ticks_before, pos=(0, 0), flag=wx.ALIGN_CENTER_VERTICAL)
+        gb_sizer.Add(self._spin_ticks_before, pos=(0, 1), flag=wx.EXPAND)
 
-        gb_sizer.Add(info_ticks_after, pos=(1, 0))
-        gb_sizer.Add(self._slider_ticks_after, pos=(1, 1), flag=wx.EXPAND)
-        gb_sizer.Add(self._label_ticks_after, pos=(1, 2))
+        gb_sizer.Add(info_ticks_after, pos=(1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
+        gb_sizer.Add(self._spin_ticks_after, pos=(1, 1), flag=wx.EXPAND)
 
-        gb_sizer.AddGrowableCol(1)
         sizer.Add(gb_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
 
         WidgetDataSelectionsDlg._BuildSettingsArea(self, sizer)
@@ -965,13 +961,26 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     def _OnWidgetCheckbox(self, label, checked):
         pass
 
+    def __OnOk(self, evt):
+        num_samples_before = self._spin_ticks_before.GetValue()
+        num_samples_after = self._spin_ticks_after.GetValue()
+        if num_samples_before + num_samples_after > 250:
+            wx.MessageBox(
+                'The two sample counts cannot add up to more than 250.',
+                'Invalid Sample Count', wx.OK | wx.ICON_ERROR,
+            )
+            self._spin_ticks_after.SetFocus()
+            return
+
+        self.EndModal(wx.ID_OK)
+
     @property
     def num_samples_before(self):
-        return self._slider_ticks_before.GetValue()
+        return self._spin_ticks_before.GetValue()
 
     @property
     def num_samples_after(self):
-        return self._slider_ticks_after.GetValue()
+        return self._spin_ticks_after.GetValue()
 
     @property
     def show_details(self):
@@ -995,12 +1004,3 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
 
     def __UpdateButtonStates(self, *args):
         WidgetDataSelectionsDlg.__UpdateButtonStates(self, *args)
-
-    def __SyncWithSliderTicks(self, evt):
-        value = self._slider_ticks_before.GetValue()
-        self._label_ticks_before.SetLabel(f'({value})')
-
-        value = self._slider_ticks_after.GetValue()
-        self._label_ticks_after.SetLabel(f'({value})')
-
-        evt.Skip()
