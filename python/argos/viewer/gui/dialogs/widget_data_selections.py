@@ -233,6 +233,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         self._single_selected_path = None
 
         self._tree_items_by_id = {}
+        self._paths_by_tree_item = {}
         self._leaf_paths_by_tree_item = {}
         self._list_indices_by_path = {}
 
@@ -442,7 +443,10 @@ class WidgetDataSelectionsDlg(wx.Dialog):
                 target_paths.extend(self.__CollectLeavesFromItem(tree, target_item))
             target_paths = list(dict.fromkeys(target_paths))
 
-            in_widget = [path for path in target_paths if path in self._selected_paths]
+            selected_target_paths = set()
+            for target_item in target_items:
+                selected_target_paths.update(self.__CollectSelectedPathsFromItem(target_item))
+            in_widget = [path for path in self._selected_paths if path in selected_target_paths]
             not_in_widget = [path for path in target_paths if path not in self._selected_paths]
             has_branches = any(
                 target_item not in self._leaf_paths_by_tree_item
@@ -548,11 +552,13 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
     def __BuildTree(self):
         self._tree_items_by_id = {}
+        self._paths_by_tree_item = {}
         self._leaf_paths_by_tree_item = {}
 
         self.hier_tree.DeleteAllItems()
         root = self.hier_tree.AddRoot('root')
         self._tree_items_by_id[0] = root
+        self._paths_by_tree_item[root] = ''
 
         visible_paths = self.__BuildVisibleElemPaths(self._all_leaf_paths)
         self.__RecurseBuildTree(
@@ -575,6 +581,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             parent_id = 0
 
         tree_item = tree_ctrl.AppendItem(self._tree_items_by_id[parent_id], node.GetName())
+        self._paths_by_tree_item[tree_item] = elem_path
         node_id = node.GetID()
         self._tree_items_by_id[node_id] = tree_item
 
@@ -795,6 +802,18 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         if not value or value.startswith('.') or value.endswith('.'):
             return False
         return all(len(part) > 0 for part in value.split('.'))
+
+    def __CollectSelectedPathsFromItem(self, item):
+        if item in self._leaf_paths_by_tree_item:
+            path = self._leaf_paths_by_tree_item[item]
+            return [path] if path in self._selected_paths else []
+
+        # Selected descendants may be absent from the tree (ShowInUI filtering).
+        branch_path = self._paths_by_tree_item[item]
+        return [
+            path for path in self._selected_paths
+            if not branch_path or path == branch_path or path.startswith(branch_path + '.')
+        ]
 
     def __CollectLeavesFromItem(self, tree, item):
         if item in self._leaf_paths_by_tree_item:
