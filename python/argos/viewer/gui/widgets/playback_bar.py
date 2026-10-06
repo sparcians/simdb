@@ -98,8 +98,6 @@ class PlaybackBar(wx.Panel):
         # Make the cycle/tick look like a hyperlink
         self.current_cyc_text.SetForegroundColour(wx.BLUE)
         self.current_tick_text.SetForegroundColour(wx.BLUE)
-        self.current_cyc_text.SetCursor(wx.Cursor(wx.CURSOR_HAND))
-        self.current_tick_text.SetCursor(wx.Cursor(wx.CURSOR_HAND))
 
         # Callbacks for the cycle/tick so we can call GoToTick() for a manually-entered time point.
         self.current_cyc_text.Bind(wx.EVT_LEFT_UP, self.__GoToExactCycle)
