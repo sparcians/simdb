@@ -241,7 +241,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         elif single_selection:
             instruction_text = 'Select a leaf node from the tree'
         else:
-            instruction_text = 'Right-click nodes to add/remove from widget'
+            instruction_text = 'Double-click leaves to add to widget; right-click nodes to add/remove'
 
         instruction_label = wx.StaticText(self, label=instruction_text)
         tree_style = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT
@@ -297,6 +297,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
         self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, self.__OnTreeRightClick)
         if not single_selection:
+            self.hier_tree.Bind(wx.EVT_TREE_ITEM_ACTIVATED, self.__OnTreeItemActivated)
             self.selections_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.__UpdateButtonStates)
             self.selections_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.__UpdateButtonStates)
             self.selections_list.Bind(wx.EVT_LEFT_DCLICK, self.__OnListCellDoubleClick)
@@ -371,6 +372,12 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self._single_selected_path = None
 
         self.__UpdateButtonStates()
+        evt.Skip()
+
+    def __OnTreeItemActivated(self, evt):
+        item = evt.GetItem()
+        if item.IsOk() and item in self._leaf_paths_by_tree_item:
+            self.__SetPathsSelected([self._leaf_paths_by_tree_item[item]], True)
         evt.Skip()
 
     def __OnTreeRightClick(self, evt):
