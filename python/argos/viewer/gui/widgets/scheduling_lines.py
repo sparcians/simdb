@@ -221,14 +221,18 @@ class SchedulingLinesWidget(wx.Panel):
                 else:
                     self._layouts_by_elem_path[elem_path] = [{'kind': 'bad_path'}]
 
-            self.SetBackgroundColour('white')
-            self.__RegenerateSchedulingLinesGrid(new_grid)
-            self.__RasterizeAllCells()
+            try:
+                self.Freeze()
+                self.SetBackgroundColour('white')
+                self.__RegenerateSchedulingLinesGrid(new_grid)
+                self.__RasterizeAllCells()
+            finally:
+                if self.IsFrozen():
+                    self.Thaw()
 
             # Restore the scroll position after the new grid has been laid out
             # and auto-sized (which establishes its scroll range).
             if saved_view_start is not None:
-                #wx.CallAfter(self.grid.Scroll, saved_view_start[0], saved_view_start[1])
                 self.grid.Scroll(saved_view_start[0], saved_view_start[1])
 
     def __IsKnownElemPath(self, elem_path):
