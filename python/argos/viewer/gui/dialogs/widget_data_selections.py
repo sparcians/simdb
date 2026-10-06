@@ -1,8 +1,721 @@
-import re
-
-import wx
+import wx, re
 from functools import partial
 
+class WidgetDataSelectionsDlg(wx.Dialog):
+    def __init__(
+        self, parent, frame, elem_paths, queues_only=False, single_selection=False,
+        settings_chkboxes=None, title="Edit Data Selections",
+        editable_captions=False, initial_captions=None,
+        dlg_help_text=None,
+    ):
+        assert not editable_captions or not single_selection
+
+        _, screen_h = wx.GetDisplaySize()
+        super().__init__(parent, title=title, size=(1000, int(screen_h * 0.75)))
+
+        self.frame = frame
+        self.simhier = frame.simhier
+        self._settings_chkboxes = settings_chkboxes or []
+        self._settings_chkboxes_by_label = {}
+        self._editable_captions = editable_captions
+        self._captions_by_path = dict(initial_captions or {})
+        self._caption_edit_ctrl = None
+        self._caption_edit_item = None
+        self._path_edit_ctrl = None
+        self._path_edit_item = None
+        if queues_only:
+            self._all_leaf_paths = sorted(self.simhier.GetContainerElemPaths())
+        else:
+            self._all_leaf_paths = sorted(self.simhier.GetElemPaths(True))
+
+        # Keep every given elem_path, including ones not found in the simhier
+        # tree (e.g. manually typed "bad" paths), so they still show up in the
+        # ListCtrl rather than silently disappearing on dialog reopen.
+        self._selected_paths = []
+        seen = set()
+        for p in elem_paths:
+            if p not in seen:
+                self._selected_paths.append(p)
+                seen.add(p)
+
+        self._initial_paths = list(self._selected_paths)
+        self._single_selection = single_selection
+        self._single_selected_path = None
+
+        self._tree_items_by_id = {}
+        self._paths_by_tree_item = {}
+        self._leaf_paths_by_tree_item = {}
+        self._list_indices_by_path = {}
+
+        if single_selection and queues_only:
+            instruction_text = 'Select a leaf queue from the tree'
+        elif single_selection:
+            instruction_text = 'Select a leaf node from the tree'
+        else:
+            instruction_text = 'Double-click leaves to add to widget; right-click nodes to add/remove'
+
+        instruction_label = wx.StaticText(self, label=instruction_text)
+        tree_style = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT
+        if not single_selection:
+            tree_style = tree_style | wx.TR_MULTIPLE
+        self.hier_tree = wx.TreeCtrl(self, style=tree_style)
+
+        if not single_selection:
+            self.selections_list = wx.ListCtrl(self, style=wx.LC_REPORT)
+            if self._editable_captions:
+                self.selections_list.InsertColumn(0, 'Current Selections', width=400)
+                self.selections_list.InsertColumn(1, 'Caption', width=150)
+            else:
+                self.selections_list.InsertColumn(0, 'Current Selections', width=550)
+
+            self.move_up_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_UP, wx.ART_BUTTON))
+            self.move_up_btn.Bind(wx.EVT_BUTTON, self.__MoveSelectedElemUp)
+
+            self.move_down_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_DOWN, wx.ART_BUTTON))
+            self.move_down_btn.Bind(wx.EVT_BUTTON, self.__MoveSelectedElemDown)
+
+            self.add_row_btn = wx.Button(self, label='+', size=self.move_down_btn.GetSize())
+            self.add_row_btn.Bind(wx.EVT_BUTTON, self.__OnAddNewRow)
+
+            self.remove_row_btn = wx.Button(self, label='X', size=self.move_down_btn.GetSize())
+            self.remove_row_btn.SetToolTip('Remove all selected rows')
+            self.remove_row_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveSelectedRows)
+
+        btn_sizer = wx.StdDialogButtonSizer()
+        self.ok_btn = wx.Button(self, wx.ID_OK)
+        btn_sizer.AddButton(self.ok_btn)
+        btn_sizer.AddButton(wx.Button(self, wx.ID_CANCEL))
+
+        if dlg_help_text is not None:
+            assert isinstance(dlg_help_text, str)
+            help_btn = wx.Button(self, wx.ID_HELP)
+            help_btn.Bind(wx.EVT_BUTTON, partial(self.__ShowDialogHelp, help_text=dlg_help_text))
+            btn_sizer.AddButton(help_btn)
+
+        btn_sizer.Realize()
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(instruction_label, 0, wx.ALL, 5)
+        sizer.Add(self.hier_tree, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+        if not single_selection:
+            list_sizer = wx.BoxSizer(wx.HORIZONTAL)
+            list_sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+
+            arrow_btns_sizer = wx.BoxSizer(wx.VERTICAL)
+            arrow_btns_sizer.Add(self.move_up_btn)
+            arrow_btns_sizer.Add(self.move_down_btn)
+            arrow_btns_sizer.Add(self.add_row_btn, 0, wx.TOP, 5)
+            arrow_btns_sizer.Add(self.remove_row_btn, 0, wx.TOP, 5)
+            list_sizer.Add(arrow_btns_sizer)
+            sizer.Add(list_sizer, 1, wx.EXPAND)
+
+        self._BuildSettingsArea(sizer)
+
+        sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizer(sizer)
+
+        self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, self.__OnTreeRightClick)
+        if not single_selection:
+            self.hier_tree.Bind(wx.EVT_TREE_ITEM_ACTIVATED, self.__OnTreeItemActivated)
+            self.selections_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.__UpdateButtonStates)
+            self.selections_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.__UpdateButtonStates)
+            self.selections_list.Bind(wx.EVT_LEFT_DCLICK, self.__OnListCellDoubleClick)
+        else:
+            self.hier_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnTreeSelectionChanged)
+
+        self.__BuildTree()
+        self.__BuildSelectionsList()
+        self.__UpdateButtonStates()
+
+    def _OnWidgetCheckbox(self, label, checked):
+        raise RuntimeError("Not implemented")
+
+    def GetSettingCheckbox(self, label):
+        return self._settings_chkboxes_by_label[label].IsChecked()
+
+    def GetCustomCaption(self, elem_path):
+        caption = self._captions_by_path.get(elem_path)
+        if caption in (None, '', '<default>'):
+            return None
+        return caption
+
+    def GetCustomCaptions(self):
+        selected_paths = set(self._selected_paths)
+        return {
+            path: caption
+            for path, caption in self._captions_by_path.items()
+            if caption not in (None, '', '<default>')
+            and re.sub(r'\[[^\]]*\]$', '', path) in selected_paths
+        }
+
+    def _SetCustomCaptions(self, custom_captions):
+        self._captions_by_path = dict(custom_captions)
+        if not self._editable_captions or self._single_selection:
+            return
+
+        for item in range(self.selections_list.GetItemCount()):
+            path = self.selections_list.GetItemText(item, 0)
+            caption = self._captions_by_path.get(path, '<default>')
+            self.selections_list.SetItem(item, 1, caption)
+
+    def _BuildSettingsArea(self, sizer):
+        if not self._settings_chkboxes:
+            return
+
+        for i, (label, checked) in enumerate(self._settings_chkboxes):
+            chkbox = wx.CheckBox(self, label=label)
+            chkbox.SetValue(checked)
+            if i == 0:
+                sizer.Add(chkbox)
+            else:
+                sizer.Add(chkbox, 0, wx.TOP, 5)
+            chkbox.Bind(wx.EVT_CHECKBOX, partial(self.__OnSettingsCheckbox, label=label))
+            self._settings_chkboxes_by_label[label] = chkbox
+
+    def __OnSettingsCheckbox(self, evt, label):
+        if self._settings_chkboxes:
+            self._OnWidgetCheckbox(label, evt.IsChecked())
+        evt.Skip()
+
+    def GetSelectedElemPaths(self):
+        if self._single_selection:
+            return [self._single_selected_path] if self._single_selected_path else []
+
+        return list(self._selected_paths)
+
+    def __OnTreeSelectionChanged(self, evt):
+        item = self.hier_tree.GetSelection()
+        if item.IsOk() and item in self._leaf_paths_by_tree_item:
+            self._single_selected_path = self._leaf_paths_by_tree_item[item]
+        else:
+            self._single_selected_path = None
+
+        self.__UpdateButtonStates()
+        evt.Skip()
+
+    def __OnTreeItemActivated(self, evt):
+        item = evt.GetItem()
+        if item.IsOk() and item in self._leaf_paths_by_tree_item:
+            self.__SetPathsSelected([self._leaf_paths_by_tree_item[item]], True)
+        evt.Skip()
+
+    def __OnTreeRightClick(self, evt):
+        item = self.hier_tree.HitTest(evt.GetPosition())
+        if not item:
+            return
+
+        item = item[0]
+        if not item.IsOk():
+            return
+        self.__PopupTreeContextMenu(self.hier_tree, item)
+
+    def __MoveSelectedElemUp(self, evt):
+        selected_rows = self.__GetListCtrlSelectedRows()
+        assert len(selected_rows) == 1
+        src_row = selected_rows[0]
+        assert src_row > 0
+        dst_row = src_row - 1
+        self.__SwapListCtrlItems(src_row, dst_row)
+
+    def __MoveSelectedElemDown(self, evt):
+        selected_rows = self.__GetListCtrlSelectedRows()
+        assert len(selected_rows) == 1
+        src_row = selected_rows[0]
+        dst_row = src_row + 1
+        assert dst_row < self.selections_list.GetItemCount()
+        self.__SwapListCtrlItems(src_row, dst_row)
+
+    def __SwapListCtrlItems(self, src_row, dst_row):
+        src_text = self.selections_list.GetItemText(src_row)
+        dst_text = self.selections_list.GetItemText(dst_row)
+        self.selections_list.SetItemText(dst_row, src_text)
+        self.selections_list.SetItemText(src_row, dst_text)
+
+        src_selected = self.selections_list.IsSelected(src_row)
+        dst_selected = self.selections_list.IsSelected(dst_row)
+        self.selections_list.Select(src_row, dst_selected)
+        self.selections_list.Select(dst_row, src_selected)
+
+        if self._editable_captions:
+            src_caption = self.selections_list.GetItemText(src_row, 1)
+            dst_caption = self.selections_list.GetItemText(dst_row, 1)
+            self.selections_list.SetItem(dst_row, 1, src_caption)
+            self.selections_list.SetItem(src_row, 1, dst_caption)
+
+        self.selections_list.EnsureVisible(dst_row)
+
+        self._selected_paths[src_row], self._selected_paths[dst_row] = (
+            self._selected_paths[dst_row], self._selected_paths[src_row]
+        )
+        self._list_indices_by_path[self._selected_paths[src_row]] = src_row
+        self._list_indices_by_path[self._selected_paths[dst_row]] = dst_row
+
+    def __PopupTreeContextMenu(self, tree, item):
+        menu = wx.Menu()
+        if not self._single_selection:
+            selected_items = tree.GetSelections()
+            target_items = selected_items if item in selected_items else [item]
+            target_paths = []
+            for target_item in target_items:
+                target_paths.extend(self.__CollectLeavesFromItem(tree, target_item))
+            target_paths = list(dict.fromkeys(target_paths))
+
+            selected_target_paths = set()
+            for target_item in target_items:
+                selected_target_paths.update(self.__CollectSelectedPathsFromItem(target_item))
+            in_widget = [path for path in self._selected_paths if path in selected_target_paths]
+            not_in_widget = [path for path in target_paths if path not in self._selected_paths]
+            has_branches = any(
+                target_item not in self._leaf_paths_by_tree_item
+                for target_item in target_items
+            )
+            add_label = 'Add leaves to widget' if has_branches else 'Add to Widget'
+            remove_label = 'Remove leaves from widget' if has_branches else 'Remove from Widget'
+            if not_in_widget:
+                add_item = menu.Append(-1, add_label)
+                self.Bind(
+                    wx.EVT_MENU,
+                    partial(self.__OnAddLeavesFromBranch, paths=not_in_widget),
+                    add_item,
+                )
+            if in_widget:
+                remove_item = menu.Append(-1, remove_label)
+                self.Bind(
+                    wx.EVT_MENU,
+                    partial(self.__OnRemoveLeavesFromBranch, paths=in_widget),
+                    remove_item,
+                )
+            menu.AppendSeparator()
+        self.__AppendExpandCollapseSubmenu(menu, tree)
+        tree.PopupMenu(menu)
+        menu.Destroy()
+
+    def __AppendExpandCollapseSubmenu(self, menu, tree):
+        expand_submenu = wx.Menu()
+        all_expanded, all_collapsed = self.__GetTreeExpandCollapseState(tree)
+        def ExpandAll(evt, **kwargs):
+            kwargs['tree'].ExpandAll()
+            evt.Skip()
+        def CollapseAll(evt, **kwargs):
+            kwargs['tree'].CollapseAll()
+            evt.Skip()
+        if not all_expanded:
+            expand_all = expand_submenu.Append(-1, 'Expand All')
+            self.Bind(wx.EVT_MENU, partial(ExpandAll, tree=tree), expand_all)
+        if not all_collapsed:
+            collapse_all = expand_submenu.Append(-1, 'Collapse All')
+            self.Bind(wx.EVT_MENU, partial(CollapseAll, tree=tree), collapse_all)
+        menu.AppendSubMenu(expand_submenu, 'Expand / Collapse')
+
+    def __OnAddLeavesFromBranch(self, evt, paths):
+        self.__SetPathsSelected(paths, True)
+        evt.Skip()
+
+    def __OnRemoveLeavesFromBranch(self, evt, paths):
+        self.__SetPathsSelected(paths, False)
+        evt.Skip()
+
+    def __SetPathsSelected(self, paths, selected):
+        changed = False
+        for path in paths:
+            if selected:
+                if path not in self._selected_paths:
+                    self._selected_paths.append(path)
+                    changed = True
+            elif path in self._selected_paths:
+                self._selected_paths.remove(path)
+                changed = True
+
+        if changed:
+            self.__BuildSelectionsList()
+            self.__UpdateButtonStates()
+
+    def __UpdateButtonStates(self, *args):
+        if self._single_selection:
+            return
+
+        list_ctrl_count = self.selections_list.GetItemCount()
+        self.ok_btn.Enable(list_ctrl_count > 0)
+
+        selected_rows = self.__GetListCtrlSelectedRows()
+
+        if selected_rows:
+            self.remove_row_btn.Enable()
+        else:
+            self.remove_row_btn.Disable()
+
+        if list_ctrl_count <= 1 or len(selected_rows) > 1 or len(selected_rows) == 0:
+            self.move_up_btn.Disable()
+            self.move_down_btn.Disable()
+        else:
+            selected_row = selected_rows[0]
+            if selected_row == 0:
+                self.move_up_btn.Disable()
+                self.move_down_btn.Enable()
+            elif selected_row == list_ctrl_count - 1:
+                self.move_up_btn.Enable()
+                self.move_down_btn.Disable()
+            else:
+                self.move_up_btn.Enable()
+                self.move_down_btn.Enable()
+
+    def __GetListCtrlSelectedRows(self):
+        rows = []
+        for idx in range(self.selections_list.GetItemCount()):
+            if self.selections_list.IsSelected(idx):
+                rows.append(idx)
+
+        return rows
+
+    def __BuildTree(self):
+        self._tree_items_by_id = {}
+        self._paths_by_tree_item = {}
+        self._leaf_paths_by_tree_item = {}
+
+        self.hier_tree.DeleteAllItems()
+        root = self.hier_tree.AddRoot('root')
+        self._tree_items_by_id[0] = root
+        self._paths_by_tree_item[root] = ''
+
+        visible_paths = self.__BuildVisibleElemPaths(self._all_leaf_paths)
+        self.__RecurseBuildTree(
+            self.hier_tree, self.simhier.GetTree().GetRoot(), visible_paths,
+        )
+
+    def __RecurseBuildTree(self, tree_ctrl, node, visible_paths):
+        if node is self.simhier.GetTree().GetRoot():
+            for child in node.GetChildren():
+                self.__RecurseBuildTree(tree_ctrl, child, visible_paths)
+            return
+
+        elem_path = node.GetPath()
+        if elem_path not in visible_paths:
+            return
+
+        if node.GetParent():
+            parent_id = node.GetParent().GetID()
+        else:
+            parent_id = 0
+
+        tree_item = tree_ctrl.AppendItem(self._tree_items_by_id[parent_id], node.GetName())
+        self._paths_by_tree_item[tree_item] = elem_path
+        node_id = node.GetID()
+        self._tree_items_by_id[node_id] = tree_item
+
+        if not node.children:
+            self._leaf_paths_by_tree_item[tree_item] = elem_path
+
+        for child in node.GetChildren():
+            self.__RecurseBuildTree(tree_ctrl, child, visible_paths)
+
+    def __BuildSelectionsList(self):
+        if self._single_selection:
+            return
+
+        self.selections_list.Freeze()
+        try:
+            self.selections_list.DeleteAllItems()
+            self._list_indices_by_path = {}
+
+            for path in self._selected_paths:
+                idx = self.selections_list.InsertItem(self.selections_list.GetItemCount(), path)
+                if self._editable_captions:
+                    self.selections_list.SetItem(idx, 1, self._captions_by_path.get(path, '<default>'))
+                self._list_indices_by_path[path] = idx
+        finally:
+            self.selections_list.Thaw()
+
+    def __OnListCellDoubleClick(self, evt):
+        item, _, col = self.selections_list.HitTestSubItem(evt.GetPosition())
+        if item == wx.NOT_FOUND:
+            evt.Skip()
+        elif col == 0:
+            self.__BeginPathCellEdit(item)
+        elif col == 1 and self._editable_captions:
+            self.__BeginCaptionCellEdit(item)
+        else:
+            evt.Skip()
+
+    def __BeginCaptionCellEdit(self, item):
+        self.__CommitPathEdit()
+        self.__CommitCaptionEdit()
+
+        rect = wx.Rect()
+        self.selections_list.GetSubItemRect(item, 1, rect)
+        path = self.selections_list.GetItemText(item, 0)
+        current = self._captions_by_path.get(path, '<default>')
+        initial_text = '' if current == '<default>' else current
+
+        self._caption_edit_item = item
+        self._caption_edit_ctrl = wx.TextCtrl(
+            self.selections_list, value=initial_text, style=wx.TE_PROCESS_ENTER,
+            pos=rect.GetTopLeft(), size=rect.GetSize(),
+        )
+        self._caption_edit_ctrl.Bind(wx.EVT_TEXT_ENTER, self.__OnCaptionEditEnter)
+        self._caption_edit_ctrl.Bind(wx.EVT_KILL_FOCUS, self.__OnCaptionEditKillFocus)
+        self._caption_edit_ctrl.Bind(wx.EVT_CHAR_HOOK, self.__OnCaptionEditCharHook)
+        self._caption_edit_ctrl.SetFocus()
+        self._caption_edit_ctrl.SelectAll()
+
+    def __OnCaptionEditEnter(self, evt):
+        self.__CommitCaptionEdit()
+
+    def __OnCaptionEditKillFocus(self, evt):
+        self.__CommitCaptionEdit()
+        evt.Skip()
+
+    def __OnCaptionEditCharHook(self, evt):
+        if evt.GetKeyCode() == wx.WXK_ESCAPE:
+            self.__CancelCaptionEdit()
+        else:
+            evt.Skip()
+
+    def __CommitCaptionEdit(self):
+        if self._caption_edit_ctrl is None:
+            return
+
+        item = self._caption_edit_item
+        value = self._caption_edit_ctrl.GetValue().strip() or '<default>'
+        path = self.selections_list.GetItemText(item, 0)
+        self._captions_by_path[path] = value
+        self.selections_list.SetItem(item, 1, value)
+
+        self.__DestroyCaptionEditCtrl()
+
+    def __CancelCaptionEdit(self):
+        self.__DestroyCaptionEditCtrl()
+
+    def __DestroyCaptionEditCtrl(self):
+        ctrl = self._caption_edit_ctrl
+        self._caption_edit_ctrl = None
+        self._caption_edit_item = None
+        if ctrl is not None:
+            wx.CallAfter(ctrl.Destroy)
+
+    def __OnAddNewRow(self, evt):
+        self.__CommitCaptionEdit()
+        self.__CommitPathEdit()
+
+        idx = self.selections_list.InsertItem(self.selections_list.GetItemCount(), '')
+        if self._editable_captions:
+            self.selections_list.SetItem(idx, 1, '<default>')
+        self.selections_list.EnsureVisible(idx)
+        self.__BeginPathCellEdit(idx)
+
+    def __OnRemoveSelectedRows(self, evt):
+        self.__CommitCaptionEdit()
+        self.__CommitPathEdit()
+        if self._path_edit_ctrl is not None:
+            return
+
+        selected_rows = self.__GetListCtrlSelectedRows()
+        for item in reversed(selected_rows):
+            self.__RemoveListRow(item)
+
+    def __BeginPathCellEdit(self, item):
+        self.__CommitCaptionEdit()
+        self.__CommitPathEdit()
+
+        rect = wx.Rect()
+        self.selections_list.GetSubItemRect(item, 0, rect)
+        current = self.selections_list.GetItemText(item, 0)
+
+        self._path_edit_item = item
+        self._path_edit_ctrl = wx.TextCtrl(
+            self.selections_list, value=current, style=wx.TE_PROCESS_ENTER,
+            pos=rect.GetTopLeft(), size=rect.GetSize(),
+        )
+        self._path_edit_ctrl.Bind(wx.EVT_TEXT_ENTER, self.__OnPathEditEnter)
+        self._path_edit_ctrl.Bind(wx.EVT_KILL_FOCUS, self.__OnPathEditKillFocus)
+        self._path_edit_ctrl.Bind(wx.EVT_CHAR_HOOK, self.__OnPathEditCharHook)
+        self._path_edit_ctrl.SetFocus()
+        self._path_edit_ctrl.SelectAll()
+
+    def __OnPathEditEnter(self, evt):
+        self.__CommitPathEdit()
+
+    def __OnPathEditKillFocus(self, evt):
+        self.__CommitPathEdit()
+        evt.Skip()
+
+    def __OnPathEditCharHook(self, evt):
+        if evt.GetKeyCode() == wx.WXK_ESCAPE:
+            self.__CancelPathEdit()
+        else:
+            evt.Skip()
+
+    def __CommitPathEdit(self):
+        if self._path_edit_ctrl is None:
+            return
+
+        item = self._path_edit_item
+        value = self._path_edit_ctrl.GetValue().strip()
+
+        if not value:
+            self.__DestroyPathEditCtrl()
+            self.__RemoveListRow(item)
+            return
+
+        if not self.__IsValidElemPath(value):
+            wx.MessageBox(
+                "'{}' is not a valid element path.\nPaths must be dot-delimited with no empty segments, e.g. 'top.foo.bar'.".format(value),
+                'Invalid Path', wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        for i in range(self.selections_list.GetItemCount()):
+            if i != item and self.selections_list.GetItemText(i, 0) == value:
+                wx.MessageBox(
+                    "'{}' is already in the list.".format(value),
+                    'Duplicate Path', wx.OK | wx.ICON_ERROR,
+                )
+                return
+
+        old_value = self.selections_list.GetItemText(item, 0)
+        self.selections_list.SetItemText(item, value)
+        self._list_indices_by_path.pop(old_value, None)
+        self._list_indices_by_path[value] = item
+        if old_value in self._selected_paths:
+            self._selected_paths[self._selected_paths.index(old_value)] = value
+        elif value not in self._selected_paths:
+            self._selected_paths.append(value)
+        if old_value and old_value != value and old_value in self._captions_by_path:
+            self._captions_by_path[value] = self._captions_by_path.pop(old_value)
+
+        self.__DestroyPathEditCtrl()
+        self.__UpdateButtonStates()
+
+    def __CancelPathEdit(self):
+        item = self._path_edit_item
+        self.__DestroyPathEditCtrl()
+        if item is not None and self.selections_list.GetItemText(item, 0) == '':
+            self.__RemoveListRow(item)
+
+    def __DestroyPathEditCtrl(self):
+        ctrl = self._path_edit_ctrl
+        self._path_edit_ctrl = None
+        self._path_edit_item = None
+        if ctrl is not None:
+            wx.CallAfter(ctrl.Destroy)
+
+    def __RemoveListRow(self, item):
+        if item is None or item < 0 or item >= self.selections_list.GetItemCount():
+            return
+        path = self.selections_list.GetItemText(item, 0)
+        if path and path in self._selected_paths:
+            self._selected_paths.remove(path)
+        self._list_indices_by_path.pop(path, None)
+        self.selections_list.DeleteItem(item)
+        for remaining_path, row in self._list_indices_by_path.items():
+            if row > item:
+                self._list_indices_by_path[remaining_path] = row - 1
+        self.__UpdateButtonStates()
+
+    def __ShowDialogHelp(self, evt, help_text):
+        dlg = wx.Dialog(
+            self, title=self.GetTitle() + ' Help', size=(700, 500),
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+        try:
+            text_ctrl = wx.TextCtrl(
+                dlg, value=help_text, style=wx.TE_MULTILINE | wx.TE_READONLY,
+            )
+            sizer = wx.BoxSizer(wx.VERTICAL)
+            sizer.Add(text_ctrl, 1, wx.ALL | wx.EXPAND, 10)
+            sizer.Add(dlg.CreateButtonSizer(wx.OK), 0, wx.ALL | wx.EXPAND, 10)
+            dlg.SetSizer(sizer)
+            dlg.CentreOnParent()
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
+    @staticmethod
+    def __IsValidElemPath(value):
+        if not value or value.startswith('.') or value.endswith('.'):
+            return False
+        return all(len(part) > 0 for part in value.split('.'))
+
+    def __CollectSelectedPathsFromItem(self, item):
+        if item in self._leaf_paths_by_tree_item:
+            path = self._leaf_paths_by_tree_item[item]
+            return [path] if path in self._selected_paths else []
+
+        # Selected descendants may be absent from the tree (ShowInUI filtering).
+        branch_path = self._paths_by_tree_item[item]
+        return [
+            path for path in self._selected_paths
+            if not branch_path or path == branch_path or path.startswith(branch_path + '.')
+        ]
+
+    def __CollectLeavesFromItem(self, tree, item):
+        if item in self._leaf_paths_by_tree_item:
+            return [self._leaf_paths_by_tree_item[item]]
+
+        paths = []
+        child, cookie = tree.GetFirstChild(item)
+        while child.IsOk():
+            paths.extend(self.__CollectLeavesFromItem(tree, child))
+            child = tree.GetNextSibling(child)
+
+        return paths
+
+    def __GetTreeExpandCollapseState(self, tree):
+        all_expanded = True
+        all_collapsed = True
+        has_expandable = False
+
+        child, cookie = tree.GetFirstChild(tree.GetRootItem())
+        while child.IsOk():
+            branch_expanded, branch_collapsed, branch_has_expandable = (
+                self.__BranchExpandCollapseState(tree, child)
+            )
+            if branch_has_expandable:
+                has_expandable = True
+                if not branch_expanded:
+                    all_expanded = False
+                if not branch_collapsed:
+                    all_collapsed = False
+            child = tree.GetNextSibling(child)
+
+        if not has_expandable:
+            return False, False
+
+        return all_expanded, all_collapsed
+
+    def __BranchExpandCollapseState(self, tree, item):
+        has_expandable = tree.ItemHasChildren(item)
+        all_expanded = True
+        all_collapsed = True
+
+        if has_expandable:
+            if tree.IsExpanded(item):
+                all_collapsed = False
+            else:
+                all_expanded = False
+
+        child, cookie = tree.GetFirstChild(item)
+        while child.IsOk():
+            child_expanded, child_collapsed, child_has_expandable = (
+                self.__BranchExpandCollapseState(tree, child)
+            )
+            if child_has_expandable:
+                has_expandable = True
+                if not child_expanded:
+                    all_expanded = False
+                if not child_collapsed:
+                    all_collapsed = False
+            child = tree.GetNextSibling(child)
+
+        return all_expanded, all_collapsed, has_expandable
+
+    @staticmethod
+    def __BuildVisibleElemPaths(leaf_elem_paths):
+        visible_paths = set()
+        for leaf_path in leaf_elem_paths:
+            parts = leaf_path.split('.')
+            for i in range(1, len(parts) + 1):
+                visible_paths.add('.'.join(parts[:i]))
+        return visible_paths
 
 class CaptionsEditDlg(wx.Dialog):
     def __init__(self, parent, custom_captions):
@@ -192,696 +905,6 @@ class CaptionsEditDlg(wx.Dialog):
             return False
         return bool(base_path) and all(base_path.split('.'))
 
-class WidgetDataSelectionsDlg(wx.Dialog):
-    def __init__(
-        self, parent, frame, elem_paths, queues_only=False, single_selection=False,
-        settings_chkboxes=None, title="Edit Data Selections",
-        editable_captions=False, initial_captions=None,
-    ):
-        assert not editable_captions or not single_selection
-
-        _, screen_h = wx.GetDisplaySize()
-        super().__init__(parent, title=title, size=(1000, int(screen_h * 0.75)))
-
-        self.frame = frame
-        self.simhier = frame.simhier
-        self._settings_chkboxes = settings_chkboxes or []
-        self._settings_chkboxes_by_label = {}
-        self._editable_captions = editable_captions
-        self._captions_by_path = dict(initial_captions or {})
-        self._caption_edit_ctrl = None
-        self._caption_edit_item = None
-        self._path_edit_ctrl = None
-        self._path_edit_item = None
-        if queues_only:
-            self._all_leaf_paths = sorted(self.simhier.GetContainerElemPaths())
-        else:
-            self._all_leaf_paths = sorted(self.simhier.GetElemPaths(True))
-
-        # Keep every given elem_path, including ones not found in the simhier
-        # tree (e.g. manually typed "bad" paths), so they still show up in the
-        # ListCtrl rather than silently disappearing on dialog reopen.
-        self._selected_paths = []
-        seen = set()
-        for p in elem_paths:
-            if p not in seen:
-                self._selected_paths.append(p)
-                seen.add(p)
-
-        self._initial_paths = list(self._selected_paths)
-        self._single_selection = single_selection
-        self._single_selected_path = None
-
-        self._tree_items_by_id = {}
-        self._leaf_paths_by_tree_item = {}
-        self._list_indices_by_path = {}
-
-        if single_selection and queues_only:
-            instruction_text = 'Select a leaf queue from the tree'
-        elif single_selection:
-            instruction_text = 'Select a leaf node from the tree'
-        else:
-            instruction_text = 'Right-click nodes to add/remove from widget'
-
-        instruction_label = wx.StaticText(self, label=instruction_text)
-        tree_style = wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT | wx.TR_LINES_AT_ROOT
-        if not single_selection:
-            tree_style = tree_style | wx.TR_MULTIPLE
-        self.hier_tree = wx.TreeCtrl(self, style=tree_style)
-
-        if not single_selection:
-            self.selections_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-            if self._editable_captions:
-                self.selections_list.InsertColumn(0, 'Current Selections', width=400)
-                self.selections_list.InsertColumn(1, 'Caption', width=150)
-            else:
-                self.selections_list.InsertColumn(0, 'Current Selections', width=550)
-
-            self.move_up_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_UP, wx.ART_BUTTON))
-            self.move_up_btn.Bind(wx.EVT_BUTTON, self.__MoveSelectedElemUp)
-
-            self.move_down_btn = wx.BitmapButton(self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_DOWN, wx.ART_BUTTON))
-            self.move_down_btn.Bind(wx.EVT_BUTTON, self.__MoveSelectedElemDown)
-
-            self.add_row_btn = wx.Button(self, label='+', size=self.move_down_btn.GetSize())
-            self.add_row_btn.Bind(wx.EVT_BUTTON, self.__OnAddNewRow)
-
-            self.remove_row_btn = wx.Button(self, label='X', size=self.move_down_btn.GetSize())
-            self.remove_row_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveSelectedRow)
-
-        btn_sizer = wx.StdDialogButtonSizer()
-        self.ok_btn = wx.Button(self, wx.ID_OK)
-        btn_sizer.AddButton(self.ok_btn)
-        btn_sizer.AddButton(wx.Button(self, wx.ID_CANCEL))
-        btn_sizer.Realize()
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(instruction_label, 0, wx.ALL, 5)
-        sizer.Add(self.hier_tree, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-        if not single_selection:
-            list_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            list_sizer.Add(self.selections_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
-
-            arrow_btns_sizer = wx.BoxSizer(wx.VERTICAL)
-            arrow_btns_sizer.Add(self.move_up_btn)
-            arrow_btns_sizer.Add(self.move_down_btn)
-            arrow_btns_sizer.Add(self.add_row_btn, 0, wx.TOP, 5)
-            arrow_btns_sizer.Add(self.remove_row_btn, 0, wx.TOP, 5)
-            list_sizer.Add(arrow_btns_sizer)
-            sizer.Add(list_sizer, 1, wx.EXPAND)
-
-        self._BuildSettingsArea(sizer)
-
-        sizer.Add(btn_sizer, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
-        self.SetSizer(sizer)
-
-        if not single_selection:
-            self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
-            self.selections_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.__UpdateButtonStates)
-            self.selections_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.__UpdateButtonStates)
-            self.selections_list.Bind(wx.EVT_LEFT_DCLICK, self.__OnListCellDoubleClick)
-        else:
-            self.hier_tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.__OnTreeSelectionChanged)
-            self.hier_tree.Bind(wx.EVT_RIGHT_DOWN, partial(self.__OnTreeRightClick, tree=self.hier_tree))
-
-        self.__BuildTree()
-        self.__BuildSelectionsList()
-        self.__UpdateButtonStates()
-
-    def _OnWidgetCheckbox(self, label, checked):
-        raise RuntimeError("Not implemented")
-
-    def GetSettingCheckbox(self, label):
-        return self._settings_chkboxes_by_label[label].IsChecked()
-
-    def GetCustomCaption(self, elem_path):
-        caption = self._captions_by_path.get(elem_path)
-        if caption in (None, '', '<default>'):
-            return None
-        return caption
-
-    def GetCustomCaptions(self):
-        selected_paths = set(self._selected_paths)
-        return {
-            path: caption
-            for path, caption in self._captions_by_path.items()
-            if caption not in (None, '', '<default>')
-            and re.sub(r'\[[^\]]*\]$', '', path) in selected_paths
-        }
-
-    def _SetCustomCaptions(self, custom_captions):
-        self._captions_by_path = dict(custom_captions)
-        if not self._editable_captions or self._single_selection:
-            return
-
-        for item in range(self.selections_list.GetItemCount()):
-            path = self.selections_list.GetItemText(item, 0)
-            caption = self._captions_by_path.get(path, '<default>')
-            self.selections_list.SetItem(item, 1, caption)
-
-    def _BuildSettingsArea(self, sizer):
-        if not self._settings_chkboxes:
-            return
-
-        for i, (label, checked) in enumerate(self._settings_chkboxes):
-            chkbox = wx.CheckBox(self, label=label)
-            chkbox.SetValue(checked)
-            if i == 0:
-                sizer.Add(chkbox)
-            else:
-                sizer.Add(chkbox, 0, wx.TOP, 5)
-            chkbox.Bind(wx.EVT_CHECKBOX, partial(self.__OnSettingsCheckbox, label=label))
-            self._settings_chkboxes_by_label[label] = chkbox
-
-    def __OnSettingsCheckbox(self, evt, label):
-        if self._settings_chkboxes:
-            self._OnWidgetCheckbox(label, evt.IsChecked())
-        evt.Skip()
-
-    def GetSelectedElemPaths(self):
-        if self._single_selection:
-            return [self._single_selected_path] if self._single_selected_path else []
-
-        return list(self._selected_paths)
-
-    def __OnTreeSelectionChanged(self, evt):
-        item = self.hier_tree.GetSelection()
-        if item.IsOk() and item in self._leaf_paths_by_tree_item:
-            self._single_selected_path = self._leaf_paths_by_tree_item[item]
-        else:
-            self._single_selected_path = None
-
-        self.__UpdateButtonStates()
-        evt.Skip()
-
-    def __OnTreeRightClick(self, evt, tree):
-        item = tree.HitTest(evt.GetPosition())
-        if not item:
-            return
-
-        item = item[0]
-        if not item.IsOk():
-            return
-
-        if self._single_selection:
-            tree.SelectItem(item)
-        else:
-            selections = tree.GetSelections()
-            if item not in selections:
-                tree.SelectItem(item)
-        self.__PopupTreeContextMenu(tree, item)
-
-    def __MoveSelectedElemUp(self, evt):
-        selected_rows = self.__GetListCtrlSelectedRows()
-        assert len(selected_rows) == 1
-        src_row = selected_rows[0]
-        assert src_row > 0
-        dst_row = src_row - 1
-        self.__SwapListCtrlItems(src_row, dst_row)
-
-    def __MoveSelectedElemDown(self, evt):
-        selected_rows = self.__GetListCtrlSelectedRows()
-        assert len(selected_rows) == 1
-        src_row = selected_rows[0]
-        dst_row = src_row + 1
-        assert dst_row < self.selections_list.GetItemCount()
-        self.__SwapListCtrlItems(src_row, dst_row)
-
-    def __SwapListCtrlItems(self, src_row, dst_row):
-        src_text = self.selections_list.GetItemText(src_row)
-        dst_text = self.selections_list.GetItemText(dst_row)
-        self.selections_list.SetItemText(dst_row, src_text)
-        self.selections_list.SetItemText(src_row, dst_text)
-
-        src_selected = self.selections_list.IsSelected(src_row)
-        dst_selected = self.selections_list.IsSelected(dst_row)
-        self.selections_list.Select(src_row, dst_selected)
-        self.selections_list.Select(dst_row, src_selected)
-
-        if self._editable_captions:
-            src_caption = self.selections_list.GetItemText(src_row, 1)
-            dst_caption = self.selections_list.GetItemText(dst_row, 1)
-            self.selections_list.SetItem(dst_row, 1, src_caption)
-            self.selections_list.SetItem(src_row, 1, dst_caption)
-
-        self.selections_list.EnsureVisible(dst_row)
-
-        self._selected_paths[src_row], self._selected_paths[dst_row] = (
-            self._selected_paths[dst_row], self._selected_paths[src_row]
-        )
-        self._list_indices_by_path[self._selected_paths[src_row]] = src_row
-        self._list_indices_by_path[self._selected_paths[dst_row]] = dst_row
-
-    def __GetSelectedLeafPaths(self, tree):
-        paths = []
-        for selected_item in tree.GetSelections():
-            if selected_item.IsOk() and selected_item in self._leaf_paths_by_tree_item:
-                paths.append(self._leaf_paths_by_tree_item[selected_item])
-        return paths
-
-    def __GetTargetLeafPathsForMenu(self, tree, item):
-        selected_leaf_paths = self.__GetSelectedLeafPaths(tree)
-        if item in tree.GetSelections() and selected_leaf_paths:
-            return selected_leaf_paths
-        return [self._leaf_paths_by_tree_item[item]]
-
-    def __PopupTreeContextMenu(self, tree, item):
-        menu = wx.Menu()
-        if not self._single_selection:
-            if item in self._leaf_paths_by_tree_item:
-                target_paths = self.__GetTargetLeafPathsForMenu(tree, item)
-                in_widget = [path for path in target_paths if path in self._selected_paths]
-                not_in_widget = [path for path in target_paths if path not in self._selected_paths]
-                if not_in_widget:
-                    add_item = menu.Append(-1, 'Add to Widget')
-                    self.Bind(
-                        wx.EVT_MENU,
-                        partial(self.__OnAddLeavesFromBranch, paths=not_in_widget),
-                        add_item,
-                    )
-                if in_widget:
-                    remove_item = menu.Append(-1, 'Remove from Widget')
-                    self.Bind(
-                        wx.EVT_MENU,
-                        partial(self.__OnRemoveLeavesFromBranch, paths=in_widget),
-                        remove_item,
-                    )
-            else:
-                leaves = self.__CollectLeavesFromItem(tree, item)
-                selected_leaves = [path for path in leaves if path in self._selected_paths]
-                if len(selected_leaves) < len(leaves):
-                    add_leaves = menu.Append(-1, 'Add leaves to widget')
-                    self.Bind(
-                        wx.EVT_MENU,
-                        partial(self.__OnAddLeavesFromBranch, paths=leaves),
-                        add_leaves,
-                    )
-                if selected_leaves:
-                    remove_leaves = menu.Append(-1, 'Remove leaves from widget')
-                    self.Bind(
-                        wx.EVT_MENU,
-                        partial(self.__OnRemoveLeavesFromBranch, paths=selected_leaves),
-                        remove_leaves,
-                    )
-            menu.AppendSeparator()
-        self.__AppendExpandCollapseSubmenu(menu, tree)
-        tree.PopupMenu(menu)
-        menu.Destroy()
-
-    def __AppendExpandCollapseSubmenu(self, menu, tree):
-        expand_submenu = wx.Menu()
-        all_expanded, all_collapsed = self.__GetTreeExpandCollapseState(tree)
-        def ExpandAll(evt, **kwargs):
-            kwargs['tree'].ExpandAll()
-            evt.Skip()
-        def CollapseAll(evt, **kwargs):
-            kwargs['tree'].CollapseAll()
-            evt.Skip()
-        if not all_expanded:
-            expand_all = expand_submenu.Append(-1, 'Expand All')
-            self.Bind(wx.EVT_MENU, partial(ExpandAll, tree=tree), expand_all)
-        if not all_collapsed:
-            collapse_all = expand_submenu.Append(-1, 'Collapse All')
-            self.Bind(wx.EVT_MENU, partial(CollapseAll, tree=tree), collapse_all)
-        menu.AppendSubMenu(expand_submenu, 'Expand / Collapse')
-
-    def __OnAddLeavesFromBranch(self, evt, paths):
-        self.__SetPathsSelected(paths, True)
-        evt.Skip()
-
-    def __OnRemoveLeavesFromBranch(self, evt, paths):
-        self.__SetPathsSelected(paths, False)
-        evt.Skip()
-
-    def __SetPathsSelected(self, paths, selected):
-        changed = False
-        for path in paths:
-            if selected:
-                if path not in self._selected_paths:
-                    self._selected_paths.append(path)
-                    changed = True
-            elif path in self._selected_paths:
-                self._selected_paths.remove(path)
-                changed = True
-
-        if changed:
-            self.__BuildSelectionsList()
-            self.__UpdateButtonStates()
-
-    def __UpdateButtonStates(self, *args):
-        if self._single_selection:
-            return
-
-        list_ctrl_count = self.selections_list.GetItemCount()
-        self.ok_btn.Enable(list_ctrl_count > 0)
-
-        selected_rows = self.__GetListCtrlSelectedRows()
-
-        if len(selected_rows) == 1:
-            self.remove_row_btn.Enable()
-        else:
-            self.remove_row_btn.Disable()
-
-        if list_ctrl_count <= 1 or len(selected_rows) > 1 or len(selected_rows) == 0:
-            self.move_up_btn.Disable()
-            self.move_down_btn.Disable()
-        else:
-            selected_row = selected_rows[0]
-            if selected_row == 0:
-                self.move_up_btn.Disable()
-                self.move_down_btn.Enable()
-            elif selected_row == list_ctrl_count - 1:
-                self.move_up_btn.Enable()
-                self.move_down_btn.Disable()
-            else:
-                self.move_up_btn.Enable()
-                self.move_down_btn.Enable()
-
-    def __GetListCtrlSelectedRows(self):
-        rows = []
-        for idx in range(self.selections_list.GetItemCount()):
-            if self.selections_list.IsSelected(idx):
-                rows.append(idx)
-
-        return rows
-
-    def __BuildTree(self):
-        self._tree_items_by_id = {}
-        self._leaf_paths_by_tree_item = {}
-
-        self.hier_tree.DeleteAllItems()
-        root = self.hier_tree.AddRoot('root')
-        self._tree_items_by_id[0] = root
-
-        visible_paths = self.__BuildVisibleElemPaths(self._all_leaf_paths)
-        self.__RecurseBuildTree(
-            self.hier_tree, self.simhier.GetTree().GetRoot(), visible_paths,
-        )
-
-    def __RecurseBuildTree(self, tree_ctrl, node, visible_paths):
-        if node is self.simhier.GetTree().GetRoot():
-            for child in node.GetChildren():
-                self.__RecurseBuildTree(tree_ctrl, child, visible_paths)
-            return
-
-        elem_path = node.GetPath()
-        if elem_path not in visible_paths:
-            return
-
-        if node.GetParent():
-            parent_id = node.GetParent().GetID()
-        else:
-            parent_id = 0
-
-        tree_item = tree_ctrl.AppendItem(self._tree_items_by_id[parent_id], node.GetName())
-        node_id = node.GetID()
-        self._tree_items_by_id[node_id] = tree_item
-
-        if not node.children:
-            self._leaf_paths_by_tree_item[tree_item] = elem_path
-
-        for child in node.GetChildren():
-            self.__RecurseBuildTree(tree_ctrl, child, visible_paths)
-
-    def __ApplySelectionToList(self):
-        self.__BuildSelectionsList()
-
-    def __BuildSelectionsList(self):
-        if self._single_selection:
-            return
-
-        self.selections_list.Freeze()
-        try:
-            self.selections_list.DeleteAllItems()
-            self._list_indices_by_path = {}
-
-            for path in self._selected_paths:
-                idx = self.selections_list.InsertItem(self.selections_list.GetItemCount(), path)
-                if self._editable_captions:
-                    self.selections_list.SetItem(idx, 1, self._captions_by_path.get(path, '<default>'))
-                self._list_indices_by_path[path] = idx
-        finally:
-            self.selections_list.Thaw()
-
-    def __OnListCellDoubleClick(self, evt):
-        item, _, col = self.selections_list.HitTestSubItem(evt.GetPosition())
-        if item == wx.NOT_FOUND:
-            evt.Skip()
-        elif col == 0:
-            self.__BeginPathCellEdit(item)
-        elif col == 1 and self._editable_captions:
-            self.__BeginCaptionCellEdit(item)
-        else:
-            evt.Skip()
-
-    def __BeginCaptionCellEdit(self, item):
-        self.__CommitPathEdit()
-        self.__CommitCaptionEdit()
-
-        rect = wx.Rect()
-        self.selections_list.GetSubItemRect(item, 1, rect)
-        path = self.selections_list.GetItemText(item, 0)
-        current = self._captions_by_path.get(path, '<default>')
-        initial_text = '' if current == '<default>' else current
-
-        self._caption_edit_item = item
-        self._caption_edit_ctrl = wx.TextCtrl(
-            self.selections_list, value=initial_text, style=wx.TE_PROCESS_ENTER,
-            pos=rect.GetTopLeft(), size=rect.GetSize(),
-        )
-        self._caption_edit_ctrl.Bind(wx.EVT_TEXT_ENTER, self.__OnCaptionEditEnter)
-        self._caption_edit_ctrl.Bind(wx.EVT_KILL_FOCUS, self.__OnCaptionEditKillFocus)
-        self._caption_edit_ctrl.Bind(wx.EVT_CHAR_HOOK, self.__OnCaptionEditCharHook)
-        self._caption_edit_ctrl.SetFocus()
-        self._caption_edit_ctrl.SelectAll()
-
-    def __OnCaptionEditEnter(self, evt):
-        self.__CommitCaptionEdit()
-
-    def __OnCaptionEditKillFocus(self, evt):
-        self.__CommitCaptionEdit()
-        evt.Skip()
-
-    def __OnCaptionEditCharHook(self, evt):
-        if evt.GetKeyCode() == wx.WXK_ESCAPE:
-            self.__CancelCaptionEdit()
-        else:
-            evt.Skip()
-
-    def __CommitCaptionEdit(self):
-        if self._caption_edit_ctrl is None:
-            return
-
-        item = self._caption_edit_item
-        value = self._caption_edit_ctrl.GetValue().strip() or '<default>'
-        path = self.selections_list.GetItemText(item, 0)
-        self._captions_by_path[path] = value
-        self.selections_list.SetItem(item, 1, value)
-
-        self.__DestroyCaptionEditCtrl()
-
-    def __CancelCaptionEdit(self):
-        self.__DestroyCaptionEditCtrl()
-
-    def __DestroyCaptionEditCtrl(self):
-        ctrl = self._caption_edit_ctrl
-        self._caption_edit_ctrl = None
-        self._caption_edit_item = None
-        if ctrl is not None:
-            wx.CallAfter(ctrl.Destroy)
-
-    def __OnAddNewRow(self, evt):
-        self.__CommitCaptionEdit()
-        self.__CommitPathEdit()
-
-        idx = self.selections_list.InsertItem(self.selections_list.GetItemCount(), '')
-        if self._editable_captions:
-            self.selections_list.SetItem(idx, 1, '<default>')
-        self.selections_list.EnsureVisible(idx)
-        self.__BeginPathCellEdit(idx)
-
-    def __OnRemoveSelectedRow(self, evt):
-        self.__CommitCaptionEdit()
-        self.__CommitPathEdit()
-
-        selected_rows = self.__GetListCtrlSelectedRows()
-        if len(selected_rows) != 1:
-            return
-
-        self.__RemoveListRow(selected_rows[0])
-
-    def __BeginPathCellEdit(self, item):
-        self.__CommitCaptionEdit()
-        self.__CommitPathEdit()
-
-        rect = wx.Rect()
-        self.selections_list.GetSubItemRect(item, 0, rect)
-        current = self.selections_list.GetItemText(item, 0)
-
-        self._path_edit_item = item
-        self._path_edit_ctrl = wx.TextCtrl(
-            self.selections_list, value=current, style=wx.TE_PROCESS_ENTER,
-            pos=rect.GetTopLeft(), size=rect.GetSize(),
-        )
-        self._path_edit_ctrl.Bind(wx.EVT_TEXT_ENTER, self.__OnPathEditEnter)
-        self._path_edit_ctrl.Bind(wx.EVT_KILL_FOCUS, self.__OnPathEditKillFocus)
-        self._path_edit_ctrl.Bind(wx.EVT_CHAR_HOOK, self.__OnPathEditCharHook)
-        self._path_edit_ctrl.SetFocus()
-        self._path_edit_ctrl.SelectAll()
-
-    def __OnPathEditEnter(self, evt):
-        self.__CommitPathEdit()
-
-    def __OnPathEditKillFocus(self, evt):
-        self.__CommitPathEdit()
-        evt.Skip()
-
-    def __OnPathEditCharHook(self, evt):
-        if evt.GetKeyCode() == wx.WXK_ESCAPE:
-            self.__CancelPathEdit()
-        else:
-            evt.Skip()
-
-    def __CommitPathEdit(self):
-        if self._path_edit_ctrl is None:
-            return
-
-        item = self._path_edit_item
-        value = self._path_edit_ctrl.GetValue().strip()
-
-        if not value:
-            self.__DestroyPathEditCtrl()
-            self.__RemoveListRow(item)
-            return
-
-        if not self.__IsValidElemPath(value):
-            wx.MessageBox(
-                "'{}' is not a valid element path.\nPaths must be dot-delimited with no empty segments, e.g. 'top.foo.bar'.".format(value),
-                'Invalid Path', wx.OK | wx.ICON_ERROR,
-            )
-            return
-
-        for i in range(self.selections_list.GetItemCount()):
-            if i != item and self.selections_list.GetItemText(i, 0) == value:
-                wx.MessageBox(
-                    "'{}' is already in the list.".format(value),
-                    'Duplicate Path', wx.OK | wx.ICON_ERROR,
-                )
-                return
-
-        old_value = self.selections_list.GetItemText(item, 0)
-        self.selections_list.SetItemText(item, value)
-        self._list_indices_by_path.pop(old_value, None)
-        self._list_indices_by_path[value] = item
-        if old_value in self._selected_paths:
-            self._selected_paths[self._selected_paths.index(old_value)] = value
-        elif value not in self._selected_paths:
-            self._selected_paths.append(value)
-        if old_value and old_value != value and old_value in self._captions_by_path:
-            self._captions_by_path[value] = self._captions_by_path.pop(old_value)
-
-        self.__DestroyPathEditCtrl()
-        self.__UpdateButtonStates()
-
-    def __CancelPathEdit(self):
-        item = self._path_edit_item
-        self.__DestroyPathEditCtrl()
-        if item is not None and self.selections_list.GetItemText(item, 0) == '':
-            self.__RemoveListRow(item)
-
-    def __DestroyPathEditCtrl(self):
-        ctrl = self._path_edit_ctrl
-        self._path_edit_ctrl = None
-        self._path_edit_item = None
-        if ctrl is not None:
-            wx.CallAfter(ctrl.Destroy)
-
-    def __RemoveListRow(self, item):
-        if item is None or item < 0 or item >= self.selections_list.GetItemCount():
-            return
-        path = self.selections_list.GetItemText(item, 0)
-        if path and path in self._selected_paths:
-            self._selected_paths.remove(path)
-        self._list_indices_by_path.pop(path, None)
-        self.selections_list.DeleteItem(item)
-        self.__UpdateButtonStates()
-
-    @staticmethod
-    def __IsValidElemPath(value):
-        if not value or value.startswith('.') or value.endswith('.'):
-            return False
-        return all(len(part) > 0 for part in value.split('.'))
-
-    def __CollectLeavesFromItem(self, tree, item):
-        if item in self._leaf_paths_by_tree_item:
-            return [self._leaf_paths_by_tree_item[item]]
-
-        paths = []
-        child, cookie = tree.GetFirstChild(item)
-        while child.IsOk():
-            paths.extend(self.__CollectLeavesFromItem(tree, child))
-            child = tree.GetNextSibling(child)
-
-        return paths
-
-    def __GetTreeExpandCollapseState(self, tree):
-        all_expanded = True
-        all_collapsed = True
-        has_expandable = False
-
-        child, cookie = tree.GetFirstChild(tree.GetRootItem())
-        while child.IsOk():
-            branch_expanded, branch_collapsed, branch_has_expandable = (
-                self.__BranchExpandCollapseState(tree, child)
-            )
-            if branch_has_expandable:
-                has_expandable = True
-                if not branch_expanded:
-                    all_expanded = False
-                if not branch_collapsed:
-                    all_collapsed = False
-            child = tree.GetNextSibling(child)
-
-        if not has_expandable:
-            return False, False
-
-        return all_expanded, all_collapsed
-
-    def __BranchExpandCollapseState(self, tree, item):
-        has_expandable = tree.ItemHasChildren(item)
-        all_expanded = True
-        all_collapsed = True
-
-        if has_expandable:
-            if tree.IsExpanded(item):
-                all_collapsed = False
-            else:
-                all_expanded = False
-
-        child, cookie = tree.GetFirstChild(item)
-        while child.IsOk():
-            child_expanded, child_collapsed, child_has_expandable = (
-                self.__BranchExpandCollapseState(tree, child)
-            )
-            if child_has_expandable:
-                has_expandable = True
-                if not child_expanded:
-                    all_expanded = False
-                if not child_collapsed:
-                    all_collapsed = False
-            child = tree.GetNextSibling(child)
-
-        return all_expanded, all_collapsed, has_expandable
-
-    @staticmethod
-    def __BuildVisibleElemPaths(leaf_elem_paths):
-        visible_paths = set()
-        for leaf_path in leaf_elem_paths:
-            parts = leaf_path.split('.')
-            for i in range(1, len(parts) + 1):
-                visible_paths.add('.'.join(parts[:i]))
-        return visible_paths
-
 class QueueUtilizEditDlg(WidgetDataSelectionsDlg):
     SHOW_FULL_PATHS_LABEL = 'Show full paths'
 
@@ -947,33 +970,30 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
         WidgetDataSelectionsDlg.__init__(
             self, parent, frame, elem_paths, queues_only=False, settings_chkboxes=chkboxes,
             editable_captions=True, initial_captions=initial_captions,
+            dlg_help_text=SCHEDULING_LINES_HELP,
         )
+        self.ok_btn.Bind(wx.EVT_BUTTON, self.__OnOk)
 
     def _BuildSettingsArea(self, sizer):
-        assert self._num_samples_before >= 1 and self._num_samples_before <= 25
+        assert 1 <= self._num_samples_before <= 200
         info_ticks_before = wx.StaticText(self, label='Num samples before current cycle:')
-        self._label_ticks_before = wx.StaticText(self, label=f'({self._num_samples_before})')
-        self._slider_ticks_before = wx.Slider(
-            self, value=self._num_samples_before, minValue=1, maxValue=25)
-        self._slider_ticks_before.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
+        self._spin_ticks_before = wx.SpinCtrl(
+            self, min=1, max=200, initial=self._num_samples_before,
+        )
 
-        assert self._num_samples_after >= 1 and self._num_samples_after <= 25
+        assert 1 <= self._num_samples_after <= 200
         info_ticks_after = wx.StaticText(self, label='Num samples after current cycle:')
-        self._label_ticks_after = wx.StaticText(self, label=f'({self._num_samples_after})')
-        self._slider_ticks_after = wx.Slider(
-            self, value=self._num_samples_after, minValue=1, maxValue=25)
-        self._slider_ticks_after.Bind(wx.EVT_SLIDER, self.__SyncWithSliderTicks)
+        self._spin_ticks_after = wx.SpinCtrl(
+            self, min=1, max=200, initial=self._num_samples_after,
+        )
 
         gb_sizer = wx.GridBagSizer(vgap=10, hgap=12)
-        gb_sizer.Add(info_ticks_before, pos=(0, 0))
-        gb_sizer.Add(self._slider_ticks_before, pos=(0, 1), flag=wx.EXPAND)
-        gb_sizer.Add(self._label_ticks_before, pos=(0, 2))
+        gb_sizer.Add(info_ticks_before, pos=(0, 0), flag=wx.ALIGN_CENTER_VERTICAL)
+        gb_sizer.Add(self._spin_ticks_before, pos=(0, 1), flag=wx.EXPAND)
 
-        gb_sizer.Add(info_ticks_after, pos=(1, 0))
-        gb_sizer.Add(self._slider_ticks_after, pos=(1, 1), flag=wx.EXPAND)
-        gb_sizer.Add(self._label_ticks_after, pos=(1, 2))
+        gb_sizer.Add(info_ticks_after, pos=(1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
+        gb_sizer.Add(self._spin_ticks_after, pos=(1, 1), flag=wx.EXPAND)
 
-        gb_sizer.AddGrowableCol(1)
         sizer.Add(gb_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
 
         WidgetDataSelectionsDlg._BuildSettingsArea(self, sizer)
@@ -992,13 +1012,26 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     def _OnWidgetCheckbox(self, label, checked):
         pass
 
+    def __OnOk(self, evt):
+        num_samples_before = self._spin_ticks_before.GetValue()
+        num_samples_after = self._spin_ticks_after.GetValue()
+        if num_samples_before + num_samples_after > 250:
+            wx.MessageBox(
+                'The two sample counts cannot add up to more than 250.',
+                'Invalid Sample Count', wx.OK | wx.ICON_ERROR,
+            )
+            self._spin_ticks_after.SetFocus()
+            return
+
+        self.EndModal(wx.ID_OK)
+
     @property
     def num_samples_before(self):
-        return self._slider_ticks_before.GetValue()
+        return self._spin_ticks_before.GetValue()
 
     @property
     def num_samples_after(self):
-        return self._slider_ticks_after.GetValue()
+        return self._spin_ticks_after.GetValue()
 
     @property
     def show_details(self):
@@ -1023,11 +1056,62 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     def __UpdateButtonStates(self, *args):
         WidgetDataSelectionsDlg.__UpdateButtonStates(self, *args)
 
-    def __SyncWithSliderTicks(self, evt):
-        value = self._slider_ticks_before.GetValue()
-        self._label_ticks_before.SetLabel(f'({value})')
+SCHEDULING_LINES_HELP = """This widget gives a bird's-eye view of collected data spanning a wide range of cycles.
 
-        value = self._slider_ticks_after.GetValue()
-        self._label_ticks_after.SetLabel(f'({value})')
+You can show between 1 and 200 cycles before/after the current cycle, but the total before+after is capped at 250.
 
-        evt.Skip()
+The checkboxes are use to toggle the following:
+
+- "Show detailed queue packets"
+  * When checked, the data's expanded annotations at the current cycle will be displayed in the far right column.
+
+- "Hide always-empty queue bins"
+  * If checked, never-collected bins will be squashed into a bin range e.g. "Fetch Queue[28-31]" will be used if this queue never exceeded size 28 for capacity 32. If unchecked, "Fetch Queue[28]" through "Fetch Queue [31]" will be expanded in the grid and will always be empty.
+
+- "Enable tooltips"
+  * When checked, hovering over any colored grid cell will show a tooltip with that data's expanded annotations at that cycle.
+
+- "Show DID"
+  * When checked, the DID field (if the collected data had the DID field) will be shown in the detailed packet column as well as the grid cell tooltips.
+
+- "Minimize grid cells"
+  * When checked, smaller fonts and smaller padding will be used to render the grid.
+
+By default, the data captions in the far left column will be the full path e.g. "top.cpu.core0.decode.fetch_queue[3]", but you can edit the caption in this dialog. Replace the "Caption" with "Fetch Queue" to use shorter captions like "Fetch Queue[3]". Let's walk through a full example:
+
+If we have these captions:
+
+    top.cpu.core0.foo.bar[3]
+    top.cpu.core0.foo.bar[2]
+    top.cpu.core0.foo.bar[1]
+    top.cpu.core0.foo.bar[0]
+
+And we want to show this:
+
+    Bar[3]
+    Bar[2]
+    Bar[1]
+    Bar[0]
+
+Then simply change the "<default>" caption to "Bar". If we then want to rename individual bins' captions to something else without affecting the rest of that queue's captions:
+
+    Bar[3]
+    Bar[2]
+    Fiz
+    Buz
+
+You can do that by clicking the "Edit Captions" button and manually entering the bin captions:
+
+    top.cpu.core0.foo.bar[1] -> "Fiz"
+    top.cpu.core0.foo.bar[0] -> "Buz"
+
+Finally, there may be use cases where you never want to show one or more specific bins. Sometimes data is collected in a queue, but for a specific layout some of the bins might not make sense. If you want to omit individual bins, open the "Edit Captions" dialog and change their captions like this:
+
+    top.cpu.core0.foo.bar[3] -> "<hide>"
+    top.cpu.core0.foo.bar[2] -> "<hide>"
+
+That will leave only this in the widget:
+
+    Fiz
+    Buz
+"""
