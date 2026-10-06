@@ -34,6 +34,33 @@ class ClockPopup(wx.ComboPopup):
         self.selection_callback()
 
 
+class _TimeValuePopup(wx.Dialog):
+    def __init__(self, parent, pos, value):
+        super(_TimeValuePopup, self).__init__(parent, style=wx.BORDER_SIMPLE, pos=pos)
+        self.text_ctrl = wx.TextCtrl(self, value=str(value), style=wx.TE_PROCESS_ENTER)
+        self.text_ctrl.Bind(wx.EVT_TEXT_ENTER, self.__OnEnter)
+        self.Bind(wx.EVT_CHAR_HOOK, self.__OnCharHook)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.text_ctrl, 0, wx.EXPAND)
+        self.SetSizer(sizer)
+        self.Fit()
+        self.text_ctrl.SetFocus()
+        self.text_ctrl.SelectAll()
+
+    def __OnEnter(self, event):
+        self.EndModal(wx.ID_OK)
+
+    def __OnCharHook(self, event):
+        if event.GetKeyCode() == wx.WXK_ESCAPE:
+            self.EndModal(wx.ID_CANCEL)
+        else:
+            event.Skip()
+
+    def GetValue(self):
+        return self.text_ctrl.GetValue()
+
+
 class PlaybackBar(wx.Panel):
     def __init__(self, frame):
         super(PlaybackBar, self).__init__(frame, size=(frame.GetSize().width, -1))
@@ -67,6 +94,16 @@ class PlaybackBar(wx.Panel):
         self.current_cyc_text.SetFont(font)
         self.current_tick_text = wx.StaticText(self, label='tick:{}'.format(widget_renderer.tick))
         self.__UpdateTimeLabels(widget_renderer.tick)
+
+        # Make the cycle/tick look like a hyperlink
+        self.current_cyc_text.SetForegroundColour(wx.BLUE)
+        self.current_tick_text.SetForegroundColour(wx.BLUE)
+        self.current_cyc_text.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+        self.current_tick_text.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+
+        # Callbacks for the cycle/tick so we can call GoToTick() for a manually-entered time point.
+        self.current_cyc_text.Bind(wx.EVT_LEFT_UP, self.__GoToExactCycle)
+        self.current_tick_text.Bind(wx.EVT_LEFT_UP, self.__GoToExactTick)
 
         self.minus_30_button = wx.Button(self, label='-30')
         self.minus_10_button = wx.Button(self, label='-10')
@@ -268,6 +305,58 @@ class PlaybackBar(wx.Panel):
     def __OnCycEnd(self, event):
         widget_renderer = self.frame.widget_renderer
         widget_renderer.GoToEnd()
+
+    def __PromptForTimeValue(self, event, unit, current_value):
+        click_position = event.GetEventObject().ClientToScreen(event.GetPosition())
+        dlg = _TimeValuePopup(self, click_position, current_value)
+
+        display_index = wx.Display.GetFromPoint(click_position)
+        display = wx.Display(display_index) if display_index != wx.NOT_FOUND else wx.Display()
+        display_area = display.GetClientArea()
+        dialog_size = dlg.GetSize()
+        x = min(max(click_position.x, display_area.x),
+                max(display_area.x, display_area.x + display_area.width - dialog_size.width))
+        y = min(max(click_position.y, display_area.y),
+                max(display_area.y, display_area.y + display_area.height - dialog_size.height))
+        dlg.SetPosition((x, y))
+
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return None
+            try:
+                return int(dlg.GetValue().strip())
+            except ValueError:
+                wx.MessageBox('Enter a valid integer {}.'.format(unit), 'Invalid Value',
+                              wx.OK | wx.ICON_ERROR, self)
+                return None
+        finally:
+            dlg.Destroy()
+
+    def __GoToExactCycle(self, event):
+        widget_renderer = self.frame.widget_renderer
+        period = self.clock_periods.get(self.clock_combobox.GetValue())
+        if not period:
+            return
+
+        period = int(period)
+        current_cycle = int(widget_renderer.tick) // period
+        cycle = self.__PromptForTimeValue(event, 'cycle', current_cycle)
+        if cycle is None:
+            return
+
+        start_cycle = int(widget_renderer.start_tick) // period
+        end_cycle = int(widget_renderer.end_tick) // period
+        cycle = min(max(cycle, start_cycle), end_cycle)
+        widget_renderer.GoToTick(cycle * period)
+
+    def __GoToExactTick(self, event):
+        widget_renderer = self.frame.widget_renderer
+        tick = self.__PromptForTimeValue(event, 'tick', widget_renderer.tick)
+        if tick is None:
+            return
+
+        tick = min(max(tick, int(widget_renderer.start_tick)), int(widget_renderer.end_tick))
+        widget_renderer.GoToTick(tick)
 
     @property
     def frame(self):
