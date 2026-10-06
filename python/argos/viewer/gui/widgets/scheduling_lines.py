@@ -27,6 +27,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.tracked_annos = {}
         self.grid = None
         self._prev_current_cycle_col = None
+        self._detailed_pkt_tooltips = {}
         self.rasterizers = {}
         self.scalar_row_by_elem_path = {}
         self.scalar_elem_paths = set(frame.simhier.GetScalarStatsElemPaths()) | set(frame.simhier.GetScalarStructsElemPaths())
@@ -476,6 +477,7 @@ class SchedulingLinesWidget(wx.Panel):
         return str(value)
 
     def __RasterizeAllCells(self):
+        self._detailed_pkt_tooltips = {}
         if self.enable_tooltips and self._bad_path_rows:
             max_data_col = self.grid.GetNumberCols() - 1
             if self.show_detailed_queue_packets:
@@ -534,8 +536,7 @@ class SchedulingLinesWidget(wx.Panel):
                         self.grid.SetCellValue(row, detailed_pkt_col, text)
                         self.grid.SetCellAlignment(row, detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
                         self.grid.SetCellBackgroundColour(row, detailed_pkt_col, auto_color)
-                        if self.enable_tooltips:
-                            self.grid.SetCellToolTip(row, detailed_pkt_col, text)
+                        self._detailed_pkt_tooltips[row] = text
                 continue
 
             time_vals = vals['TimeVals']
@@ -812,10 +813,23 @@ class SchedulingLinesWidget(wx.Panel):
         else:
             tooltip = None
 
+        # The detailed packet column's text is only shown as a tooltip when the
+        # column is not entirely visible (scrolled out of view or clipped).
+        if in_bounds and self.show_detailed_queue_packets and col == self.num_samples_before + self.num_samples_after + 3:
+            if not self.__IsColumnFullyVisible(col):
+                tooltip = self._detailed_pkt_tooltips.get(row)
+
         if tooltip:
             self.grid.SetToolTip(tooltip)
         else:
             self.grid.UnsetToolTip()
+
+    def __IsColumnFullyVisible(self, col):
+        left = sum(self.grid.GetColSize(c) for c in range(col) if self.grid.IsColShown(c))
+        right = left + self.grid.GetColSize(col)
+        scrolled_left, _ = self.grid.CalcScrolledPosition(left, 0)
+        scrolled_right = scrolled_left + (right - left)
+        return scrolled_left >= 0 and scrolled_right <= self.grid.GetGridWindow().GetClientSize().width
 
     def __EditWidget(self, evt):
         widget_container = self.GetParent()
@@ -1057,5 +1071,6 @@ class Rasterizer:
             self.grid.SetCellValue(self.row, self.detailed_pkt_col, stringized_anno)
             self.grid.SetCellAlignment(self.row, self.detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
             self.grid.SetCellBackgroundColour(self.row, self.detailed_pkt_col, auto_color)
+            self.widget._detailed_pkt_tooltips[self.row] = stringized_tooltip
             if show_border:
                 self.grid.SetCellBorder(self.row, self.detailed_pkt_col, 1, wx.ALL)
