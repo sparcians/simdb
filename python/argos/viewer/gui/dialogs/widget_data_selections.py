@@ -250,7 +250,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         self.hier_tree = wx.TreeCtrl(self, style=tree_style)
 
         if not single_selection:
-            self.selections_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+            self.selections_list = wx.ListCtrl(self, style=wx.LC_REPORT)
             if self._editable_captions:
                 self.selections_list.InsertColumn(0, 'Current Selections', width=400)
                 self.selections_list.InsertColumn(1, 'Caption', width=150)
@@ -267,7 +267,8 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self.add_row_btn.Bind(wx.EVT_BUTTON, self.__OnAddNewRow)
 
             self.remove_row_btn = wx.Button(self, label='X', size=self.move_down_btn.GetSize())
-            self.remove_row_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveSelectedRow)
+            self.remove_row_btn.SetToolTip('Remove all selected rows')
+            self.remove_row_btn.Bind(wx.EVT_BUTTON, self.__OnRemoveSelectedRows)
 
         btn_sizer = wx.StdDialogButtonSizer()
         self.ok_btn = wx.Button(self, wx.ID_OK)
@@ -517,7 +518,7 @@ class WidgetDataSelectionsDlg(wx.Dialog):
 
         selected_rows = self.__GetListCtrlSelectedRows()
 
-        if len(selected_rows) == 1:
+        if selected_rows:
             self.remove_row_btn.Enable()
         else:
             self.remove_row_btn.Disable()
@@ -680,15 +681,15 @@ class WidgetDataSelectionsDlg(wx.Dialog):
         self.selections_list.EnsureVisible(idx)
         self.__BeginPathCellEdit(idx)
 
-    def __OnRemoveSelectedRow(self, evt):
+    def __OnRemoveSelectedRows(self, evt):
         self.__CommitCaptionEdit()
         self.__CommitPathEdit()
-
-        selected_rows = self.__GetListCtrlSelectedRows()
-        if len(selected_rows) != 1:
+        if self._path_edit_ctrl is not None:
             return
 
-        self.__RemoveListRow(selected_rows[0])
+        selected_rows = self.__GetListCtrlSelectedRows()
+        for item in reversed(selected_rows):
+            self.__RemoveListRow(item)
 
     def __BeginPathCellEdit(self, item):
         self.__CommitCaptionEdit()
@@ -784,6 +785,9 @@ class WidgetDataSelectionsDlg(wx.Dialog):
             self._selected_paths.remove(path)
         self._list_indices_by_path.pop(path, None)
         self.selections_list.DeleteItem(item)
+        for remaining_path, row in self._list_indices_by_path.items():
+            if row > item:
+                self._list_indices_by_path[remaining_path] = row - 1
         self.__UpdateButtonStates()
 
     @staticmethod
