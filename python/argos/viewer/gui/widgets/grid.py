@@ -23,6 +23,13 @@ class Grid(wx.grid.Grid):
 
         self.SetDefaultRenderer(self.renderer)
 
+        # Protect against weird UI settings for users that use dark mode.
+        for r in range(rows):
+            for c in range(cols):
+                wx.grid.Grid.SetCellTextColour(self, r, c, wx.WHITE)
+                wx.grid.Grid.SetCellBackgroundColour(self, r, c, wx.WHITE)
+                self.SetCellBackgroundColour(r, c, wx.WHITE)
+
     def SetCellValue(self, row, col, value, immediate_refresh=False):
         self.renderer.SetCellValue(row, col, value)
         if immediate_refresh:
