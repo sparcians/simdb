@@ -13,6 +13,17 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_SHOW_DID = False
     DEFAULT_MINIMIZE_GRID_CELLS = False
 
+    # Extra blank row appended below the real data rows, inside the grid's own
+    # scrollable area. Some platforms/themes intercept mouse-motion events near
+    # the bottom edge of a grid that needs horizontal (but not vertical)
+    # scrolling, in order to reveal a horizontal scrollbar on hover; that
+    # interception can otherwise swallow the hover events needed to show
+    # tooltips over the last row of data. A sizer-level spacer placed outside
+    # the grid does not help since it does not affect the grid's own bottom
+    # edge. Keeping this buffer inside the grid guarantees real separation
+    # regardless of whether the grid also happens to need vertical scrolling.
+    TOOLTIP_ROW_SPACER_HEIGHT = 20
+
     def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID, minimize_grid_cells=DEFAULT_MINIMIZE_GRID_CELLS):
         super().__init__(parent)
         self.frame = frame
@@ -303,11 +314,16 @@ class SchedulingLinesWidget(wx.Panel):
         if self.show_detailed_queue_packets:
             num_cols += 2
 
+        # Remember the real (data) row count; the grid itself gets one extra
+        # trailing row beyond this (see TOOLTIP_ROW_SPACER_HEIGHT above).
+        self._num_data_rows = num_rows
+        total_rows = num_rows + 1
+
         # A playback step only changes which cycle is "current"; reuse the existing
         # grid instead of destroying/recreating it unless its shape must change.
         needs_full_rebuild = (
             new_grid or self.grid is None or
-            self.grid.GetNumberRows() != num_rows or self.grid.GetNumberCols() != num_cols
+            self.grid.GetNumberRows() != total_rows or self.grid.GetNumberCols() != num_cols
         )
 
         # Create 8-point monospace font for the grid cells
@@ -325,7 +341,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.grid.Destroy()
             self._prev_current_cycle_col = None
 
-            self.grid = Grid(self, self.frame, num_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
+            self.grid = Grid(self, self.frame, total_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
             self.grid.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.__OnGridCellRightClick)
             self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
             self.grid.EnableGridLines(False)
@@ -465,7 +481,7 @@ class SchedulingLinesWidget(wx.Panel):
             for col in range(self.grid.GetNumberCols()):
                 self.__AddCellBorderSides(separator_row, col, wx.BOTTOM)
 
-        last_row = self.grid.GetNumberRows() - 1
+        last_row = self._num_data_rows - 1
         for col in range(self.grid.GetNumberCols()):
             self.__AddCellBorderSides(last_row, col, wx.BOTTOM)
 
@@ -589,7 +605,7 @@ class SchedulingLinesWidget(wx.Panel):
 
                 return ' ' + ' '.join(parts)
 
-            labels = [self.grid.GetCellValue(row,col).strip() for row in range(self.grid.GetNumberRows())]
+            labels = [self.grid.GetCellValue(row,col).strip() for row in range(self._num_data_rows)]
             labels = [label.replace('\t', ' ') for label in labels]
             labels_by_dtype = {}
             for row, dtype in self._struct_dtypes_by_row.items():
@@ -618,7 +634,7 @@ class SchedulingLinesWidget(wx.Panel):
                     label = f' {auto_label}{label}  '
                 self.grid.SetCellValue(row, col, label)
 
-        for row in range(self.grid.GetNumberRows()):
+        for row in range(self._num_data_rows):
             for col in range(1, self.grid.GetNumberCols()):
                 if self.grid.GetCellValue(row, col).strip() == '' and self.grid.GetCellBackgroundColour(row, col) == (255, 255, 255):
                     self.grid.SetCellBackgroundColour(row, col, (240,240,240))
@@ -627,6 +643,13 @@ class SchedulingLinesWidget(wx.Panel):
         if self.minimize_grid_cells:
             self.__SetMinimizedRowHeights()
             self.__SetMinimizedColWidths()
+
+        # AutoSize() (and the minimized-row-height logic above) size every row,
+        # including the trailing tooltip-buffer row, based on its (empty)
+        # content; pin it back to its intended height afterwards so it always
+        # provides enough hover room beneath the last real row of data.
+        self.grid.SetRowSize(self._num_data_rows, self.TOOLTIP_ROW_SPACER_HEIGHT)
+
         self.Layout()
         self.Update()
         self.Refresh()
