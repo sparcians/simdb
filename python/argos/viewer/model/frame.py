@@ -48,8 +48,6 @@ class ArgosFrame(wx.Frame):
         sizer.Add(self.inspector, 1, wx.EXPAND)
         sizer.Add(self.playback_bar, 0, wx.EXPAND)
         self.SetSizer(sizer)
-        self.Layout()
-        self.Maximize()
 
     def PostLoad(self, view_file):
         self.view_settings.PostLoad(self, view_file)
