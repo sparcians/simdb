@@ -1,4 +1,4 @@
-import wx, os
+import wx, os, sqlite3
 from viewer.model.frame import ArgosFrame
 from viewer.gui.view_settings import ViewSettings
 
@@ -6,6 +6,13 @@ class Workspace:
     def __init__(self, db_path, view_file, read_only=False):
         if not os.path.isfile(db_path):
             raise ValueError(f"Database file does not exist: {db_path}")
+
+        db = sqlite3.connect(db_path)
+        cursor = db.cursor()
+        cursor.execute('SELECT COUNT(*) FROM Timestamps')
+        if not cursor.fetchone()[0]:
+            raise RuntimeError(f"No data found in database: {db_path}")
+
         self._view_settings = ViewSettings(read_only=read_only)
         self._frame = ArgosFrame(db_path, self._view_settings)
         self._frame.PostLoad(view_file)
