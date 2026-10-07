@@ -721,11 +721,6 @@ class CaptionsEditDlg(wx.Dialog):
     def __init__(self, parent, custom_captions):
         super().__init__(parent, title='Edit Captions', size=(1000, 450))
 
-        self._preserved_captions = {
-            path: caption
-            for path, caption in custom_captions.items()
-            if self.__IsRangeKey(path)
-        }
         self._custom_captions = {}
         self._edit_ctrl = None
         self._edit_item = None
@@ -738,7 +733,7 @@ class CaptionsEditDlg(wx.Dialog):
         self.captions_list.InsertColumn(1, 'Caption', width=150)
 
         for path, caption in custom_captions.items():
-            if self.__IsRangeKey(path) or caption in (None, '', '<default>'):
+            if caption in (None, '', '<default>'):
                 continue
             item = self.captions_list.InsertItem(
                 self.captions_list.GetItemCount(), path,
@@ -776,9 +771,7 @@ class CaptionsEditDlg(wx.Dialog):
         self.__UpdateButtonStates()
 
     def GetCustomCaptions(self):
-        captions = dict(self._preserved_captions)
-        captions.update(self._custom_captions)
-        return captions
+        return dict(self._custom_captions)
 
     def __OnAddRow(self, evt):
         self.__CommitCellEdit()
@@ -871,7 +864,8 @@ class CaptionsEditDlg(wx.Dialog):
             if not self.__IsValidCaptionKey(path):
                 wx.MessageBox(
                     "'{}' is not a valid caption path. Use a dot-delimited path "
-                    "with an optional single bin, e.g. 'top.foo' or 'top.foo[4]'.".format(path),
+                    "with an optional single bin or bin range, e.g. 'top.foo', 'top.foo[4]', "
+                    "or 'top.foo[2-end]'.".format(path),
                     'Invalid Path', wx.OK | wx.ICON_ERROR,
                 )
                 return
@@ -891,16 +885,9 @@ class CaptionsEditDlg(wx.Dialog):
     def __UpdateButtonStates(self, *args):
         self.remove_btn.Enable(self.captions_list.GetFirstSelected() != wx.NOT_FOUND)
 
-    @staticmethod
-    def __IsRangeKey(path):
-        return re.search(r'\[\d+-\d+\]$', path) is not None
-
     @classmethod
     def __IsValidCaptionKey(cls, path):
-        if cls.__IsRangeKey(path):
-            return False
-
-        base_path = re.sub(r'\[\d+\]$', '', path)
+        base_path = re.sub(r'\[\d+(-(\d+|end))?\]$', '', path)
         if '[' in base_path or ']' in base_path:
             return False
         return bool(base_path) and all(base_path.split('.'))
@@ -1114,4 +1101,12 @@ That will leave only this in the widget:
 
     Fiz
     Buz
+
+To hide or caption several bins at once without knowing the queue's capacity, use a bin range. The range end may be a number or "end" (the last bin):
+
+    top.cpu.core0.foo.bar[2-end] -> "<hide>"
+    top.cpu.core0.foo.bar[2-5] -> "<hide>"
+    top.cpu.core0.foo.bar[2-end] -> "FooBar"
+
+The last one shows the bins as "FooBar[3]", "FooBar[2]", keeping each bin's index. A caption for a single bin always wins over a range, and if several ranges cover a bin, the one with the highest start index wins.
 """

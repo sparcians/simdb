@@ -754,7 +754,10 @@ class SchedulingLinesWidget(wx.Panel):
         if segment['kind'] != 'bin':
             return False
         segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
-        return self.caption_mgr.GetCustomCaption(segment_key) == '<hide>'
+        caption = self.caption_mgr.GetCustomCaption(segment_key)
+        if caption is None:
+            caption = self.caption_mgr.GetRangeCaption(elem_path, segment['bin'])
+        return caption == '<hide>'
 
     def __FormatSegmentCaption(self, elem_path, segment, elem_paths=None):
         if elem_paths is None:
@@ -764,6 +767,11 @@ class SchedulingLinesWidget(wx.Panel):
         custom_caption = self.caption_mgr.GetCustomCaption(segment_key)
         if custom_caption is not None:
             return custom_caption
+
+        if segment['kind'] == 'bin':
+            range_caption = self.caption_mgr.GetRangeCaption(elem_path, segment['bin'])
+            if range_caption is not None:
+                return '{}[{}]'.format(range_caption, segment['bin'])
 
         if segment['kind'] == 'scalar':
             return self.caption_mgr.GetCaptionPrefix(elem_path)
@@ -927,6 +935,26 @@ class CaptionManager:
         if is_scalar:
             return prefix
         return f'{prefix}[{bin_idx}]'
+
+    def GetRangeCaption(self, elem_path, bin_idx):
+        """Returns the caption of a range key like "path[2-end]" or "path[2-5]"
+        covering bin_idx, or None. "end" means up to the queue's last bin. If
+        several ranges cover the bin, the one starting closest to it wins."""
+        range_key_regex = re.compile(re.escape(elem_path) + r'\[(\d+)-(\d+|end)\]$')
+        best_first = -1
+        best_caption = None
+        for key, caption in self.custom_captions.items():
+            match = range_key_regex.match(key)
+            if not match:
+                continue
+            first = int(match.group(1))
+            last = match.group(2)
+            if first > bin_idx or (last != 'end' and bin_idx > int(last)):
+                continue
+            if first > best_first:
+                best_first = first
+                best_caption = caption
+        return best_caption
 
     def GetCaptionPrefix(self, elem_path):
         # Check custom container-level caption first
