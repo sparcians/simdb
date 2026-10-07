@@ -22,7 +22,7 @@ class SchedulingLinesWidget(wx.Panel):
     # the grid does not help since it does not affect the grid's own bottom
     # edge. Keeping this buffer inside the grid guarantees real separation
     # regardless of whether the grid also happens to need vertical scrolling.
-    TOOLTIP_ROW_SPACER_HEIGHT = 20
+    TOOLTIP_ROW_SPACER_HEIGHT = 5
 
     def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID, minimize_grid_cells=DEFAULT_MINIMIZE_GRID_CELLS):
         super().__init__(parent)
@@ -419,7 +419,6 @@ class SchedulingLinesWidget(wx.Panel):
                 self.SetSizer(sizer)
 
             sizer.Add(self.grid, 0, wx.EXPAND)
-            sizer.AddSpacer(5)
 
             # Mark the data cells of rows for unrecognized ("bad") paths with an X
             # rather than trying to rasterize data that doesn't exist.
