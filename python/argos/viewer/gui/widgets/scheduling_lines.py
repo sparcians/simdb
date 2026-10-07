@@ -220,7 +220,12 @@ class SchedulingLinesWidget(wx.Panel):
                         if not self.__IsSegmentHidden(elem_path, segment)
                     ]
                 else:
-                    self._layouts_by_elem_path[elem_path] = [{'kind': 'bad_path'}]
+                    layout = self.__BuildUncollectedLayout(elem_path)
+                    self._layouts_by_elem_path[elem_path] = [
+                        segment
+                        for segment in layout
+                        if not self.__IsSegmentHidden(elem_path, segment)
+                    ]
 
             try:
                 self.Freeze()
@@ -745,13 +750,25 @@ class SchedulingLinesWidget(wx.Panel):
             if match and int(match.group(1)) < num_bins:
                 bin_indices.add(int(match.group(1)))
 
+        # Bins in a "<fixed>" range are always shown too.
+        bin_indices |= self.caption_mgr.GetFixedBins(elem_path, num_bins)
+
         if not bin_indices:
             return [{'kind': 'no_data'}]
 
         return [{'kind': 'bin', 'bin': bin_idx} for bin_idx in sorted(bin_indices, reverse=True)]
 
+    def __BuildUncollectedLayout(self, elem_path):
+        # The path was never collected, so only bins marked "<fixed>" are shown
+        # (as hatched rows). Without any, a single hatched row stands in for the path.
+        fixed_bins = self.caption_mgr.GetFixedBins(elem_path)
+        if not fixed_bins:
+            return [{'kind': 'bad_path'}]
+
+        return [{'kind': 'bad_path', 'bin': bin_idx} for bin_idx in sorted(fixed_bins, reverse=True)]
+
     def __IsSegmentHidden(self, elem_path, segment):
-        if segment['kind'] != 'bin':
+        if 'bin' not in segment:
             return False
         segment_key = self.__SegmentElemPathTooltip(elem_path, segment)
         caption = self.caption_mgr.GetCustomCaption(segment_key)
@@ -768,18 +785,15 @@ class SchedulingLinesWidget(wx.Panel):
         if custom_caption is not None:
             return custom_caption
 
-        if segment['kind'] == 'bin':
+        if 'bin' in segment:
             range_caption = self.caption_mgr.GetRangeCaption(elem_path, segment['bin'])
             if range_caption is not None:
                 return '{}[{}]'.format(range_caption, segment['bin'])
+            return self.caption_mgr.GetCaption(elem_path, segment['bin'])
 
-        if segment['kind'] == 'scalar':
-            return self.caption_mgr.GetCaptionPrefix(elem_path)
         if segment['kind'] == 'no_data':
             return '{}(no data)'.format(self.caption_mgr.GetCaptionPrefix(elem_path))
-        if segment['kind'] == 'bad_path':
-            return self.caption_mgr.GetCaptionPrefix(elem_path)
-        return self.caption_mgr.GetCaption(elem_path, segment['bin'])
+        return self.caption_mgr.GetCaptionPrefix(elem_path)
 
     def __GetDisplayedElemPaths(self):
         regexes = self.caption_mgr.GetElemPathRegexReplacements(as_list=True)
@@ -796,9 +810,7 @@ class SchedulingLinesWidget(wx.Panel):
         return None
 
     def __SegmentElemPathTooltip(self, elem_path, segment):
-        if segment['kind'] == 'scalar':
-            return elem_path
-        if segment['kind'] in ('no_data', 'bad_path'):
+        if 'bin' not in segment:
             return elem_path
         return '{}[{}]'.format(elem_path, segment['bin'])
 
@@ -845,6 +857,7 @@ class SchedulingLinesWidget(wx.Panel):
 
 class CaptionManager:
     MINIMUM_CAPTION_PATH_PARTS = 2
+    FIXED_FLAG_REGEX = re.compile(r'\s*,\s*<fixed>\s*$')
 
     def __init__(self, simhier):
         self.simhier = simhier
@@ -893,8 +906,45 @@ class CaptionManager:
         for k in keys_to_remove:
             self.custom_captions.pop(k, None)
 
+    @classmethod
+    def SplitFixedFlag(cls, caption):
+        """Splits "P0, <fixed>" into ("P0", True). <fixed> means the bin is always
+        shown with this caption, even if its data was never collected."""
+        match = cls.FIXED_FLAG_REGEX.search(caption)
+        if match:
+            return caption[:match.start()], True
+        return caption, False
+
     def GetCustomCaption(self, segment_key):
-        return self.custom_captions.get(segment_key)
+        caption = self.custom_captions.get(segment_key)
+        if caption is None:
+            return None
+        return self.SplitFixedFlag(caption)[0]
+
+    def GetFixedBins(self, elem_path, num_bins=None):
+        """Returns the bins of elem_path marked "<fixed>" by a key like "path[1]" or
+        "path[2-5]". Ranges ending in "end" need num_bins to be expanded. If num_bins
+        is given, only bins below it are returned."""
+        key_regex = re.compile(re.escape(elem_path) + r'\[(\d+)(?:-(\d+|end))?\]$')
+        fixed_bins = set()
+        for key, caption in self.custom_captions.items():
+            match = key_regex.match(key)
+            if not match or not self.SplitFixedFlag(caption)[1]:
+                continue
+            first = int(match.group(1))
+            last = match.group(2)
+            if last is None:
+                last = first
+            elif last == 'end':
+                if num_bins is None:
+                    continue
+                last = num_bins - 1
+            else:
+                last = int(last)
+            if num_bins is not None:
+                last = min(last, num_bins - 1)
+            fixed_bins.update(range(first, last + 1))
+        return fixed_bins
 
     def GetCustomCaptions(self):
         return copy.deepcopy(self.custom_captions)
@@ -953,7 +1003,7 @@ class CaptionManager:
                 continue
             if first > best_first:
                 best_first = first
-                best_caption = caption
+                best_caption = self.SplitFixedFlag(caption)[0]
         return best_caption
 
     def GetCaptionPrefix(self, elem_path):

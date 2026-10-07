@@ -1109,4 +1109,12 @@ To hide or caption several bins at once without knowing the queue's capacity, us
     top.cpu.core0.foo.bar[2-end] -> "FooBar"
 
 The last one shows the bins as "FooBar[3]", "FooBar[2]", keeping each bin's index. A caption for a single bin always wins over a range, and if several ranges cover a bin, the one with the highest start index wins.
+
+By default, bins whose data was never collected are not shown (and a path that was never collected at all is shown as a single hatched row). To always show specific bins with their custom caption anyway, append ", <fixed>" to the caption:
+
+    top.cpu.core0.foo.bar[0] -> "P0, <fixed>"
+    top.cpu.core0.foo.bar[1] -> "P1, <fixed>"
+    top.cpu.core0.foo.bar[2-end] -> "<hide>"
+
+If "top.cpu.core0.foo.bar" was never collected, this shows the "P1" and "P0" rows hatched, with the tooltip "top.cpu.core0.foo.bar not in <database>". Bin ranges can be fixed too (e.g. "[0-3]"), though a range ending in "end" needs the queue to have been collected.
 """
