@@ -15,9 +15,19 @@ class Workspace:
 
         self._view_settings = ViewSettings(read_only=read_only)
         self._frame = ArgosFrame(db_path, self._view_settings)
-        self._frame.PostLoad(view_file)
-        self._frame.Show()
         self._frame.Bind(wx.EVT_CLOSE, self.__OnCloseFrame)
+
+        wx.CallAfter(self.__DoPostLoad, view_file)
+
+    def __DoPostLoad(self, view_file):
+        try:
+            self._frame.Freeze()
+            self._frame.Maximize()
+            self._frame.PostLoad(view_file)
+            self._frame.Show()
+        finally:
+            if self._frame.IsFrozen():
+                self._frame.Thaw()
 
     def __OnCloseFrame(self, event):
         if self._view_settings.OnFrameClosing():
