@@ -3,8 +3,9 @@
 
 TEST_INIT;
 
-/// This file bashing concurrent use of DatabaseManager::safeTransaction()
-/// for DB access safety (locked tables etc. should not be a show-stopper).
+/// This test bashes concurrent use of DatabaseManager::safeTransaction/INSERT
+/// for DB access safety (locked tables etc. should not be a show-stopper and
+/// should be able to recover).
 
 void initSchema(simdb::DatabaseManager& db_mgr)
 {
