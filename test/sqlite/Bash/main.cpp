@@ -1,5 +1,5 @@
-#include "simdb/sqlite/DatabaseManager.hpp"
 #include "SimDBTester.hpp"
+#include "simdb/sqlite/DatabaseManager.hpp"
 
 TEST_INIT;
 
@@ -22,14 +22,14 @@ void initSchema(simdb::DatabaseManager& db_mgr)
 class Runner
 {
 public:
-    Runner(simdb::DatabaseManager& db_mgr) : db_mgr_(db_mgr) {}
-    Runner(const Runner&) = default;
+    Runner(simdb::DatabaseManager& db_mgr) :
+        db_mgr_(db_mgr)
+    {
+    }
+    Runner(const Runner&) = delete;
     Runner(Runner&&) = default;
 
-    ~Runner()
-    {
-        close();
-    }
+    ~Runner() { close(); }
 
     void open()
     {
@@ -53,10 +53,7 @@ public:
         }
     }
 
-    void setNextSleepTime(size_t ms)
-    {
-        next_sleep_ms_ = ms;
-    }
+    void setNextSleepTime(size_t ms) { next_sleep_ms_ = ms; }
 
 private:
     void loop_()
@@ -74,15 +71,10 @@ private:
         static const std::array<uint32_t, 10000> array{0};
         const simdb::SqlBlob blob(array);
 
-        db_mgr_.INSERT(
-            SQL_TABLE("AllTheData"),
-            SQL_VALUES(string, blob));
+        db_mgr_.INSERT(SQL_TABLE("AllTheData"), SQL_VALUES(string, blob));
     }
 
-    void sleep_() const
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(next_sleep_ms_));
-    }
+    void sleep_() const { std::this_thread::sleep_for(std::chrono::milliseconds(next_sleep_ms_)); }
 
     simdb::DatabaseManager& db_mgr_;
     std::unique_ptr<std::thread> thread_;

@@ -36,7 +36,7 @@ struct SqlBlob
 
     /// Construct from a contiguous array.
     template <typename T, size_t N>
-    SqlBlob(const std::array<T,N>& vals) :
+    SqlBlob(const std::array<T, N>& vals) :
         data_ptr(vals.data()),
         num_bytes(N * sizeof(T))
     {
