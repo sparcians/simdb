@@ -40,6 +40,10 @@ inline PragmaPairs getPragmas(JournalMode mode)
     case JournalMode::BALANCED:
         return {{"journal_mode", "WAL"}, {"synchronous", "NORMAL"}};
     }
+
+    // Unreachable
+    assert(false);
+    return {};
 }
 
 /*!
