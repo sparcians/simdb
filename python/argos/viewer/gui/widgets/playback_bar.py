@@ -1,4 +1,5 @@
 import wx
+from viewer.gui.widgets.button import CreateButton
 from functools import partial
 
 class ClockPopup(wx.ComboPopup):
@@ -103,14 +104,21 @@ class PlaybackBar(wx.Panel):
         self.current_cyc_text.Bind(wx.EVT_LEFT_UP, self.__GoToExactCycle)
         self.current_tick_text.Bind(wx.EVT_LEFT_UP, self.__GoToExactTick)
 
-        self.minus_30_button = wx.Button(self, label='-30')
-        self.minus_10_button = wx.Button(self, label='-10')
-        self.minus_3_button = wx.Button(self, label='-3')
-        self.minus_1_button = wx.Button(self, label='-1')
-        self.plus_1_button = wx.Button(self, label='+1')
-        self.plus_3_button = wx.Button(self, label='+3')
-        self.plus_10_button = wx.Button(self, label='+10')
-        self.plus_30_button = wx.Button(self, label='+30')
+        self.minus_30_button = CreateButton(self, label='-30')
+        self.minus_10_button = CreateButton(self, label='-10')
+        self.minus_3_button = CreateButton(self, label='-3')
+        self.minus_1_button = CreateButton(self, label='-1')
+        self.plus_1_button = CreateButton(self, label='+1')
+        self.plus_3_button = CreateButton(self, label='+3')
+        self.plus_10_button = CreateButton(self, label='+10')
+        self.plus_30_button = CreateButton(self, label='+30')
+
+        # Protect against dark mode by forcing the above buttons to use
+        # the right colors.
+        for btn in [self.minus_30_button, self.minus_10_button, self.minus_3_button, self.minus_1_button, \
+                    self.plus_1_button, self.plus_3_button, self.plus_10_button, self.plus_30_button]:
+            btn.SetForegroundColour(wx.BLACK)
+            btn.SetBackgroundColour(wx.WHITE)
 
         self.cyc_slider = wx.Slider(self, minValue=widget_renderer.start_tick, maxValue=widget_renderer.end_tick, style=wx.SL_HORIZONTAL)
 

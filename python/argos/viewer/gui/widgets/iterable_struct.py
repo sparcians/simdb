@@ -2,6 +2,8 @@ import wx, wx.grid
 from collections.abc import Iterable
 from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
+from viewer.gui.widgets.grid import Grid
+from viewer.gui.widgets.static_text import DefaultStaticText
 
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
@@ -18,21 +20,15 @@ class IterableStruct(wx.Panel):
             num_cols -= 1
         assert len(all_field_names) > 0
 
-        self.grid = wx.grid.Grid(self)
-        self.grid.CreateGrid(num_rows, num_cols, wx.grid.Grid.GridSelectNone)
-        self.grid.EnableEditing(False)
-        self.grid.SetLabelBackgroundColour('white')
-        self.__SyncGridViewSettings()
-
         mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        self.grid.SetDefaultCellFont(mono10)
-        self.grid.SetLabelFont(mono10)
+        self.grid = Grid(self, frame, num_rows, num_cols, cell_font=mono10, label_font=mono10, cell_selection_allowed=False)
+        self.__SyncGridViewSettings()
 
         for i in range(self.capacity):
             self.grid.SetRowLabelValue(i, str(i))
 
         self.utiliz_elem = UtilizElement(self, frame, self.capacity)
-        location_elem = wx.StaticText(self, label=elem_path)
+        location_elem = DefaultStaticText(self, label=elem_path)
         BindCopyPathMenu(location_elem, elem_path)
 
         font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
@@ -170,7 +166,7 @@ class IterableStruct(wx.Panel):
             widget = IterableStruct(widget_container, self.frame, selected)
             widget_container.SetWidget(widget)
 
-class UtilizElement(wx.StaticText):
+class UtilizElement(DefaultStaticText):
     def __init__(self, parent, frame, capacity):
         super().__init__(parent)
         self.frame = frame

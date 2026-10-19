@@ -5,6 +5,7 @@ from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
 from viewer.gui.widgets.scheduling_lines import CaptionManager
+from viewer.gui.widgets.static_text import DefaultStaticText
 
 class SummaryViews(wx.Panel):
     DEFAULT_SHOW_FULL_PATHS = True
@@ -205,7 +206,7 @@ class SummaryGrid(wx.Panel):
                 parent_label_text = parent
             else:
                 parent_label_text = CaptionManager.GetMinimumUniqueSuffix(parent, parent_paths)
-            parent_label = wx.StaticText(self, label=parent_label_text)
+            parent_label = DefaultStaticText(self, label=parent_label_text)
             parent_label.SetFont(mono10_bold)
             CaptionManager.ApplyPartialPathTooltip(
                 parent_label, parent, parent_label_text, summary_views.show_full_paths)
@@ -220,7 +221,7 @@ class SummaryGrid(wx.Panel):
                 else:
                     label = ''
                 label += leaf
-                leaf_label = wx.StaticText(self, label=label)
+                leaf_label = DefaultStaticText(self, label=label)
                 BindCopyPathMenu(leaf_label, full_path)
                 leaf_label.SetFont(mono10)
                 CaptionManager.ApplyPartialPathTooltip(
@@ -267,17 +268,17 @@ class SummaryGrid(wx.Panel):
 
             handler.UpdateValue(value)
 
-    class SimpleSummary(wx.StaticText):
+    class SimpleSummary(DefaultStaticText):
         def __init__(self, parent, frame):
-            wx.StaticText.__init__(self, parent, label='TODO')
+            DefaultStaticText.__init__(self, parent, label='TODO')
             self.frame = frame
 
         def UpdateValue(self, value):
             self.SetLabel(str(value))
 
-    class IntegerSummary(wx.StaticText):
+    class IntegerSummary(DefaultStaticText):
         def __init__(self, parent, frame):
-            wx.StaticText.__init__(self, parent, label='TODO')
+            DefaultStaticText.__init__(self, parent, label='TODO')
             self.frame = frame
             self.hex = False
 
@@ -287,9 +288,9 @@ class SummaryGrid(wx.Panel):
                 value = hex(value)
             self.SetLabel(value)
 
-    class StructSummary(wx.StaticText):
+    class StructSummary(DefaultStaticText):
         def __init__(self, parent, frame, summary_views):
-            wx.StaticText.__init__(self, parent, label='TODO')
+            DefaultStaticText.__init__(self, parent, label='TODO')
             self.frame = frame
             self.summary_views = summary_views
             self.auto_color = True
@@ -313,9 +314,9 @@ class SummaryGrid(wx.Panel):
         def __HandleContextMenu(self, evt, auto_color):
             self.auto_color = auto_color
 
-    class ContainerSummary(wx.StaticText):
+    class ContainerSummary(DefaultStaticText):
         def __init__(self, parent, frame, capacity):
-            wx.StaticText.__init__(self, parent, label='TODO')
+            DefaultStaticText.__init__(self, parent, label='TODO')
             self.frame = frame
             self.capacity = capacity
             assert self.capacity > 0

@@ -3,6 +3,7 @@ from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.dialogs.widget_data_selections import QueueUtilizEditDlg
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.scheduling_lines import CaptionManager
+from viewer.gui.widgets.static_text import DefaultStaticText
 
 class QueueUtilizWidget(wx.Panel):
     DEFAULT_SHOW_FULL_PATHS = False
@@ -123,7 +124,7 @@ class QueueUtilizWidget(wx.Panel):
         self._elem_path_text_boxes = []
         for elem_path in self.container_elem_paths:
             label_text = self.__FormatElemPathLabel(elem_path)
-            label_ctrl = wx.StaticText(self.panel, label=label_text)
+            label_ctrl = DefaultStaticText(self.panel, label=label_text)
             BindCopyPathMenu(label_ctrl, elem_path)
             CaptionManager.ApplyPartialPathTooltip(
                 label_ctrl, elem_path, label_text, self.show_full_paths)
@@ -150,7 +151,7 @@ class UtilizBar(wx.Panel):
         self.frame = frame
         self.elem_path = elem_path
         self.capacity = frame.simhier.GetCapacityByElemPath(elem_path)
-        self.static_text = wx.StaticText(self, label='0%')
+        self.static_text = DefaultStaticText(self, label='0%')
         font = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         self.static_text.SetFont(font)
 
