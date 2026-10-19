@@ -9,7 +9,11 @@ class Grid(wx.grid.Grid):
         if label_font:
             self.SetLabelFont(label_font)
 
-        self.CreateGrid(rows, cols)
+        if cell_selection_allowed:
+            self.CreateGrid(rows, cols)
+        else:
+            self.CreateGrid(rows, cols, wx.grid.Grid.GridSelectNone)
+
         self.EnableEditing(False)
         self.DisableDragColMove()
         self.DisableDragColSize()
@@ -24,11 +28,10 @@ class Grid(wx.grid.Grid):
         self.SetDefaultRenderer(self.renderer)
 
         # Protect against weird UI settings for users that use dark mode.
-        for r in range(rows):
-            for c in range(cols):
-                wx.grid.Grid.SetCellTextColour(self, r, c, wx.WHITE)
-                wx.grid.Grid.SetCellBackgroundColour(self, r, c, wx.WHITE)
-                self.SetCellBackgroundColour(r, c, wx.WHITE)
+        self.SetDefaultCellTextColour(wx.BLACK)
+        self.SetDefaultCellBackgroundColour(wx.WHITE)
+        self.SetLabelTextColour(wx.BLACK)
+        self.SetLabelBackgroundColour(wx.WHITE)
 
     def SetCellValue(self, row, col, value, immediate_refresh=False):
         self.renderer.SetCellValue(row, col, value)
@@ -258,6 +261,7 @@ class GridCell:
 
         if self.text:
             dc.SetFont(self.font)
+            dc.SetTextForeground(wx.BLACK)
             if self.use_padding:
                 dc.DrawLabel(self.text, rect, self.text_alignment)
             else:

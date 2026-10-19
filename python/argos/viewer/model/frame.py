@@ -10,6 +10,7 @@ from viewer.model.dtype_inspector import DataTypeInspector
 from viewer.model.simhier import SimHierarchy
 from viewer.gui.widgets.splitter_window import DirtySplitterWindow
 from viewer.gui.view_settings import DirtyReasons
+from viewer.gui.widgets.button import CreateButton
 
 class ArgosFrame(wx.Frame):
     def __init__(self, db_path, view_settings):
@@ -96,8 +97,10 @@ class ArgosFrame(wx.Frame):
 
     def CreateWidgetStandardButtons(self, widget, settings_callback, settings_tooltip):
         std_size = (36,22)
+        def CreateTheButton(label):
+            return CreateButton(widget, label=label, size=std_size)
 
-        settings_btn = wx.Button(widget, label=">>", size=std_size)
+        settings_btn = CreateTheButton(">>")
         settings_btn.Bind(wx.EVT_BUTTON, settings_callback)
         settings_btn.SetToolTip(settings_tooltip)
 
@@ -108,7 +111,7 @@ class ArgosFrame(wx.Frame):
             else:
                 ClearWidget(evt, widget.GetParent())
 
-        clear_btn = wx.Button(widget, label="X", size=std_size)
+        clear_btn = CreateTheButton("X")
         clear_btn.Bind(wx.EVT_BUTTON, partial(ClearWidget, widget=widget))
         clear_btn.SetToolTip("Clear widget")
 
@@ -120,15 +123,15 @@ class ArgosFrame(wx.Frame):
         splitters = []
         canvas_grid.AddQuickLinks(splitters)
 
-        split_lr = wx.Button(widget, label="|", size=std_size)
+        split_lr = CreateTheButton("|")
         split_lr.Bind(wx.EVT_BUTTON, splitters[0][1])
         split_lr.SetToolTip("Split left/right")
 
-        split_tb = wx.Button(widget, label="-", size=std_size)
+        split_tb = CreateTheButton("-")
         split_tb.Bind(wx.EVT_BUTTON, splitters[1][1])
         split_tb.SetToolTip("Split top/bottom")
 
-        maximize_btn = wx.Button(widget, label="@", size=std_size)
+        maximize_btn = CreateTheButton("@")
         maximize_btn.Bind(wx.EVT_BUTTON, splitters[2][1])
         maximize_btn.SetToolTip("Clear all widgets except this one")
 
