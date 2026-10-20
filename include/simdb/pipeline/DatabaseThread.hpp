@@ -67,7 +67,7 @@ private:
 
         std::error_code ec;
         int64_t starting_db_bytes = std::filesystem::file_size(db_mgr_->getDatabaseFilePath(), ec);
-        bool perf_good = static_cast<bool>(ec);
+        bool perf_good = !static_cast<bool>(ec);
 
         // Put all runnables (AsyncDbWriters) in a BEGIN/COMMIT block
         // for fastest insert performance.
@@ -106,7 +106,7 @@ private:
         if (perf_good && did_work)
         {
             int64_t current_db_bytes = std::filesystem::file_size(db_mgr_->getDatabaseFilePath(), ec);
-            perf_good &= static_cast<bool>(ec);
+            perf_good &= !static_cast<bool>(ec);
             if (perf_good)
             {
                 recordTransaction_(starting_db_bytes, current_db_bytes);
