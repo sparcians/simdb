@@ -40,6 +40,19 @@ public:
     /// \brief Return the AsyncDatabaseAccessor for submitting work to this thread.
     AsyncDatabaseAccessor* getAsyncDatabaseAccessor() { return &db_accessor_; }
 
+    /// \brief Print a performance report (sleep vs work %) for this thread.
+    /// Also append DB-thread-specific perf numbers.
+    bool printPerfReport() const noexcept override final
+    {
+        auto printed = PollingThread::printPerfReport();
+        if (printed && db_perf_report_.largest_file_change)
+        {
+            std::cout << "        Num committed transactions:  " << db_perf_report_.transactions_issued << "\n";
+            std::cout << "        Largest transaction change:  " << *db_perf_report_.largest_file_change << " bytes\n";
+        }
+        return printed;
+    }
+
 private:
     /// Overridden from AsyncDatabaseAccessHandler
     void eval(AsyncDatabaseTaskPtr&& task, double timeout_seconds = 0) override final
@@ -51,6 +64,10 @@ private:
     bool run_(bool force) override final
     {
         bool did_work = false;
+
+        std::error_code ec;
+        int64_t starting_db_bytes = std::filesystem::file_size(db_mgr_->getDatabaseFilePath(), ec);
+        bool perf_good = static_cast<bool>(ec);
 
         // Put all runnables (AsyncDbWriters) in a BEGIN/COMMIT block
         // for fastest insert performance.
@@ -85,6 +102,16 @@ private:
                 did_work |= continue_while;
             } while (continue_while);
         });
+
+        if (perf_good && did_work)
+        {
+            int64_t current_db_bytes = std::filesystem::file_size(db_mgr_->getDatabaseFilePath(), ec);
+            perf_good &= static_cast<bool>(ec);
+            if (perf_good)
+            {
+                recordTransaction_(starting_db_bytes, current_db_bytes);
+            }
+        }
 
         return did_work;
     }
@@ -237,6 +264,22 @@ private:
     AsyncDatabaseAccessor db_accessor_{this};
     std::vector<Runnable*> polling_runnables_;
     DormantThread dormant_thread_;
+
+    struct DbPerfReport
+    {
+        uint64_t transactions_issued = 0;
+        std::optional<int64_t> largest_file_change;
+    } db_perf_report_;
+
+    void recordTransaction_(int64_t prev_bytes, int64_t curr_bytes)
+    {
+        ++db_perf_report_.transactions_issued;
+        const auto delta = curr_bytes - prev_bytes;
+        if (!db_perf_report_.largest_file_change || std::abs(delta) > std::abs(*db_perf_report_.largest_file_change))
+        {
+            db_perf_report_.largest_file_change = delta;
+        }
+    }
 };
 
 } // namespace simdb::pipeline

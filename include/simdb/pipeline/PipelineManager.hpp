@@ -188,8 +188,10 @@ public:
 
         auto close_thread = [&](PollingThread* thread) {
             thread->close();
-            thread->printPerfReport();
-            std::cout << "\n\n";
+            if (thread->printPerfReport())
+            {
+                std::cout << "\n\n";
+            }
         };
 
         auto it = polling_threads_.begin();
