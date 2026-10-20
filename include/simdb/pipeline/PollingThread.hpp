@@ -175,16 +175,16 @@ public:
     }
 
     /// \brief Print a performance report (sleep vs work %) for this thread.
-    void printPerfReport() const noexcept
+    virtual bool printPerfReport() const noexcept
     {
         if (runnables_.empty())
         {
-            return;
+            return false;
         }
 
         if (is_running_)
         {
-            return;
+            return false;
         }
 
         const auto pct_time_sleeping = getSleepPct();
@@ -199,10 +199,10 @@ public:
         [[maybe_unused]] ios_format_saver fmt_saver(std::cout);
         std::cout << "\n";
         std::cout << "    Performance report:\n";
-        std::cout << "        Num times run:      " << num_times_run_ << "\n";
         std::cout << "        Pct time sleeping:  " << std::fixed << std::setprecision(1) << pct_time_sleeping << "%\n";
         std::cout << "        Pct time working:   " << std::fixed << std::setprecision(1) << pct_time_working << "%\n";
-        std::cout << "\n";
+
+        return true;
     }
 
     double getSleepPct() const
@@ -250,9 +250,6 @@ private:
                 auto sleep_end = std::chrono::high_resolution_clock::now();
                 auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(sleep_end - sleep_start);
                 total_sleep_seconds_ += duration_us.count() / 1'000'000.0;
-            } else
-            {
-                ++num_times_run_;
             }
         }
 
@@ -304,7 +301,6 @@ private:
     bool has_pending_pause_ack_ = false;
 
     std::chrono::high_resolution_clock::time_point start_;
-    uint64_t num_times_run_ = 0;
     double total_sleep_seconds_ = 0;
 };
 
