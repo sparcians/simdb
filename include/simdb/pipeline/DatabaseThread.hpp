@@ -275,8 +275,7 @@ private:
     {
         ++db_perf_report_.transactions_issued;
         const auto delta = curr_bytes - prev_bytes;
-        if (!db_perf_report_.largest_file_change ||
-            std::abs(delta) > std::abs(*db_perf_report_.largest_file_change))
+        if (!db_perf_report_.largest_file_change || std::abs(delta) > std::abs(*db_perf_report_.largest_file_change))
         {
             db_perf_report_.largest_file_change = delta;
         }
