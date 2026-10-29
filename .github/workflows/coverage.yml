@@ -1,0 +1,108 @@
+name: SimDB coverage
+
+# Runs only after a PR is merged into main (or manually). Per-directory coverage
+# badges are written as shields.io endpoint JSON to a Gist, which the README
+# embeds. Nothing is committed to the repository.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Serialize runs so back-to-back merges cannot race on the Gist update.
+concurrency:
+  group: coverage-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Update coverage badges
+    if: github.repository == 'sparcians/simdb'
+    runs-on: ubuntu-24.04
+
+    env:
+      SIMDB_BUILD_TYPE: Debug
+      COMPILER: gcc-14
+      SIMDB_CMAKE_ARGS: -DSIMDB_COVERAGE=ON
+      GIST_ID: e504a32344a75ab5b683a0da2176f820
+
+    steps:
+      - name: Clone SimDB
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install packages needed for SimDB
+        run: |
+          sudo apt-get update --fix-missing
+          sudo apt-get install -y libboost-all-dev sqlite3 libsqlite3-dev g++-14
+          python3 -m pip install gcovr
+
+      - name: CMake
+        run: ./.github/actions/cmake.sh
+
+      - name: Regress (instrumented)
+        run: |
+          cd ${GITHUB_WORKSPACE}/${SIMDB_BUILD_TYPE}
+          make -j$(nproc) simdb_regress
+
+      - name: Generate coverage reports
+        run: |
+          mkdir -p coverage-html
+          gcovr --gcov-executable gcov-14 \
+                --root . --filter 'include/simdb/' \
+                --exclude-throw-branches --exclude-unreachable-branches \
+                --json-summary cov.json --json-summary-pretty \
+                --html-nested coverage-html/index.html \
+                ${SIMDB_BUILD_TYPE}
+
+      # Published to GitHub Pages by the deploy job below
+      - name: Upload full HTML report
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: coverage-html/
+
+      - name: Generate badge files
+        run: python3 scripts/coverage-report.py cov.json --out-dir badges
+
+      # Requires the GIST_TOKEN repo secret (PAT with the "gist" scope)
+      - name: Publish badges to Gist
+        if: github.ref == 'refs/heads/main'
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${GIST_TOKEN}@gist.github.com/${GIST_ID}.git" gist
+          cp badges/*.json gist/
+          cd gist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Badges unchanged"
+            exit 0
+          fi
+          git commit -m "Update SimDB coverage badges (${GITHUB_SHA})"
+          git push
+
+  deploy-report:
+    name: Publish HTML report to GitHub Pages
+    needs: coverage
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
