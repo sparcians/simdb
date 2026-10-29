@@ -28,6 +28,18 @@ if(SIMDB_PEDANTIC)
     )
 endif()
 
+option(SIMDB_COVERAGE "Instrument tests and examples for gcov code coverage (GCC only)" OFF)
+
+if(SIMDB_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "SIMDB_COVERAGE requires the GNU compiler")
+    endif()
+    # Atomic counter updates are required: SimDB is multi-threaded and plain
+    # counters produce negative hit counts that corrupt the report.
+    target_compile_options(simdb INTERFACE --coverage -fprofile-update=atomic -O0 -g)
+    target_link_options(simdb INTERFACE --coverage)
+endif()
+
 target_include_directories(simdb INTERFACE
     $<BUILD_INTERFACE:${SIMDB_BASE}/include>
     $<INSTALL_INTERFACE:include>

@@ -368,3 +368,30 @@ Before opening a PR:
 - Ensure self-contained headers: `python3 scripts/check-headers.py`
 
 GitHub will run these checks too, and all must pass before merging your PR.
+
+---
+
+## Code Coverage
+
+Coverage of the `simdb_regress` tests and examples, measured with gcov. DC is decision (branch) coverage. The badges below are regenerated automatically when a PR is merged into `main` (see [coverage.yml](.github/workflows/coverage.yml)). The full per-file report is at [sparcians.github.io/simdb](https://sparcians.github.io/simdb/).
+
+| Directory | Function | Line | DC |
+|:--|:-:|:-:|:-:|
+| [`apps`](https://sparcians.github.io/simdb/) | ![apps function](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-apps-function.json) | ![apps line](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-apps-line.json) | ![apps dc](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-apps-dc.json) |
+| [`pipeline`](https://sparcians.github.io/simdb/) | ![pipeline function](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-pipeline-function.json) | ![pipeline line](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-pipeline-line.json) | ![pipeline dc](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-pipeline-dc.json) |
+| [`schema`](https://sparcians.github.io/simdb/) | ![schema function](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-schema-function.json) | ![schema line](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-schema-line.json) | ![schema dc](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-schema-dc.json) |
+| [`sqlite`](https://sparcians.github.io/simdb/) | ![sqlite function](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-sqlite-function.json) | ![sqlite line](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-sqlite-line.json) | ![sqlite dc](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-sqlite-dc.json) |
+| [`utils`](https://sparcians.github.io/simdb/) | ![utils function](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-utils-function.json) | ![utils line](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-utils-line.json) | ![utils dc](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/colby-nyce/e504a32344a75ab5b683a0da2176f820/raw/simdb-cov-utils-dc.json) |
+
+To reproduce locally (GCC only):
+
+```
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug -DSIMDB_COVERAGE=ON ..
+make simdb_regress
+cd ..
+gcovr --root . --filter 'include/simdb/' --exclude-throw-branches --exclude-unreachable-branches \
+      --json-summary cov.json --json-summary-pretty build
+python3 scripts/coverage-report.py cov.json
+```
