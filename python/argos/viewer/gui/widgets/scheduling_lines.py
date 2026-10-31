@@ -539,8 +539,8 @@ class SchedulingLinesWidget(wx.Panel):
                     if auto_colorize_key is None:
                         auto_colorize_key = text if text else str(value)
 
-                    auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key)
-                    auto_color = self.frame.widget_renderer.GetAutoColor(auto_colorize_key)
+                    auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key, elem_path)
+                    auto_color = self.frame.widget_renderer.GetAutoColor(auto_colorize_key, elem_path)
 
                     for col in range(self.grid.GetNumberCols()):
                         if not self.grid.IsColShown(col):
@@ -1127,8 +1127,8 @@ class Rasterizer:
                 break
 
         assert auto_colorize_key is not None
-        auto_color = self.frame.widget_renderer.GetAutoColor(auto_colorize_key)
-        auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key)
+        auto_color = self.frame.widget_renderer.GetAutoColor(auto_colorize_key, elem_path)
+        auto_label = self.frame.widget_renderer.GetAutoTag(auto_colorize_key, elem_path)
 
         anno = []
         for k, v in annos:

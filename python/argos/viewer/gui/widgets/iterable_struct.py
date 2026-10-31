@@ -92,7 +92,7 @@ class IterableStruct(wx.Panel):
                             break
 
                     assert color_keyval is not None
-                    color = widget_renderer.GetAutoColor(color_keyval)
+                    color = widget_renderer.GetAutoColor(color_keyval, self.elem_path)
                     self.grid.SetCellBackgroundColour(idx, write_col, color)
                     write_col += 1
 
