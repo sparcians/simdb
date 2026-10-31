@@ -8,6 +8,7 @@
 #include <string>
 
 #include "simdb/Exceptions.hpp"
+#include "simdb/Assert.hpp"
 
 namespace simdb {
 
