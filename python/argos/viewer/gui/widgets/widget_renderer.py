@@ -15,9 +15,7 @@ class WidgetRenderer:
 
         self._current_tick = self._start_tick
         self._utiliz_handler = IterableUtiliz(self, frame.simhier)
-        self._auto_colors_by_key = {}
-        self._auto_tags_by_key = {}
-        autocoloring.BuildBrushes('default', 'default')
+        self._auto_idxs_by_dtype = {}
 
         self._auto_tag_list = []
 
@@ -28,6 +26,9 @@ class WidgetRenderer:
         # Second part: a to z
         for char in range(ord('a'), ord('z') + 1):
             self._auto_tag_list.append(chr(char))
+
+        # One color per tag
+        autocoloring.BuildBrushes('default', 'default', len(self._auto_tag_list))
 
     @property
     def tick(self):
@@ -77,30 +78,29 @@ class WidgetRenderer:
     def GoToEnd(self):
         self.GoToTick(self._end_tick)
 
-    def GetAutoColor(self, value):
-        if value in self._auto_colors_by_key:
-            return self._auto_colors_by_key[value]
-
+    def GetAutoColor(self, value, elem_path=None):
+        idx = self.__GetAutoIndex(value, elem_path)
         brushes = autocoloring.BACKGROUND_BRUSHES
-        idx = len(self._auto_colors_by_key) % len(brushes)
-        color = brushes[idx].GetColour()
-        self._auto_colors_by_key[value] = (color.Red(), color.Green(), color.Blue())
-        return color
+        return brushes[idx % len(brushes)].GetColour()
 
-    def GetAutoTag(self, value):
-        if value in self._auto_tags_by_key:
-            return self._auto_tags_by_key[value]
-
-        idx = len(self._auto_tags_by_key) % len(self._auto_tag_list)
-        tag = self._auto_tag_list[idx]
-        self._auto_tags_by_key[value] = tag
-        return tag
+    def GetAutoTag(self, value, elem_path=None):
+        idx = self.__GetAutoIndex(value, elem_path)
+        return self._auto_tag_list[idx % len(self._auto_tag_list)]
 
     def __UpdateWidgetsOnCurrentTab(self):
         notebook = self.frame.inspector
         page_idx = notebook.GetSelection()
         page = notebook.GetPage(page_idx)
         page.UpdateWidgets()
+
+    def __GetAutoIndex(self, value, elem_path):
+        # The tag and color are both derived from this one index, so they can
+        # never drift apart. The index space is per data type.
+        dtype = self.frame.data_retriever.GetDataType(elem_path)
+        idxs_by_value = self._auto_idxs_by_dtype.setdefault(dtype, {})
+        if value not in idxs_by_value:
+            idxs_by_value[value] = len(idxs_by_value)
+        return idxs_by_value[value]
 
 class IterableUtiliz:
     def __init__(self, widget_renderer, simhier):

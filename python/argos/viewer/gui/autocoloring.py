@@ -154,101 +154,27 @@ class BrushRepository:
         self.palette = palette
 
 
-BACKGROUND_BRUSHES = BrushRepository()
-REASON_BRUSHES = BrushRepository()
-
+BACKGROUND_BRUSHES = None
 
 def SetPalettes(palette: str) -> None:
     BACKGROUND_BRUSHES.set_palette(palette)
-    REASON_BRUSHES.set_palette(palette)
-
 
 def SetShuffleModes(mode: str) -> None:
     BACKGROUND_BRUSHES.set_shuffle_mode(mode)
-    REASON_BRUSHES.set_shuffle_mode(mode)
 
+def BuildBackgroundColors(count: int):
+    assert (count > 0)
+    colors = {}
+    for i in range(count):
+        colors[i] = colorsys.hls_to_rgb(i / float(count), 0.75, 1)
+
+    return colors
 
 # call after wx.App init
-def BuildBrushes(colorblindness_mode: str, shuffle_mode: str) -> None:
+def BuildBrushes(colorblindness_mode: str, shuffle_mode: str, count: int = 52) -> None:
     global BACKGROUND_BRUSHES
-    global REASON_BRUSHES
-    # Map of background colors based on annotation content
-    # The first pass used pretty saturated colors, which was too dark, and
-    # hard to read on some monitors.  I've altered it to use three different
-    # sequences of pastels, and hand-adjusted some to try to look better on
-    # the screen.  - bgrayson
-    # There are 32 colors used right now, and 16 different shades makes the
-    # gradations too small, so let's do three passes of unequal sizes:
-    #    11, 11, and 10.
-    # The lightness of 0.9 is too light, so using 0.6, 0.7, and 0.8
-    # I manually adjusted the last color in the first two slices to 10.5 to
-    # make it more distinguished.
-    BACKGROUND_COLORS = {
-        # --------------------------------------------------
-        # New colorization method (based on sequence ID)
-        # - see transaction_viewer/argos_view/core/src/renderer.pyx
-        # - note:  number of colors is set in renderer.pyx, in the
-        #   variable NUM_ANNOTATION_COLORS
-        # - note2:  if changes are made in renderer.pyx, then you must type
-        #   "make" in transaction_viewer
-        #
-        0: colorsys.hls_to_rgb(0 / 32.0, 0.75, 1),
-        1: colorsys.hls_to_rgb(1 / 32.0, 0.75, 1),
-        2: colorsys.hls_to_rgb(2 / 32.0, 0.75, 1),
-        3: colorsys.hls_to_rgb(3 / 32.0, 0.75, 1),
-        4: colorsys.hls_to_rgb(4 / 32.0, 0.75, 1),
-        5: colorsys.hls_to_rgb(5 / 32.0, 0.75, 1),
-        6: colorsys.hls_to_rgb(6 / 32.0, 0.75, 1),
-        7: colorsys.hls_to_rgb(7 / 32.0, 0.75, 1),
-        8: colorsys.hls_to_rgb(8 / 32.0, 0.75, 1),
-        9: colorsys.hls_to_rgb(9 / 32.0, 0.75, 1),
-        10: colorsys.hls_to_rgb(10 / 32.0, 0.75, 1),
-
-        11: colorsys.hls_to_rgb(11 / 32.0, 0.75, 1),
-        12: colorsys.hls_to_rgb(12 / 32.0, 0.75, 1),
-        13: colorsys.hls_to_rgb(13 / 32.0, 0.75, 1),
-        14: colorsys.hls_to_rgb(14 / 32.0, 0.75, 1),
-        15: colorsys.hls_to_rgb(15 / 32.0, 0.75, 1),
-        16: colorsys.hls_to_rgb(16 / 32.0, 0.75, 1),
-        17: colorsys.hls_to_rgb(17 / 32.0, 0.75, 1),
-        18: colorsys.hls_to_rgb(18 / 32.0, 0.75, 1),
-        19: colorsys.hls_to_rgb(19 / 32.0, 0.75, 1),
-        20: colorsys.hls_to_rgb(20 / 32.0, 0.75, 1),
-        21: colorsys.hls_to_rgb(21 / 32.0, 0.75, 1),
-
-        22: colorsys.hls_to_rgb(22 / 32.0, 0.75, 1),
-        23: colorsys.hls_to_rgb(23 / 32.0, 0.75, 1),
-        24: colorsys.hls_to_rgb(24 / 32.0, 0.75, 1),
-        25: colorsys.hls_to_rgb(25 / 32.0, 0.75, 1),
-        26: colorsys.hls_to_rgb(26 / 32.0, 0.75, 1),
-        27: colorsys.hls_to_rgb(27 / 32.0, 0.75, 1),
-        28: colorsys.hls_to_rgb(28 / 32.0, 0.75, 1),
-        29: colorsys.hls_to_rgb(29 / 32.0, 0.75, 1),
-        30: colorsys.hls_to_rgb(30 / 32.0, 0.75, 1),
-        31: colorsys.hls_to_rgb(31 / 32.0, 0.75, 1),
-    }
-
-    REASON_COLORS = {
-        0: colorsys.hls_to_rgb(1.0, 1.0, 1.0),
-        1: colorsys.hls_to_rgb(1 / 16.0, 0.75, 1),
-        2: colorsys.hls_to_rgb(2 / 16.0, 0.75, 1),
-        3: colorsys.hls_to_rgb(3 / 16.0, 0.75, 1),
-        4: colorsys.hls_to_rgb(4 / 16.0, 0.75, 1),
-        5: colorsys.hls_to_rgb(5 / 16.0, 0.75, 1),
-        6: colorsys.hls_to_rgb(6 / 16.0, 0.75, 1),
-        7: colorsys.hls_to_rgb(7 / 16.0, 0.75, 1),
-        8: colorsys.hls_to_rgb(8 / 16.0, 0.75, 1),
-        9: colorsys.hls_to_rgb(9 / 16.0, 0.75, 1),
-        10: colorsys.hls_to_rgb(10 / 16.0, 0.75, 1),
-
-        11: colorsys.hls_to_rgb(11 / 16.0, 0.75, 1),
-        12: colorsys.hls_to_rgb(12 / 16.0, 0.75, 1),
-        13: colorsys.hls_to_rgb(13 / 16.0, 0.75, 1),
-        14: colorsys.hls_to_rgb(14 / 16.0, 0.75, 1),
-        15: colorsys.hls_to_rgb(15 / 16.0, 0.75, 1),
-    }
-
+    BACKGROUND_BRUSHES = BrushRepository()
+    BACKGROUND_COLORS = BuildBackgroundColors(count)
     BACKGROUND_BRUSHES.generate_all_brushes(BACKGROUND_COLORS)
-    REASON_BRUSHES.generate_all_brushes(REASON_COLORS)
     SetPalettes(colorblindness_mode)
     SetShuffleModes(shuffle_mode)

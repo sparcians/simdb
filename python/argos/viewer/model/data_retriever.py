@@ -207,6 +207,14 @@ class DataRetriever:
         dtype = self._dtypes_by_elem_path[elem_path]
         return self.dtype_inspector.GetDeserializer(dtype)
 
+    def GetDataType(self, elem_path):
+        # Containers have type names like "Inst_contig_capacity8". Use the
+        # underlying struct name so that queues of the same struct with
+        # different capacities share one tag/color space.
+        struct_name, _ = self.__GetStructViewMeta(elem_path) \
+            if elem_path in self._dtypes_by_elem_path else (None, None)
+        return struct_name or self._dtypes_by_elem_path.get(elem_path)
+
     def _has_timestamp_clocks(self):
         self.cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='TimestampClocks'"
