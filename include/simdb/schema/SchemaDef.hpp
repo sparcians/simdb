@@ -343,11 +343,11 @@ public:
             // Command is something like:
             //   CREATE INDEX <index_name> ON <table_name> (Foo,Bar)
             auto lparen = cmd.rfind("(");
-            assert(lparen != std::string::npos);
+            simdb_assert(lparen != std::string::npos);
 
             auto rparen = cmd.rfind(")");
-            assert(rparen != std::string::npos);
-            assert(rparen > lparen);
+            simdb_assert(rparen != std::string::npos);
+            simdb_assert(rparen > lparen);
 
             auto idx_cols = cmd.substr(lparen + 1, rparen - lparen - 1);
             indexes.emplace_back();

@@ -19,21 +19,21 @@ public:
     Timestamp(const uint64_t* backpointer) :
         backpointer_(backpointer)
     {
-        assert(backpointer);
+        simdb_assert(backpointer);
     }
 
     /// \brief Construct with a C-style function pointer to get the current time value
     Timestamp(uint64_t (*fn)()) :
         cfuncpointer_(fn)
     {
-        assert(fn);
+        simdb_assert(fn);
     }
 
     /// \brief Construct with a std::function to get the current time value
     Timestamp(std::function<uint64_t()> fn) :
         stdfunction_(fn)
     {
-        assert(fn);
+        simdb_assert(fn);
     }
 
     /// Read the current simulation time
@@ -67,7 +67,7 @@ public:
 
         if (query->getResultSet().getNextRecord())
         {
-            assert(id > 0);
+            simdb_assert(id > 0);
             return id;
         }
 

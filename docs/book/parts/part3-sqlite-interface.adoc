@@ -226,7 +226,7 @@ simdb::DatabaseManager orig_db_mgr("orig.db", true);  // Create new DB
 orig_db_mgr.appendSchema(orig_schema);
 
 simdb::DatabaseManager diff_db_mgr("orig.db", false); // Connect to same DB
-assert(orig_schema == diff_db_mgr.getSchema());
+simdb_assert(orig_schema == diff_db_mgr.getSchema());
 ----
 
 === The manager is the hub

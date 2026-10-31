@@ -42,7 +42,7 @@ inline PragmaPairs getPragmas(JournalMode mode)
     }
 
     // Unreachable
-    assert(false);
+    simdb_assert(false);
     return {};
 }
 
@@ -135,7 +135,10 @@ public:
     const std::string& getDatabaseFilePath() const { return db_filepath_; }
 
     /// Execute the functor inside BEGIN/COMMIT TRANSACTION.
-    void safeTransaction(const TransactionFunc& func) const { db_conn_->safeTransaction(func); }
+    void safeTransaction(const TransactionFunc& func, uint64_t num_retries = std::numeric_limits<uint64_t>::max()) const
+    {
+        db_conn_->safeTransaction(func, num_retries);
+    }
 
     /// For debug purposes only.
     bool isInTransaction() const { return db_conn_ && db_conn_->isInTransaction(); }
@@ -332,7 +335,7 @@ private:
     /// \return Returns error message if failed to connect
     void connectToExistingDatabase_()
     {
-        assert(db_conn_ != nullptr);
+        simdb_assert(db_conn_ != nullptr);
         reconstituteSchema_();
         db_filepath_ = db_conn_->getDatabaseFilePath();
     }
@@ -340,7 +343,7 @@ private:
     /// \brief Regenerate the Schema object when attaching to an existing database file.
     void reconstituteSchema_()
     {
-        assert(schema_.getTables().empty());
+        simdb_assert(schema_.getTables().empty());
 
         auto tbl_query = createQuery("internal$SchemaTables");
 

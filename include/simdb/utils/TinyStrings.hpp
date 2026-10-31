@@ -12,14 +12,16 @@
 
 namespace simdb {
 
+namespace detail {
+static inline constexpr uint32_t BAD_STRING_ID = 0;
+}
+
 /// To keep SimDB collection as fast and small as possible, we serialize strings
 /// not as actual strings, but as ints. This class is used to map strings to
 /// ints in memory, and may be serialized to a database table at teardown.
 template <bool MutexProtect = false> class TinyStrings
 {
 public:
-    static inline constexpr uint32_t BAD_STRING_ID = 0;
-
     TinyStrings() = default;
 
     /// Add or get a string ID for the given string.
@@ -46,7 +48,7 @@ public:
     {
         if (s.empty())
         {
-            return BAD_STRING_ID;
+            return detail::BAD_STRING_ID;
         }
 
         DeferredLock<std::mutex> lock(mutex_);
@@ -61,7 +63,7 @@ public:
     /// Get a string ID for the given string
     uint32_t getStringID(const char* s)
     {
-        assert(s != nullptr);
+        simdb_assert(s != nullptr);
         return getStringID(std::string(s));
     }
 
@@ -74,7 +76,7 @@ public:
         {
             return getStringID(*s);
         }
-        return BAD_STRING_ID;
+        return detail::BAD_STRING_ID;
     }
 
     /// Serialize newly seen string mappings to the database.
