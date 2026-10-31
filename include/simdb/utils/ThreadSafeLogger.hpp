@@ -7,8 +7,8 @@
 #include <sstream>
 #include <string>
 
-#include "simdb/Exceptions.hpp"
 #include "simdb/Assert.hpp"
+#include "simdb/Exceptions.hpp"
 
 namespace simdb {
 
