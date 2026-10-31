@@ -442,7 +442,7 @@ private:
         }
 
         auto apps = getApps_();
-        assert(std::set<App*>(out.begin(), out.end()) == std::set<App*>(apps.begin(), apps.end()));
+        simdb_assert(std::set<App*>(out.begin(), out.end()) == std::set<App*>(apps.begin(), apps.end()));
         return out;
     }
 
@@ -485,7 +485,7 @@ private:
             {
                 auto user_app_name = app_name;
                 auto idx = user_app_name.find_last_of("-");
-                assert(idx != std::string::npos);
+                simdb_assert(idx != std::string::npos);
                 user_app_name = user_app_name.substr(0, idx);
 
                 auto tmp_substr = app_name.substr(idx);

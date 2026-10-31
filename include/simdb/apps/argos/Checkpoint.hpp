@@ -192,7 +192,7 @@ private:
     /// Encodes a CLOSED lifecycle wire record.
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
+        simdb_assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
         auto encoded = std::make_unique<CollectedData>(cid);
         encoded->getBuffer().append(Action::CLOSED);
         return encoded;
@@ -201,7 +201,7 @@ private:
     /// Encodes a FULL snapshot of the current scalar bytes.
     std::unique_ptr<CollectedData> encodeFull_(uint16_t cid)
     {
-        assert(!full_bytes_.empty());
+        simdb_assert(!full_bytes_.empty());
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
         buf.append(Action::FULL);
@@ -213,7 +213,7 @@ private:
     std::unique_ptr<CollectedData> encodeDelta_(uint16_t cid)
     {
         const auto* data_prev = prevDataCheckpoint_();
-        assert(data_prev && data_prev->full_bytes_ == full_bytes_ && !full_bytes_.empty());
+        simdb_assert(data_prev && data_prev->full_bytes_ == full_bytes_ && !full_bytes_.empty());
         (void)data_prev;
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
@@ -265,7 +265,7 @@ public:
     /// Encodes an unconditional FULL snapshot for heartbeat or absent-CID refresh.
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
-        assert(isDataCheckpoint());
+        simdb_assert(isDataCheckpoint());
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
         buf.append(Action::FULL);
@@ -360,7 +360,7 @@ private:
     /// Encodes a CLOSED lifecycle wire record.
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
+        simdb_assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
         (void)cid;
         auto encoded = std::make_unique<CollectedData>(cid);
         encoded->getBuffer().append(Action::CLOSED);
@@ -388,14 +388,14 @@ private:
         switch (action)
         {
         case Action::CONTAINER_SWAP:
-            assert(classification.swap_index.isValid());
-            assert(!classification.payload.empty());
+            simdb_assert(classification.swap_index.isValid());
+            simdb_assert(!classification.payload.empty());
             buf.append(classification.swap_index.getValue());
             buf.append(classification.payload);
             break;
         case Action::CONTAINER_MULTI_SWAP:
-            assert(classification.swap_indices.size() >= 2);
-            assert(classification.swap_indices.size() == classification.swap_payloads.size());
+            simdb_assert(classification.swap_indices.size() >= 2);
+            simdb_assert(classification.swap_indices.size() == classification.swap_payloads.size());
             buf.append(static_cast<uint8_t>(classification.swap_indices.size()));
             for (size_t i = 0; i < classification.swap_indices.size(); ++i)
             {
@@ -407,7 +407,7 @@ private:
             break;
         case Action::CONTIG_ARRIVE:
         case Action::CONTIG_BOOKENDS:
-            assert(!classification.payload.empty());
+            simdb_assert(!classification.payload.empty());
             buf.append(classification.payload);
             break;
         case Action::CONTIG_MIMO:
@@ -471,7 +471,7 @@ public:
     /// Encodes an unconditional FULL snapshot for heartbeat or absent-CID refresh.
     std::unique_ptr<CollectedData> encodeSnapshotForPipeline(uint16_t cid) const
     {
-        assert(isDataCheckpoint());
+        simdb_assert(isDataCheckpoint());
         auto encoded = std::make_unique<CollectedData>(cid);
         auto& buf = encoded->getBuffer();
         buf.append(Action::FULL);
@@ -568,7 +568,7 @@ private:
     /// Encodes a CLOSED lifecycle wire record.
     std::unique_ptr<CollectedData> encodeLifecycleEvt_(uint16_t cid)
     {
-        assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
+        simdb_assert(lifecycle_change_.isValid() && lifecycle_change_.getValue());
         (void)cid;
         auto encoded = std::make_unique<CollectedData>(cid);
         encoded->getBuffer().append(Action::CLOSED);
@@ -596,14 +596,14 @@ private:
         switch (action)
         {
         case Action::CONTAINER_SWAP:
-            assert(classification.bin_index.isValid());
-            assert(!classification.payload.empty());
+            simdb_assert(classification.bin_index.isValid());
+            simdb_assert(!classification.payload.empty());
             buf.append(classification.bin_index.getValue());
             buf.append(classification.payload);
             break;
         case Action::CONTAINER_MULTI_SWAP:
-            assert(classification.bin_indices.size() >= 2);
-            assert(classification.bin_indices.size() == classification.payloads.size());
+            simdb_assert(classification.bin_indices.size() >= 2);
+            simdb_assert(classification.bin_indices.size() == classification.payloads.size());
             buf.append(static_cast<uint8_t>(classification.bin_indices.size()));
             for (size_t i = 0; i < classification.bin_indices.size(); ++i)
             {
@@ -612,17 +612,17 @@ private:
             }
             break;
         case Action::SPARSE_REMOVE:
-            assert(classification.bin_index.isValid());
+            simdb_assert(classification.bin_index.isValid());
             buf.append(classification.bin_index.getValue());
             break;
         case Action::SPARSE_ADD:
-            assert(classification.bin_index.isValid());
-            assert(!classification.payload.empty());
+            simdb_assert(classification.bin_index.isValid());
+            simdb_assert(!classification.payload.empty());
             buf.append(classification.bin_index.getValue());
             buf.append(classification.payload);
             break;
         case Action::SPARSE_MULTI_REMOVE:
-            assert(classification.bin_indices.size() >= 2);
+            simdb_assert(classification.bin_indices.size() >= 2);
             buf.append(static_cast<uint8_t>(classification.bin_indices.size()));
             for (const auto idx : classification.bin_indices)
             {

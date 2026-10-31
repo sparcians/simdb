@@ -799,7 +799,7 @@ public:
     void handleContigContainerMultiSwap(argos_test::BlobContext& context, const std::vector<uint16_t>& indices,
                                         const std::vector<std::vector<char>>& payloads) override
     {
-        assert(indices.size() == payloads.size());
+        simdb_assert(indices.size() == payloads.size());
         for (size_t i = 0; i < indices.size(); ++i)
         {
             handleContigContainerSwap(context, indices[i], payloads[i]);
@@ -864,7 +864,7 @@ public:
     void handleSparseContainerMultiSwap(argos_test::BlobContext& context, const std::vector<uint16_t>& indices,
                                         const std::vector<std::vector<char>>& payloads) override
     {
-        assert(indices.size() == payloads.size());
+        simdb_assert(indices.size() == payloads.size());
         for (size_t i = 0; i < indices.size(); ++i)
         {
             handleSparseContainerExchangedBin(context, indices[i], payloads[i]);

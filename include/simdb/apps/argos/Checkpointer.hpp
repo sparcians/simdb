@@ -25,7 +25,7 @@ inline uint16_t getContainerSize(const std::vector<std::vector<char>>& contig_bi
             break;
         }
     }
-    assert(size <= UINT16_MAX);
+    simdb_assert(size <= UINT16_MAX);
     return size;
 }
 
@@ -40,7 +40,7 @@ inline uint16_t getContainerSize(const std::map<uint16_t, std::vector<char>>& sp
             ++size;
         }
     }
-    assert(size <= UINT16_MAX);
+    simdb_assert(size <= UINT16_MAX);
     return size;
 }
 } // namespace detail
@@ -392,7 +392,7 @@ public:
     void createCheckpoint(uint64_t window_id, const std::vector<std::vector<char>>& contig_bin_bytes) override
     {
         auto size = detail::getContainerSize(contig_bin_bytes);
-        assert(size <= capacity_);
+        simdb_assert(size <= capacity_);
         (void)capacity_;
         max_container_size_ = std::max(max_container_size_, size);
 
@@ -548,7 +548,7 @@ public:
     void createCheckpoint(uint64_t window_id, const std::map<uint16_t, std::vector<char>>& sparse_bin_bytes) override
     {
         auto size = detail::getContainerSize(sparse_bin_bytes);
-        assert(size <= capacity_);
+        simdb_assert(size <= capacity_);
         (void)capacity_;
         max_container_size_ = std::max(max_container_size_, size);
 

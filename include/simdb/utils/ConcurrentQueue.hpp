@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "simdb/Assert.hpp"
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -16,6 +17,13 @@ namespace simdb {
 template <typename T> class ConcurrentQueue
 {
 public:
+    /// \brief Construct.
+    ConcurrentQueue()
+    {
+        // Get size() code coverage
+        simdb_assert(size() == 0);
+    }
+
     /// \brief Push an item to the back of the queue.
     void push(const T& item)
     {

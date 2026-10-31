@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 
+#include "simdb/Assert.hpp"
 #include "simdb/Exceptions.hpp"
 
 namespace simdb {
@@ -81,8 +82,8 @@ protected:
         owned_file_(std::move(fstream)),
         out_(owned_file_.get())
     {
-        assert(owned_file_ && owned_file_->is_open());
-        assert(out_);
+        simdb_assert(owned_file_ && owned_file_->is_open());
+        simdb_assert(out_);
     }
 
 private:

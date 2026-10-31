@@ -220,7 +220,7 @@ private:
             oss << column->getName() << " " << column->getDataType();
             if (column->getName() == pkey)
             {
-                assert(pkey != "Id");
+                simdb_assert(pkey != "Id");
                 oss << " PRIMARY KEY";
             }
             if (column->hasDefaultValue())

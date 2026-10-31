@@ -130,8 +130,11 @@ public:
     virtual ~Transaction() = default;
 
     /// Execute the functor inside BEGIN/COMMIT TRANSACTION.
-    void safeTransaction(const TransactionFunc& transaction)
+    void safeTransaction(const TransactionFunc& transaction,
+                         uint64_t num_retries = std::numeric_limits<uint64_t>::max())
     {
+        uint64_t num_tries = 0;
+
         while (true)
         {
             std::unique_lock<std::recursive_mutex> lock(mutex_);
@@ -172,7 +175,12 @@ public:
                 rollbackSilently_();
                 lock.unlock();
                 std::this_thread::sleep_for(std::chrono::milliseconds(25));
+
                 // Loop around and retry the whole transaction from scratch.
+                if (++num_tries > num_retries)
+                {
+                    throw DBException("Max number of safeTransaction retries exceeded");
+                }
             } catch (...)
             {
                 in_transaction_flag_ = false;

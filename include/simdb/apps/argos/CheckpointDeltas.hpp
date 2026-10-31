@@ -69,7 +69,7 @@ inline uint16_t countContigElements(const std::vector<std::vector<char>>& contig
             break;
         }
     }
-    assert(count <= UINT16_MAX);
+    simdb_assert(count <= UINT16_MAX);
     return count;
 }
 
@@ -296,7 +296,7 @@ inline uint16_t countSparseElements(const std::map<uint16_t, std::vector<char>>&
             ++count;
         }
     }
-    assert(count <= UINT16_MAX);
+    simdb_assert(count <= UINT16_MAX);
     return static_cast<uint16_t>(count);
 }
 
