@@ -12,6 +12,7 @@ class SchedulingLinesWidget(wx.Panel):
     DEFAULT_ENABLE_TOOLTIPS = True
     DEFAULT_SHOW_DID = False
     DEFAULT_MINIMIZE_GRID_CELLS = False
+    DEFAULT_USE_REL_CYC_LABELS = False
 
     # Extra blank row appended below the real data rows, inside the grid's own
     # scrollable area. Some platforms/themes intercept mouse-motion events near
@@ -24,7 +25,10 @@ class SchedulingLinesWidget(wx.Panel):
     # regardless of whether the grid also happens to need vertical scrolling.
     TOOLTIP_ROW_SPACER_HEIGHT = 5
 
-    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER, show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS, show_did=DEFAULT_SHOW_DID, minimize_grid_cells=DEFAULT_MINIMIZE_GRID_CELLS):
+    def __init__(self, parent, frame, elem_paths=None, num_samples_before=DEFAULT_TICKS_BEFORE, num_samples_after=DEFAULT_TICKS_AFTER,
+                 show_details=DEFAULT_SHOW_DETAILS, hide_empty_rows=DEFAULT_HIDE_EMPTY_ROWS, enable_tooltips=DEFAULT_ENABLE_TOOLTIPS,
+                 show_did=DEFAULT_SHOW_DID, minimize_grid_cells=DEFAULT_MINIMIZE_GRID_CELLS,
+                 use_rel_cyc_labels=DEFAULT_USE_REL_CYC_LABELS):
         super().__init__(parent)
         self.frame = frame
         self.num_samples_before = num_samples_before
@@ -34,6 +38,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.enable_tooltips = enable_tooltips
         self.show_did = show_did
         self.minimize_grid_cells = minimize_grid_cells
+        self.use_rel_cyc_labels = use_rel_cyc_labels
         self.caption_mgr = CaptionManager(frame.simhier)
         self.tracked_annos = {}
         self.grid = None
@@ -126,6 +131,7 @@ class SchedulingLinesWidget(wx.Panel):
         settings['enable_tooltips'] = self.enable_tooltips
         settings['show_did'] = self.show_did
         settings['minimize_grid_cells'] = self.minimize_grid_cells
+        settings['use_rel_cyc_labels'] = self.use_rel_cyc_labels
         settings['tracked_annos'] = copy.deepcopy(self.tracked_annos)
         return settings
     
@@ -143,6 +149,7 @@ class SchedulingLinesWidget(wx.Panel):
                 self.enable_tooltips != settings['enable_tooltips'] or \
                 self.show_did != settings['show_did'] or \
                 self.minimize_grid_cells != settings['minimize_grid_cells'] or \
+                self.use_rel_cyc_labels != settings.get('use_rel_cyc_labels', self.DEFAULT_USE_REL_CYC_LABELS) or \
                 self.tracked_annos != settings['tracked_annos']
 
         if not dirty:
@@ -157,6 +164,7 @@ class SchedulingLinesWidget(wx.Panel):
         self.enable_tooltips = settings['enable_tooltips']
         self.show_did = settings['show_did']
         self.minimize_grid_cells = settings['minimize_grid_cells']
+        self.use_rel_cyc_labels = settings.get('use_rel_cyc_labels', self.DEFAULT_USE_REL_CYC_LABELS)
         self.tracked_annos = settings['tracked_annos']
 
         self.__Refresh()
@@ -369,11 +377,20 @@ class SchedulingLinesWidget(wx.Panel):
         current_cycle_col = cycle_col_by_cycle.get(current_cycle)
         self._current_cycle_col = current_cycle_col
         col_labels = []
+
         for col in range(1, self.num_samples_before + self.num_samples_after + 2):
             label_idx = col - 1
             if label_idx < len(timeline_cycles):
-                cycle_offset = timeline_cycles[label_idx] - current_cycle
-                label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
+                if self.use_rel_cyc_labels:
+                    # We are setting the col labels using +/- notation:
+                    # -3, -2, -1, <tick>, +1, +2, +3
+                    cycle_offset = timeline_cycles[label_idx] - current_cycle
+                    label = str(current_cycle) if cycle_offset == 0 else f'{cycle_offset:+d}'
+                else:
+                    # We are setting the col labels using the actual cycle:
+                    # <tick-3>, <tick-2>, <tick-1>, <tick>, <tick+1>, <tick+2>, <tick+3>
+                    label = str(timeline_cycles[label_idx])
+
                 self.grid.SetColLabelValue(col, label)
                 col_labels.append(label)
             else:
@@ -862,6 +879,20 @@ class SchedulingLinesWidget(wx.Panel):
                 tooltip = self._detailed_pkt_tooltips.get(row)
 
         if tooltip:
+            current_cyc_label = self.grid.GetColLabelValue(col)
+            if current_cyc_label:
+                current_cyc = self.frame.playback_bar.GetCurrentCycle()
+                if current_cyc_label[0] == '+':
+                    delta_cyc = int(current_cyc_label[1:])
+                    tooltip_cyc = current_cyc + delta_cyc
+                elif current_cyc_label[0] == '-':
+                    delta_cyc = int(current_cyc_label[1:])
+                    tooltip_cyc = current_cyc - delta_cyc
+                else:
+                    tooltip_cyc = current_cyc_label
+
+                tooltip = f"Cycle: {tooltip_cyc}\n\n{tooltip}"
+
             self.grid.SetToolTip(tooltip)
         else:
             self.grid.UnsetToolTip()
