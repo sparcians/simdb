@@ -79,7 +79,7 @@ public:
     virtual void postInit([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {}
 
     /// \brief Hook to create and configure this app's pipeline(s) on the given manager.
-    virtual void createPipeline(pipeline::PipelineManager*) {}
+    virtual void createPipeline(pipeline::PipelineManager*) = 0;
 
     /// \brief Hook called before simulation teardown.
     virtual void preTeardown() {}

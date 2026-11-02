@@ -940,10 +940,11 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     ENABLE_TOOLTIPS_LABEL = 'Enable tooltips'
     SHOW_DID_LABEL = 'Show DID'
     MINIMIZE_GRID_CELLS_LABEL = 'Minimize grid cells'
+    USE_REL_CYCLES_LABEL = 'Use relative cycles for column labels'
 
     def __init__(
-        self, parent, frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did, title="Edit Data Selections",
-        initial_captions=None, minimize_grid_cells=False,
+        self, parent, frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did,
+        initial_captions, minimize_grid_cells, use_rel_cyc_labels,
     ):
         self._num_samples_before = num_samples_before
         self._num_samples_after = num_samples_after
@@ -953,6 +954,7 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
             (self.ENABLE_TOOLTIPS_LABEL, enable_tooltips),
             (self.SHOW_DID_LABEL, show_did),
             (self.MINIMIZE_GRID_CELLS_LABEL, minimize_grid_cells),
+            (self.USE_REL_CYCLES_LABEL, use_rel_cyc_labels)
         ]
         WidgetDataSelectionsDlg.__init__(
             self, parent, frame, elem_paths, queues_only=False, settings_chkboxes=chkboxes,
@@ -1039,6 +1041,10 @@ class SchedulingLinesEditDlg(WidgetDataSelectionsDlg):
     @property
     def minimize_grid_cells(self):
         return self.GetSettingCheckbox(self.MINIMIZE_GRID_CELLS_LABEL)
+
+    @property
+    def use_rel_cyc_labels(self):
+        return self.GetSettingCheckbox(self.USE_REL_CYCLES_LABEL)
 
     def __UpdateButtonStates(self, *args):
         WidgetDataSelectionsDlg.__UpdateButtonStates(self, *args)

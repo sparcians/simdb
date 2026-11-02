@@ -7,7 +7,6 @@ from viewer.gui.widgets.summary_views import SummaryViews
 from viewer.gui.widgets.iterable_struct import IterableStruct
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from viewer.gui.dialogs.widget_data_selections import SchedulingLinesEditDlg
-from functools import partial
 
 class CanvasGrid(wx.Panel):
     def __init__(self, parent, rows=1, cols=1):
@@ -353,6 +352,7 @@ class WidgetContainer(wx.Panel):
             enable_tooltips = self._widget.enable_tooltips
             show_did = self._widget.show_did
             minimize_grid_cells = self._widget.minimize_grid_cells
+            use_rel_cyc_labels = self._widget.use_rel_cyc_labels
             initial_captions = self._widget.caption_mgr.GetCustomCaptions()
         else:
             elem_paths = []
@@ -363,11 +363,12 @@ class WidgetContainer(wx.Panel):
             enable_tooltips = SchedulingLinesWidget.DEFAULT_ENABLE_TOOLTIPS
             show_did = SchedulingLinesWidget.DEFAULT_SHOW_DID
             minimize_grid_cells = SchedulingLinesWidget.DEFAULT_MINIMIZE_GRID_CELLS
+            use_rel_cyc_labels = SchedulingLinesWidget.DEFAULT_USE_REL_CYC_LABELS
             initial_captions = {}
 
         dlg = SchedulingLinesEditDlg(
             self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did,
-            initial_captions=initial_captions, minimize_grid_cells=minimize_grid_cells,
+            initial_captions, minimize_grid_cells, use_rel_cyc_labels
         )
         result = dlg.ShowModal()
         if result == wx.ID_OK:
@@ -379,8 +380,9 @@ class WidgetContainer(wx.Panel):
             enable_tooltips = dlg.enable_tooltips
             show_did = dlg.show_did
             minimize_grid_cells = dlg.minimize_grid_cells
+            use_rel_cyc_labels = dlg.use_rel_cyc_labels
             if len(elem_paths) > 0:
-                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did, minimize_grid_cells)
+                widget = SchedulingLinesWidget(self, self.frame, elem_paths, num_samples_before, num_samples_after, show_details, hide_empty_rows, enable_tooltips, show_did, minimize_grid_cells, use_rel_cyc_labels)
                 widget.caption_mgr.SetCustomCaptions(dlg.GetCustomCaptions())
                 widget.UpdateWidgetData(regenerate_grid=True)
                 self.SetWidget(widget)
