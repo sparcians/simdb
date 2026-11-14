@@ -279,7 +279,7 @@ class ArgosFrame(wx.Frame):
             # Widget results hold a dict of name/value pairs; database results hold
             # the raw list of (name, value) pairs from UnpackRange.
             pairs = r.nvps.items() if isinstance(r.nvps, dict) else r.nvps
-            data = ' '.join(f'{k}({v})' for k, v in pairs)
+            data = [(str(k), str(v)) for k, v in pairs]
 
             entries.append((tick, cycle, clock_name, r.elem_path, type(r.widget).__name__, data))
 

@@ -43,11 +43,27 @@ class SearchResultsPanel(wx.Panel):
         self.Hide()
 
     def ShowResults(self, entries: list):
-        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget, data) tuple."""
+        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget, data) tuple.
+
+        'data' is a list of (name, value) pairs. It is shown as 'name(value)' pairs
+        padded so that the same field lines up across rows with the same field names.
+        """
+        # Rows with the same field names are assumed to share a struct type, and are
+        # aligned together (same approach as the detailed packet column in SchedulingLinesWidget).
+        max_lens = {}
+        for entry in entries:
+            fields = tuple(name for name, _ in entry[5])
+            lens = max_lens.setdefault(fields, {})
+            for name, value in entry[5]:
+                lens[name] = max(lens.get(name, 0), len(value))
+
         self.list_ctrl.DeleteAllItems()
         for entry in entries:
+            lens = max_lens[tuple(name for name, _ in entry[5])]
+            data = ' ' + ' '.join(f'{name}({value})' + ' ' * (lens[name] - len(value))
+                                  for name, value in entry[5])
             row = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), str(entry[0]))
-            for col, value in enumerate(entry[1:], start=1):
+            for col, value in enumerate(entry[1:5] + (data,), start=1):
                 self.list_ctrl.SetItem(row, col, str(value))
 
         self.__FitColumns()
