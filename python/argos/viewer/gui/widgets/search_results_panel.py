@@ -8,7 +8,7 @@ class SearchResultsPanel(wx.Panel):
     again with the 'X' button in the top-right corner.
     """
 
-    COLUMNS = ('tick', 'cyc', 'clock', 'path', 'widget')
+    COLUMNS = ('tick', 'cyc', 'clock', 'path', 'widget', 'data')
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -24,6 +24,9 @@ class SearchResultsPanel(wx.Panel):
         self.close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.HidePanel())
 
         self.list_ctrl = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        mono_font = wx.Font(self.list_ctrl.GetFont().GetPointSize(), wx.FONTFAMILY_TELETYPE,
+                            wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        self.list_ctrl.SetFont(mono_font)
         for name in self.COLUMNS:
             self.list_ctrl.AppendColumn(name)
 
@@ -40,7 +43,7 @@ class SearchResultsPanel(wx.Panel):
         self.Hide()
 
     def ShowResults(self, entries: list):
-        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget) tuple."""
+        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget, data) tuple."""
         self.list_ctrl.DeleteAllItems()
         for entry in entries:
             row = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), str(entry[0]))

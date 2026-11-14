@@ -262,7 +262,7 @@ class ArgosFrame(wx.Frame):
 
     def __ShowSearchResults(self, results):
         # They all have a 'widget' field and an 'nvps' field. We will show a wx.ListCtrl
-        # with the columns: tick, cyc, clock, path, widget.
+        # with the columns: tick, cyc, clock, path, widget, data.
         #
         # Some results have a 'tick' field, but for those that don't we will assume
         # it is the current tick.
@@ -276,7 +276,12 @@ class ArgosFrame(wx.Frame):
             clock_name, period = self.__GetClockForElemPath(r.elem_path)
             cycle = int(tick) // int(period) if period else ''
 
-            entries.append((tick, cycle, clock_name, r.elem_path, type(r.widget).__name__))
+            # Widget results hold a dict of name/value pairs; database results hold
+            # the raw list of (name, value) pairs from UnpackRange.
+            pairs = r.nvps.items() if isinstance(r.nvps, dict) else r.nvps
+            data = ' '.join(f'{k}({v})' for k, v in pairs)
+
+            entries.append((tick, cycle, clock_name, r.elem_path, type(r.widget).__name__, data))
 
         self.search_results_panel.ShowResults(entries)
 
