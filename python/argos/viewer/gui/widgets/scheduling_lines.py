@@ -170,6 +170,59 @@ class SchedulingLinesWidget(wx.Panel):
         self.__Refresh()
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
 
+    def CreateSearchResults(self, data_constraints: dict, path_constraints: str = ''):
+        if path_constraints and path_constraints not in self.caption_mgr.GetAllMatchingElemPaths():
+            return []
+
+        if not self.grid or not data_constraints:
+            return []
+
+        # Search the unpacked timeline data that was used to rasterize the grid
+        # (self._ranges) rather than the cells' text. The cells only hold the short
+        # auto-tag letter (e.g. 'A'), whereas the data holds the real (name, value)
+        # pairs. No per-cell metadata is needed: the sample column comes from
+        # self._sample_col_by_time and the row from the rasterizer / scalar row.
+        elem_paths = [path_constraints] if path_constraints else self.caption_mgr.GetAllMatchingElemPaths()
+        constraints = [(k, str(v)) for k, v in data_constraints.items()]
+
+        results = []
+        for elem_path in elem_paths:
+            vals = self._ranges.get(elem_path)
+            if not vals:
+                continue
+
+            is_scalar = elem_path in self.scalar_elem_paths
+            if is_scalar:
+                scalar_row = self.scalar_row_by_elem_path.get(elem_path)
+                if scalar_row is None:
+                    continue
+
+            for time_val, data in zip(vals['TimeVals'], vals['DataVals']):
+                col = self._sample_col_by_time.get(time_val)
+                if col is None or data is None:
+                    continue
+
+                # Scalar structs hold one list of (name, value) pairs; queues hold one
+                # such list per bin. Plain scalar values have no names to match.
+                if is_scalar:
+                    bins = [(scalar_row, data)] if isinstance(data, (list, tuple)) else []
+                else:
+                    bins = []
+                    for bin_idx, annos in enumerate(data):
+                        rasterizer = self.rasterizers.get((elem_path, bin_idx))
+                        if annos and rasterizer:
+                            bins.append((rasterizer.row, annos))
+
+                for row, annos in bins:
+                    nvps = OrderedDict((k, str(v)) for k, v in annos)
+                    if all(nvps.get(k) == v for k, v in constraints):
+                        results.append(self.__CreateSearchResult(elem_path, nvps, row, col))
+
+        return results
+
+    def __CreateSearchResult(self, elem_path: str, nvps: dict, row: int, col: int):
+        return self.SearchResult(self, elem_path, nvps, row, col)
+
     def __AddElement(self, elem_path):
         assert elem_path not in self.caption_mgr.GetAllMatchingElemPaths()
             
@@ -907,6 +960,41 @@ class SchedulingLinesWidget(wx.Panel):
     def __EditWidget(self, evt):
         widget_container = self.GetParent()
         widget_container.LaunchSchedulingLinesViewer()
+
+    class SearchResult:
+        def __init__(self, widget: SchedulingLinesWidget, elem_path: str, nvps: dict, row: int, col: int):
+            self.widget = widget
+            self.nvps = nvps
+            self.row = row
+            self.col = col
+
+            cycle = widget.grid.GetColLabelValue(col)
+            assert cycle
+            try:
+                cycle = int(cycle)
+            except:
+                # We are using relative cycles e.g. '-4' or '+10'
+                assert cycle[0] in ('-', '+')
+                if cycle[0] == '-':
+                    delta = -1 * int(cycle[1:])
+                else:
+                    delta = int(cycle[1:])
+
+                cycle = widget.frame.playback_bar.GetCurrentCycle()
+                cycle += delta
+
+            selected_clock = widget.frame.playback_bar.clock_combobox.GetValue()
+            period = widget.frame.playback_bar.clock_periods.get(selected_clock)
+
+            assert period
+            self.tick = cycle * period
+            self.elem_path = elem_path
+
+        def BringIntoFocus(self):
+            print(f"TODO XXX: BringIntoFocus {self}")
+
+        def TakeOutOfFocus(self):
+            print(f"TODO XXX: TakeOutOfFocus {self}")
 
 class CaptionManager:
     MINIMUM_CAPTION_PATH_PARTS = 2

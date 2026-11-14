@@ -1,5 +1,6 @@
 import wx, wx.grid
 from collections.abc import Iterable
+from collections import OrderedDict
 from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from viewer.gui.widgets.grid import Grid
@@ -123,6 +124,39 @@ class IterableStruct(wx.Panel):
     def GetCurrentUserSettings(self):
         return {}
     
+    def CreateSearchResults(self, data_constraints: dict, path_constraints: str = ''):
+        if path_constraints and self.elem_path != path_constraints:
+            return None
+
+        results = []
+        for i in range(self.grid.GetNumberRows()):
+            nvps = self.__GetNameValuePairs(i)
+            take = True
+            for k,v in data_constraints.items():
+                if k not in nvps:
+                    take = False
+                    break
+                if nvps[k] != v:
+                    take = False
+                    break
+
+            if take:
+                results.append(self.__CreateSearchResult(nvps, i))
+
+        return results
+
+    def __GetNameValuePairs(self, row: int):
+        nvps = OrderedDict()
+        for i in range(self.grid.GetNumberCols()):
+            name = self.grid.GetColLabelValue(i)
+            value = self.grid.GetCellValue(row, i)
+            nvps[name] = value
+
+        return nvps
+
+    def __CreateSearchResult(self, nvps: OrderedDict, row: int):
+        return self.SearchResult(self, nvps, row)
+
     def __SyncGridViewSettings(self):
         # Remove all column labels
         for i in range(self.grid.GetNumberCols()):
@@ -165,6 +199,19 @@ class IterableStruct(wx.Panel):
             widget_container = self.GetParent()
             widget = IterableStruct(widget_container, self.frame, selected)
             widget_container.SetWidget(widget)
+
+    class SearchResult:
+        def __init__(self, widget: IterableStruct, nvps: OrderedDict, row: int):
+            self.widget = widget
+            self.nvps = nvps
+            self.row = row
+            self.elem_path = widget.elem_path
+
+        def BringIntoFocus(self):
+            print(f"TODO XXX: BringIntoFocus {self}")
+
+        def TakeOutOfFocus(self):
+            print(f"TODO XXX: TakeOutOfFocus {self}")
 
 class UtilizElement(DefaultStaticText):
     def __init__(self, parent, frame, capacity):

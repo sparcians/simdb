@@ -103,6 +103,10 @@ class SimHierarchy:
         for elem_path,_ in self._cids_by_elem_path.items():
             assert elem_path.find('root.') == -1
 
+        self._elem_paths_by_cid = {
+            k:v for v,k in self._cids_by_elem_path.items()
+        }
+
     def GetTree(self):
         return self._simhier_tree
 
@@ -127,6 +131,9 @@ class SimHierarchy:
     
     def GetCollectionID(self, elem_path):
         return self._cids_by_elem_path.get(elem_path)
+
+    def GetElemPathByCollectionID(self, cid):
+        return self._elem_paths_by_cid.get(cid)
 
     def GetContainerIDs(self):
         return self._contig_cids | self._sparse_cids

@@ -1,0 +1,73 @@
+import wx
+from viewer.gui.widgets.button import CreateButton
+
+class SearchResultsPanel(wx.Panel):
+    """Panel shown above the playback bar that lists search results.
+
+    It is hidden until results are available, and the user can hide it
+    again with the 'X' button in the top-right corner.
+    """
+
+    COLUMNS = ('tick', 'cyc', 'clock', 'path', 'widget')
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.SetBackgroundColour('light gray')
+
+        self.title_text = wx.StaticText(self, label='Search results')
+        font = self.title_text.GetFont()
+        font.SetWeight(wx.FONTWEIGHT_BOLD)
+        self.title_text.SetFont(font)
+
+        self.close_btn = CreateButton(self, label='X', size=(36, 22))
+        self.close_btn.SetToolTip('Close search results')
+        self.close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.HidePanel())
+
+        self.list_ctrl = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        for name in self.COLUMNS:
+            self.list_ctrl.AppendColumn(name)
+
+        header = wx.BoxSizer(wx.HORIZONTAL)
+        header.Add(self.title_text, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5)
+        header.Add(self.close_btn, 0, wx.ALL, 2)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(header, 0, wx.EXPAND)
+        sizer.Add(self.list_ctrl, 1, wx.EXPAND)
+        self.SetSizer(sizer)
+        self.SetMinSize((-1, 150))
+
+        self.Hide()
+
+    def ShowResults(self, entries: list):
+        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget) tuple."""
+        self.list_ctrl.DeleteAllItems()
+        for entry in entries:
+            row = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), str(entry[0]))
+            for col, value in enumerate(entry[1:], start=1):
+                self.list_ctrl.SetItem(row, col, str(value))
+
+        self.__FitColumns()
+
+        self.title_text.SetLabel(f'Search results ({len(entries)})')
+        self.__SetVisible(True)
+
+    def HidePanel(self):
+        self.__SetVisible(False)
+
+    def __SetVisible(self, visible: bool):
+        if self.IsShown() != visible:
+            self.Show(visible)
+
+        # Re-layout the parent so the panel's space is given/returned to the inspector.
+        self.GetParent().Layout()
+
+    def __FitColumns(self):
+        # Rows don't change once populated, so size each column to the wider of
+        # its contents and its header.
+        for col in range(len(self.COLUMNS)):
+            self.list_ctrl.SetColumnWidth(col, wx.LIST_AUTOSIZE)
+            content_width = self.list_ctrl.GetColumnWidth(col)
+            self.list_ctrl.SetColumnWidth(col, wx.LIST_AUTOSIZE_USEHEADER)
+            header_width = self.list_ctrl.GetColumnWidth(col)
+            self.list_ctrl.SetColumnWidth(col, max(content_width, header_width))

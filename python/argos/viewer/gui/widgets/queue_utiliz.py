@@ -85,6 +85,10 @@ class QueueUtilizWidget(wx.Panel):
 
         wx.CallAfter(self.UpdateWidgetData)
 
+    def CreateSearchResults(self, data_constraints: dict, path_constraints: str = ''):
+        # Search is not applicable to the queue utiliz widget.
+        return None
+
     def __EditWidget(self, event):
         dlg = QueueUtilizEditDlg(
             self, self.frame, self.container_elem_paths, self.show_full_paths,

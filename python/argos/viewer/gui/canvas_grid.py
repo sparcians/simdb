@@ -121,10 +121,24 @@ class CanvasGrid(wx.Panel):
     def __GetWidgetContainers(self, widget_containers):
         if isinstance(self.container, WidgetContainer):
             widget_containers.append(self.container)
+        elif isinstance(self.container, DirtySplitterWindow):
+            win1 = self.container.Window1
+            win2 = self.container.Window2
+            if isinstance(win1, CanvasGrid):
+                win1.__GetWidgetContainers(widget_containers)
+            if isinstance(win2, CanvasGrid):
+                win2.__GetWidgetContainers(widget_containers)
         else:
             for child in self.container.GetChildren():
                 if isinstance(child, CanvasGrid):
                     child.__GetWidgetContainers(widget_containers)
+                elif isinstance(child, DirtySplitterWindow):
+                    win1 = child.Window1
+                    win2 = child.Window2
+                    if isinstance(win1, CanvasGrid):
+                        win1.__GetWidgetContainers(widget_containers)
+                    if isinstance(win2, CanvasGrid):
+                        win2.__GetWidgetContainers(widget_containers)
 
     def __BuildGrid(self, splitter, rows, cols):
         assert rows > 0 and cols > 0
