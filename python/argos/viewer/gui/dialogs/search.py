@@ -12,8 +12,13 @@ class Search(wx.Dialog):
         assert len(cycle_range) in (0,2)
         self.frame = frame
 
-        self.data_constraints = wx.TextCtrl(self, value=search_params, size=(400, -1))
+        # Most recent searches first. ENTER is handled like pressing 'Find'.
+        self.data_constraints = wx.ComboBox(
+            self, value=search_params, choices=list(frame.search_history),
+            size=(400, -1), style=wx.CB_DROPDOWN | wx.TE_PROCESS_ENTER)
         self.data_constraints.Bind(wx.EVT_TEXT, self.__ValidateFind)
+        self.data_constraints.Bind(wx.EVT_COMBOBOX, self.__ValidateFind)
+        self.data_constraints.Bind(wx.EVT_TEXT_ENTER, self.__OnEnter)
 
         if elem_path:
             self.path_constraints = wx.RadioBox(
@@ -64,6 +69,10 @@ class Search(wx.Dialog):
 
     def GetDataConstraints(self):
         return self.NormalizeDataConstraints(self.data_constraints.GetValue())
+
+    def GetDataConstraintsText(self):
+        # What the user typed (or picked from the history), with whitespace tidied.
+        return ' '.join(self.data_constraints.GetValue().split())
 
     def GetPathConstraints(self):
         if self.path_constraints:
@@ -166,6 +175,12 @@ class Search(wx.Dialog):
         else:
             self.find_button.Enable()
             self.find_button.UnsetToolTip()
+
+    def __OnEnter(self, evt):
+        if self.find_button.IsEnabled():
+            self.__DoFind(evt)
+        else:
+            wx.Bell()
 
     def __DoFind(self, evt):
         self.EndModal(wx.ID_OK)

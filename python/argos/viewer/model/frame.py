@@ -15,6 +15,8 @@ from viewer.gui.widgets.button import CreateButton
 from viewer.gui.dialogs.search import Search
 
 class ArgosFrame(wx.Frame):
+    MAX_SEARCH_HISTORY = 20
+
     def __init__(self, db_path, view_settings):
         super().__init__(None, title=db_path)
 
@@ -25,6 +27,9 @@ class ArgosFrame(wx.Frame):
 
         # (data_constraints, path_constraints) of the search whose results are being shown, if any.
         self._active_search = None
+
+        # The data constraints most recently searched for in the Search dialog, newest first.
+        self.search_history = []
         self.dtype_inspector = DataTypeInspector(db_path)
         self.simhier = SimHierarchy(self.db, self.dtype_inspector)
         self.widget_renderer = WidgetRenderer(self)
@@ -273,9 +278,23 @@ class ArgosFrame(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             data_constraints = dlg.GetDataConstraints()
             path_constraints = dlg.GetPathConstraints()
+            self.__AddToSearchHistory(dlg.GetDataConstraintsText())
             self.RunSearch(data_constraints, path_constraints)
 
         dlg.Destroy()
+
+    def __AddToSearchHistory(self, text):
+        if text in self.search_history:
+            self.search_history.remove(text)
+        self.search_history.insert(0, text)
+        del self.search_history[self.MAX_SEARCH_HISTORY:]
+
+    def GetCurrentUserSettings(self):
+        return {'search_history': list(self.search_history)}
+
+    def ApplyUserSettings(self, settings):
+        history = settings.get('search_history') or []
+        self.search_history = [str(text) for text in history][:self.MAX_SEARCH_HISTORY]
 
     def __GetClockForElemPath(self, elem_path):
         if self._clocks_by_id is None:
