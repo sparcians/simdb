@@ -262,7 +262,7 @@ class ArgosFrame(wx.Frame):
 
     def __ShowSearchResults(self, results):
         # They all have a 'widget' field and an 'nvps' field. We will show a wx.ListCtrl
-        # with the columns: tick, cyc, clock, path, widget, data.
+        # with the columns: (auto-color/tag), tick, cyc, clock, path, widget, data.
         #
         # Some results have a 'tick' field, but for those that don't we will assume
         # it is the current tick.
@@ -278,12 +278,33 @@ class ArgosFrame(wx.Frame):
 
             # Widget results hold a dict of name/value pairs; database results hold
             # the raw list of (name, value) pairs from UnpackRange.
-            pairs = r.nvps.items() if isinstance(r.nvps, dict) else r.nvps
+            pairs = list(r.nvps.items() if isinstance(r.nvps, dict) else r.nvps or [])
             data = [(str(k), str(v)) for k, v in pairs]
+            color, tag = self.__GetSearchResultColorAndTag(r.elem_path, pairs, data)
 
-            entries.append((tick, cycle, clock_name, r.elem_path, type(r.widget).__name__, data))
+            entries.append((tick, cycle, clock_name, r.elem_path, type(r.widget).__name__, data, color, tag))
 
         self.search_results_panel.ShowResults(entries)
+
+    def __GetSearchResultColorAndTag(self, elem_path, pairs, data):
+        # Same keying as the detailed packet column in SchedulingLinesWidget: the
+        # auto-colorize column's value for structs, otherwise the whole text.
+        auto_colorize_column = self.data_retriever.GetAutoColorizeColumn(elem_path)
+        key = None
+        for name, value in pairs:
+            if name == auto_colorize_column:
+                key = value
+                # Widgets hand back stringified values, but the auto-color index is
+                # keyed on the raw (integer) values from the database.
+                if isinstance(key, str) and key.isdigit():
+                    key = int(key)
+                break
+
+        if key is None:
+            key = ' '.join(f'{k}({v})' for k, v in data)
+
+        return (self.widget_renderer.GetAutoColor(key, elem_path),
+                self.widget_renderer.GetAutoTag(key, elem_path))
 
     class SearchResult:
         def __init__(self, frame, tick, cid, nvps):

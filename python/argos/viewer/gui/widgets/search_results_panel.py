@@ -8,7 +8,8 @@ class SearchResultsPanel(wx.Panel):
     again with the 'X' button in the top-right corner.
     """
 
-    COLUMNS = ('tick', 'cyc', 'clock', 'path', 'widget', 'data')
+    COLUMNS = ('', 'tick', 'cyc', 'clock', 'path', 'widget', 'data')
+    TAG_SIZE = (24, 16)
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -43,10 +44,11 @@ class SearchResultsPanel(wx.Panel):
         self.Hide()
 
     def ShowResults(self, entries: list):
-        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget, data) tuple.
+        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget, data, color, tag) tuple.
 
         'data' is a list of (name, value) pairs. It is shown as 'name(value)' pairs
         padded so that the same field lines up across rows with the same field names.
+        'color' and 'tag' are the row's auto-color and auto-tag, shown in the first column.
         """
         # Rows with the same field names are assumed to share a struct type, and are
         # aligned together (same approach as the detailed packet column in SchedulingLinesWidget).
@@ -58,12 +60,24 @@ class SearchResultsPanel(wx.Panel):
                 lens[name] = max(lens.get(name, 0), len(value))
 
         self.list_ctrl.DeleteAllItems()
+        # SetImageList() doesn't take ownership, so the list must outlive this call.
+        self.image_list = wx.ImageList(*self.TAG_SIZE)
+        image_list = self.image_list
+        image_idxs = {}
+        self.list_ctrl.SetImageList(image_list, wx.IMAGE_LIST_SMALL)
+
         for entry in entries:
             lens = max_lens[tuple(name for name, _ in entry[5])]
             data = ' ' + ' '.join(f'{name}({value})' + ' ' * (lens[name] - len(value))
                                   for name, value in entry[5])
-            row = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), str(entry[0]))
-            for col, value in enumerate(entry[1:5] + (data,), start=1):
+
+            color, tag = entry[6], entry[7]
+            key = (wx.Colour(color).GetRGB(), tag)
+            if key not in image_idxs:
+                image_idxs[key] = image_list.Add(self.__CreateTagBitmap(color, tag))
+
+            row = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), '', image_idxs[key])
+            for col, value in enumerate(entry[:5] + (data,), start=1):
                 self.list_ctrl.SetItem(row, col, str(value))
 
         self.__FitColumns()
@@ -80,6 +94,24 @@ class SearchResultsPanel(wx.Panel):
 
         # Re-layout the parent so the panel's space is given/returned to the inspector.
         self.GetParent().Layout()
+
+    def __CreateTagBitmap(self, color, tag: str):
+        # wx.ListCtrl can't colour individual cells, so the auto-color/tag is drawn
+        # into a bitmap shown as the first column's image.
+        width, height = self.TAG_SIZE
+        bitmap = wx.Bitmap(width, height)
+        dc = wx.MemoryDC(bitmap)
+        dc.SetBackground(wx.Brush(wx.Colour(color)))
+        dc.Clear()
+        dc.SetPen(wx.BLACK_PEN)
+        dc.SetBrush(wx.TRANSPARENT_BRUSH)
+        dc.DrawRectangle(0, 0, width, height)
+        dc.SetFont(self.list_ctrl.GetFont())
+        dc.SetTextForeground(wx.BLACK)
+        text_width, text_height = dc.GetTextExtent(tag)
+        dc.DrawText(tag, (width - text_width) // 2, (height - text_height) // 2)
+        dc.SelectObject(wx.NullBitmap)
+        return bitmap
 
     def __FitColumns(self):
         # Rows don't change once populated, so size each column to the wider of
