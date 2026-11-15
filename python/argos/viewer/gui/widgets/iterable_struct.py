@@ -210,12 +210,6 @@ class IterableStruct(wx.Panel):
             self.row = row
             self.elem_path = widget.elem_path
 
-        def BringIntoFocus(self):
-            print(f"TODO XXX: BringIntoFocus {self}")
-
-        def TakeOutOfFocus(self):
-            print(f"TODO XXX: TakeOutOfFocus {self}")
-
 class UtilizElement(DefaultStaticText):
     def __init__(self, parent, frame, capacity):
         super().__init__(parent)

@@ -264,7 +264,7 @@ class ArgosFrame(wx.Frame):
         # 'results' is a list of (result, tab_name) pairs, where tab_name is None for results
         # that came from the database. They all have a 'widget' field and an 'nvps' field.
         # We will show a wx.ListCtrl with the columns: (auto-color/tag), tick, cyc, clock,
-        # path, source, data.
+        # path, caption, source, data.
         #
         # Some results have a 'tick' field, but for those that don't we will assume
         # it is the current tick.
@@ -294,7 +294,9 @@ class ArgosFrame(wx.Frame):
                 if show_tab_names and tab_name:
                     source = f'{source} ({tab_name})'
 
-            entries.append((tick, cycle, clock_name, r.elem_path, source, data, color, tag))
+            caption = getattr(r, 'caption', '')
+
+            entries.append((tick, cycle, clock_name, r.elem_path, caption, source, data, color, tag))
 
         self.search_results_panel.ShowResults(entries)
 
@@ -325,9 +327,3 @@ class ArgosFrame(wx.Frame):
             self.frame = frame
             self.tick = tick
             self.nvps = nvps
-
-        def BringIntoFocus(self):
-            print(f"TODO XXX: BringIntoFocus {self}")
-
-        def TakeOutOfFocus(self):
-            print(f"TODO XXX: TakeOutOfFocus {self}")

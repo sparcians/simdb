@@ -8,7 +8,7 @@ class SearchResultsPanel(wx.Panel):
     again with the 'X' button in the top-right corner.
     """
 
-    COLUMNS = ('', 'tick', 'cyc', 'clock', 'path', 'source', 'data')
+    COLUMNS = ('', 'tick', 'cyc', 'clock', 'path', 'caption', 'source', 'data')
     TAG_SIZE = (24, 16)
 
     def __init__(self, parent):
@@ -44,7 +44,8 @@ class SearchResultsPanel(wx.Panel):
         self.Hide()
 
     def ShowResults(self, entries: list):
-        """Show one row per entry, where each entry is a (tick, cyc, clock, path, widget, data, color, tag) tuple.
+        """Show one row per entry, where each entry is a
+        (tick, cyc, clock, path, caption, source, data, color, tag) tuple.
 
         'data' is a list of (name, value) pairs. It is shown as 'name(value)' pairs
         padded so that the same field lines up across rows with the same field names.
@@ -54,9 +55,9 @@ class SearchResultsPanel(wx.Panel):
         # aligned together (same approach as the detailed packet column in SchedulingLinesWidget).
         max_lens = {}
         for entry in entries:
-            fields = tuple(name for name, _ in entry[5])
+            fields = tuple(name for name, _ in entry[6])
             lens = max_lens.setdefault(fields, {})
-            for name, value in entry[5]:
+            for name, value in entry[6]:
                 lens[name] = max(lens.get(name, 0), len(value))
 
         self.list_ctrl.DeleteAllItems()
@@ -67,17 +68,17 @@ class SearchResultsPanel(wx.Panel):
         self.list_ctrl.SetImageList(image_list, wx.IMAGE_LIST_SMALL)
 
         for entry in entries:
-            lens = max_lens[tuple(name for name, _ in entry[5])]
+            lens = max_lens[tuple(name for name, _ in entry[6])]
             data = ' ' + ' '.join(f'{name}({value})' + ' ' * (lens[name] - len(value))
-                                  for name, value in entry[5])
+                                  for name, value in entry[6])
 
-            color, tag = entry[6], entry[7]
+            color, tag = entry[7], entry[8]
             key = (wx.Colour(color).GetRGB(), tag)
             if key not in image_idxs:
                 image_idxs[key] = image_list.Add(self.__CreateTagBitmap(color, tag))
 
             row = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), '', image_idxs[key])
-            for col, value in enumerate(entry[:5] + (data,), start=1):
+            for col, value in enumerate(entry[:6] + (data,), start=1):
                 self.list_ctrl.SetItem(row, col, str(value))
 
         self.__FitColumns()

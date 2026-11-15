@@ -205,26 +205,46 @@ class SchedulingLinesWidget(wx.Panel):
                 # Scalar structs hold one list of (name, value) pairs; queues hold one
                 # such list per bin. Plain scalar values have no names to match.
                 if is_scalar:
-                    bins = [(scalar_row, data)] if isinstance(data, (list, tuple)) else []
+                    bins = [(scalar_row, data, None)] if isinstance(data, (list, tuple)) else []
                 else:
                     bins = []
                     for bin_idx, annos in enumerate(data):
                         rasterizer = self.rasterizers.get((elem_path, bin_idx))
                         if annos and rasterizer:
-                            bins.append((rasterizer.row, annos))
+                            bins.append((rasterizer.row, annos, bin_idx))
 
-                for row, annos in bins:
+                for row, annos, bin_idx in bins:
                     nvps = OrderedDict((k, str(v)) for k, v in annos)
                     if all(nvps.get(k) == v for k, v in constraints):
-                        results.append(self.__CreateSearchResult(elem_path, nvps, row, col))
+                        results.append(self.__CreateSearchResult(elem_path, nvps, row, col, bin_idx))
 
         return results
 
     def GetSearchResultSourceName(self):
         return 'Scheduling Lines'
 
-    def __CreateSearchResult(self, elem_path: str, nvps: dict, row: int, col: int):
-        return self.SearchResult(self, elem_path, nvps, row, col)
+    def __CreateSearchResult(self, elem_path: str, nvps: dict, row: int, col: int, bin_idx):
+        caption = self.__GetCustomCaption(elem_path, bin_idx)
+        return self.SearchResult(self, elem_path, nvps, row, col, caption)
+
+    def __GetCustomCaption(self, elem_path, bin_idx):
+        # Only captions explicitly set in the CaptionManager (custom_captions) count.
+        # The default caption derived from the elem path is not one, so it gives ''.
+        segment = {} if bin_idx is None else {'bin': bin_idx}
+        custom_caption = self.caption_mgr.GetCustomCaption(self.__SegmentElemPathTooltip(elem_path, segment))
+        if custom_caption is not None:
+            return custom_caption
+
+        if bin_idx is not None:
+            range_caption = self.caption_mgr.GetRangeCaption(elem_path, bin_idx)
+            if range_caption is not None:
+                return f'{range_caption}[{bin_idx}]'
+
+            container_caption = self.caption_mgr.GetCustomCaption(elem_path)
+            if container_caption is not None:
+                return f'{container_caption}[{bin_idx}]'
+
+        return ''
 
     def __AddElement(self, elem_path):
         assert elem_path not in self.caption_mgr.GetAllMatchingElemPaths()
@@ -965,7 +985,7 @@ class SchedulingLinesWidget(wx.Panel):
         widget_container.LaunchSchedulingLinesViewer()
 
     class SearchResult:
-        def __init__(self, widget: SchedulingLinesWidget, elem_path: str, nvps: dict, row: int, col: int):
+        def __init__(self, widget: SchedulingLinesWidget, elem_path: str, nvps: dict, row: int, col: int, caption: str = ''):
             self.widget = widget
             self.nvps = nvps
             self.row = row
@@ -992,12 +1012,7 @@ class SchedulingLinesWidget(wx.Panel):
             assert period
             self.tick = cycle * period
             self.elem_path = elem_path
-
-        def BringIntoFocus(self):
-            print(f"TODO XXX: BringIntoFocus {self}")
-
-        def TakeOutOfFocus(self):
-            print(f"TODO XXX: TakeOutOfFocus {self}")
+            self.caption = caption
 
 class CaptionManager:
     MINIMUM_CAPTION_PATH_PARTS = 2

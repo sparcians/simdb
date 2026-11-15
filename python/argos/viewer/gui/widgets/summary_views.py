@@ -185,12 +185,6 @@ class SummaryViews(wx.Panel):
             self.value_handler = value_handler
             self.nvps = Search.NormalizeDataConstraints(value_handler.GetLabel())
 
-        def BringIntoFocus(self):
-            print(f"TODO XXX: BringIntoFocus {self}")
-
-        def TakeOutOfFocus(self):
-            print(f"TODO XXX: TakeOutOfFocus {self}")
-
 class SummaryGrid(wx.Panel):
     def __init__(self, parent, frame, elem_paths, summary_views):
         wx.Panel.__init__(self, parent)
