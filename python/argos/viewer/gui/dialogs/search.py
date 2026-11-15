@@ -5,11 +5,9 @@ class Search(wx.Dialog):
     def __init__(self,
                  frame,
                  search_params: str = '',
-                 elem_path: str = '',
-                 cycle_range: list = []):
+                 elem_path: str = ''):
 
         wx.Dialog.__init__(self, None, title='Search')
-        assert len(cycle_range) in (0,2)
         self.frame = frame
 
         # Most recent searches first. ENTER is handled like pressing 'Find'.
@@ -60,13 +58,6 @@ class Search(wx.Dialog):
 
         self.__ValidateFind(None)
 
-        selected_clock = frame.playback_bar.clock_combobox.GetValue()
-        period = frame.playback_bar.clock_periods.get(selected_clock)
-        if not period:
-            self.cycle_range_chkbox.SetValue(False)
-            self.cycle_range_chkbox.Disable()
-            self.cycle_range_chkbox.SetToolTip('Clock must be selected')
-
     def GetDataConstraints(self):
         return self.NormalizeDataConstraints(self.data_constraints.GetValue())
 
@@ -110,13 +101,16 @@ class Search(wx.Dialog):
         )
 
     @staticmethod
-    def ResolveCycleRange(start, end, first_cycle, last_cycle, curr_cycle):
+    def ResolveCycleRange(start, end, first_cycle, last_cycle, curr_cycle, unit='cycle'):
         """
         Resolve the start/end text into absolute (start_cycle, end_cycle).
         Raises ValueError with a user-facing message if the range is invalid.
 
         Start: '' | 'start' | 'end' | '-N' (N cycles before current) | N (absolute)
         End:   '' | 'start' | 'end' | '+N' (N cycles after current)  | N (absolute)
+
+        The numbers can be in any unit (e.g. 'tick') as long as they all use the same
+        one. 'unit' is only used to word the error messages.
         """
         start = ''.join(start.split()).lower()
         end = ''.join(end.split()).lower()
@@ -125,7 +119,7 @@ class Search(wx.Dialog):
             cycle = int(text)
             if not first_cycle <= cycle <= last_cycle:
                 raise ValueError(
-                    f'{name} cycle {cycle} is outside of [{first_cycle}, {last_cycle}]'
+                    f'{name} {unit} {cycle} is outside of [{first_cycle}, {last_cycle}]'
                 )
             return cycle
 
@@ -139,8 +133,8 @@ class Search(wx.Dialog):
             start_cycle = absolute(start, 'Start')
         else:
             raise ValueError(
-                "Start must be empty, 'start', 'end', '-N' (N previous cycles), "
-                "or an absolute cycle"
+                f"Start must be empty, 'start', 'end', '-N' (N previous {unit}s), "
+                f"or an absolute {unit}"
             )
 
         if end in ('', 'end'):
@@ -153,13 +147,13 @@ class Search(wx.Dialog):
             end_cycle = absolute(end, 'End')
         else:
             raise ValueError(
-                "End must be empty, 'start', 'end', '+N' (N future cycles), "
-                "or an absolute cycle"
+                f"End must be empty, 'start', 'end', '+N' (N future {unit}s), "
+                f"or an absolute {unit}"
             )
 
         if start_cycle > end_cycle:
             raise ValueError(
-                f'Cycle range is out of order ({start_cycle} > {end_cycle})'
+                f'{unit.capitalize()} range is out of order ({start_cycle} > {end_cycle})'
             )
 
         return start_cycle, end_cycle

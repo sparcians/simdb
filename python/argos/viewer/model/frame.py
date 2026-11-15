@@ -1,4 +1,4 @@
-import wx, sqlite3, os
+import wx, sqlite3, os, time
 from functools import partial
 from viewer.gui.widgets.playback_bar import PlaybackBar
 from viewer.gui.widgets.search_results_panel import SearchResultsPanel
@@ -30,6 +30,9 @@ class ArgosFrame(wx.Frame):
 
         # The data constraints most recently searched for in the Search dialog, newest first.
         self.search_history = []
+
+        # (start, end, unit) of the last database search. Kept for the session only.
+        self._last_db_range = None
         self.dtype_inspector = DataTypeInspector(db_path)
         self.simhier = SimHierarchy(self.db, self.dtype_inspector)
         self.widget_renderer = WidgetRenderer(self)
@@ -39,6 +42,9 @@ class ArgosFrame(wx.Frame):
         self.playback_bar = PlaybackBar(self)
         self.search_results_panel = SearchResultsPanel(self)
         self.search_results_panel.on_hide = self.__OnSearchResultsHidden
+        self.search_results_panel.validate_db_range = self.__ValidateDatabaseRange
+        self.search_results_panel.on_search_db = self.RunDatabaseSearch
+        self.search_results_panel.on_go_to_db_result = self.__GoToDatabaseResult
 
         self.menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
@@ -55,15 +61,12 @@ class ArgosFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda event: self.Close(), exit_argos)
 
         self.menu_bar.Append(file_menu, '&File')
-
-        find_menu = wx.Menu()
-        search_widgets = find_menu.Append(-1, '&Search widgets\tCtrl-F', 'Search widgets')
-        search_everywhere = find_menu.Append(-1, '&Search everywhere\tCtrl-Shift-F', 'Search everywhere')
-        self.Bind(wx.EVT_MENU, self.__SearchWidgets, search_widgets)
-        self.Bind(wx.EVT_MENU, self.__SearchEverywhere, search_everywhere)
-        self.menu_bar.Append(find_menu, '&Search')
-
         self.SetMenuBar(self.menu_bar)
+
+        # Ctrl-F opens the Search dialog. There is no menu item for it, so it needs its own accelerator.
+        self._search_id = wx.NewIdRef()
+        self.Bind(wx.EVT_MENU, self.__RunSearchDialog, id=self._search_id)
+        self.SetAcceleratorTable(wx.AcceleratorTable([(wx.ACCEL_CTRL, ord('F'), self._search_id)]))
 
         # Layout
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -162,13 +165,14 @@ class ArgosFrame(wx.Frame):
     def RunSearch(self,
                   data_constraints: str,
                   path_constraints: str = '',
-                  cycle_constraints: list = []):
+                  range_unit: str = None):
 
         data_constraints = Search.NormalizeDataConstraints(data_constraints)
         assert data_constraints
         assert not path_constraints or path_constraints in self.simhier.GetElemPaths(leaves_only=True)
-        assert len(cycle_constraints) in (0,2)
 
+        start_time = time.perf_counter()
+        cycle_constraints = []#['start', 'end']
         results = []
 
         # Give first priority to the on-screen search (find this data on existing widgets).
@@ -182,26 +186,135 @@ class ArgosFrame(wx.Frame):
                     if result:
                         results.extend((r, tab_name) for r in result if r is not None)
 
+        self._active_search = (data_constraints, path_constraints)
+
+        search_text = ' '.join(f'{k}({v})' for k, v in data_constraints.items())
+        if path_constraints:
+            search_text += f' in {path_constraints}'
+
+        panel = self.search_results_panel
+        panel.ShowResults(self.__CreateSearchEntries(results), search_text, self.__RefreshSearch)
+
+        # The database range comes from the caller (e.g. 'start'/'end' for Search
+        # everywhere), otherwise the last range that was searched is offered again.
         if cycle_constraints:
-            selected_clock = self.playback_bar.clock_combobox.GetValue()
-            period = self.playback_bar.clock_periods.get(selected_clock)
-            tick_range = [period * cyc for cyc in cycle_constraints]
-
-            # These tick/CID pairs isolate the DB blob records that contain
-            # the matches. They are not consumed yet.
-            tick_cid_nvps_tuples = self.__FindMatchingTickCIDs(
-                tick_range, data_constraints, path_constraints)
-
-            results.extend([
-                (self.__CreateDatabaseSearchResult(tick, cid, nvps), None) for tick,cid,nvps in tick_cid_nvps_tuples
-            ])
-
-        self.__ShowSearchResults(results, data_constraints, path_constraints,
-                                 lambda: self.RunSearch(data_constraints, path_constraints, cycle_constraints))
+            unit = range_unit or self.__GetDefaultRangeUnit()
+            panel.SetDatabaseRange(str(cycle_constraints[0]), str(cycle_constraints[1]), unit)
+        else:
+            panel.SetDatabaseRange(*self.__GetInitialDatabaseRange())
 
         # Widgets highlight any data matching the active search while the results are shown.
-        self._active_search = (data_constraints, path_constraints)
         self.inspector.RefreshWidgetsOnAllTabs()
+
+        if cycle_constraints:
+            self.__RunDatabaseSearch(*panel.GetDatabaseRange())
+
+        panel.SetElapsedTime(time.perf_counter() - start_time)
+
+    def RunDatabaseSearch(self, start_text: str, end_text: str, unit: str):
+        """Searches the database over the given range for the active search, replacing
+        any database results already shown."""
+        start_time = time.perf_counter()
+        if self.__RunDatabaseSearch(start_text, end_text, unit):
+            self.search_results_panel.SetElapsedTime(time.perf_counter() - start_time)
+
+    def __RunDatabaseSearch(self, start_text: str, end_text: str, unit: str):
+        # Returns whether a search was run (False if there is no active search or the range is invalid).
+        if self._active_search is None:
+            return False
+
+        data_constraints, path_constraints = self._active_search
+        try:
+            tick_range = self.__ResolveDatabaseRange(start_text, end_text, unit)
+        except ValueError as ex:
+            wx.MessageBox(str(ex), 'Search DB', wx.OK | wx.ICON_ERROR)
+            return False
+
+        self._last_db_range = (start_text, end_text, unit)
+
+        wx.BeginBusyCursor()
+        try:
+            # These tick/CID pairs isolate the DB blob records that contain the matches.
+            tick_cid_nvps_tuples = self.__FindMatchingTickCIDs(
+                tick_range, data_constraints, path_constraints)
+        finally:
+            wx.EndBusyCursor()
+
+        results = [
+            (self.__CreateDatabaseSearchResult(tick, cid, nvps), None) for tick,cid,nvps in tick_cid_nvps_tuples
+        ]
+        self.search_results_panel.SetDatabaseResults(self.__CreateSearchEntries(results))
+        return True
+
+    def __RefreshSearch(self):
+        if self._active_search is None:
+            return
+
+        data_constraints, path_constraints = self._active_search
+        panel = self.search_results_panel
+        db_range = panel.GetDatabaseRange()
+        if panel.HasDatabaseResults():
+            self.RunSearch(data_constraints, path_constraints, list(db_range[:2]), db_range[2])
+        else:
+            # Keep whatever is typed in the database inputs.
+            self.RunSearch(data_constraints, path_constraints)
+            panel.SetDatabaseRange(*db_range)
+
+    def __GetSelectedClockPeriod(self):
+        period = self.playback_bar.clock_periods.get(self.playback_bar.clock_combobox.GetValue())
+        return int(period) if period else None
+
+    def __GetDefaultRangeUnit(self):
+        return 'cycles' if self.__GetSelectedClockPeriod() else 'ticks'
+
+    DEFAULT_RANGE_WINDOW_CYCLES = 100
+
+    def __GetInitialDatabaseRange(self):
+        default_unit = self.__GetDefaultRangeUnit()
+        if self._last_db_range and self._last_db_range[2] in (default_unit, 'ticks'):
+            return self._last_db_range
+
+        # Searching the whole database can take minutes, so start from a window around
+        # the current time. Without a selected clock the window is sized with the slowest
+        # clock's period, so it still covers at least that many cycles of every clock.
+        window = self.DEFAULT_RANGE_WINDOW_CYCLES
+        if default_unit == 'ticks':
+            window *= max(int(period) for period in self.playback_bar.clock_periods.values())
+        return (f'-{window}', f'+{window}', default_unit)
+
+    def __ResolveDatabaseRange(self, start_text, end_text, unit):
+        """Returns the (start_tick, end_tick) of the text range, or raises a ValueError
+        with a user-facing message."""
+        widget_renderer = self.widget_renderer
+        start_tick = int(widget_renderer.start_tick)
+        end_tick = int(widget_renderer.end_tick)
+        current_tick = int(widget_renderer.tick)
+
+        if unit == 'cycles':
+            period = self.__GetSelectedClockPeriod()
+            if not period:
+                raise ValueError('A clock must be selected to search by cycles')
+
+            start_cycle, end_cycle = Search.ResolveCycleRange(
+                start_text, end_text, start_tick // period, end_tick // period, current_tick // period)
+            return start_cycle * period, end_cycle * period
+
+        return Search.ResolveCycleRange(start_text, end_text, start_tick, end_tick, current_tick, unit='tick')
+
+    def __ValidateDatabaseRange(self, start_text, end_text, unit):
+        try:
+            self.__ResolveDatabaseRange(start_text, end_text, unit)
+        except ValueError as ex:
+            return str(ex)
+        return None
+
+    def __GoToDatabaseResult(self, tick):
+        # With a clock selected we go to that clock's cycle, otherwise to the exact tick.
+        tick = int(tick)
+        period = self.__GetSelectedClockPeriod()
+        if period:
+            tick = tick // period * period
+        self.widget_renderer.GoToTick(tick)
 
     def MatchesActiveSearch(self, elem_path, nvps):
         """Whether the name/value pairs (a dict or a list of pairs) found at elem_path
@@ -239,7 +352,9 @@ class ArgosFrame(wx.Frame):
                 all(isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[0], str)
                     for pair in value)
 
-        tick_cid_nvps_tuples = set()
+        # At most one match per element and tick. Keyed rather than a set of tuples
+        # because a struct is a list and so can't be hashed.
+        matches = {}
         for elem_path, vals in unpacked.items():
             cid = self.simhier.GetCollectionID(elem_path)
             for tick, data in zip(vals['TimeVals'], vals['DataVals']):
@@ -253,10 +368,10 @@ class ArgosFrame(wx.Frame):
 
                 for struct in structs:
                     if Matches({k: str(v) for k, v in struct}):
-                        tick_cid_nvps_tuples.add((tick, cid, struct))
+                        matches[(tick, cid)] = struct
                         break
 
-        return sorted(tick_cid_nvps_tuples)
+        return [(tick, cid, struct) for (tick, cid), struct in sorted(matches.items(), key=lambda kv: kv[0])]
 
     def __OnNewView(self, event):
         self.view_settings.CreateNewView()
@@ -267,14 +382,8 @@ class ArgosFrame(wx.Frame):
     def __OnSaveView(self, event):
         self.view_settings.SaveView()
 
-    def __SearchWidgets(self, evt):
-        self.__RunSearchDialog([])
-
-    def __SearchEverywhere(self, evt):
-        self.__RunSearchDialog(['start', 'end'])
-
-    def __RunSearchDialog(self, cycle_range: list):
-        dlg = Search(self, cycle_range=cycle_range)
+    def __RunSearchDialog(self, event):
+        dlg = Search(self)
         if dlg.ShowModal() == wx.ID_OK:
             data_constraints = dlg.GetDataConstraints()
             path_constraints = dlg.GetPathConstraints()
@@ -305,7 +414,7 @@ class ArgosFrame(wx.Frame):
         clk_id = self.simhier.GetMetaAtPath(elem_path, 'ClkID')
         return self._clocks_by_id.get(clk_id, ('', None))
 
-    def __ShowSearchResults(self, results, data_constraints, path_constraints, rerun_search):
+    def __CreateSearchEntries(self, results):
         # 'results' is a list of (result, tab_name) pairs, where tab_name is None for results
         # that came from the database. They all have a 'widget' field and an 'nvps' field.
         # We will show a wx.ListCtrl with the columns: (auto-color/tag), tick, cyc, clock,
@@ -343,11 +452,7 @@ class ArgosFrame(wx.Frame):
 
             entries.append((tick, cycle, clock_name, r.elem_path, caption, source, data, color, tag))
 
-        search_text = ' '.join(f'{k}({v})' for k, v in data_constraints.items())
-        if path_constraints:
-            search_text += f' in {path_constraints}'
-
-        self.search_results_panel.ShowResults(entries, search_text, rerun_search)
+        return entries
 
     def __GetSearchResultColorAndTag(self, elem_path, pairs, data):
         # Same keying as the detailed packet column in SchedulingLinesWidget: the
