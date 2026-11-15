@@ -25,9 +25,11 @@ class SearchResultsPanel(wx.Panel):
         self.refresh_btn.Bind(wx.EVT_BUTTON, self.__OnRefresh)
         self._rerun_search = None
 
+        # Called after the panel is hidden, e.g. so widgets can drop their search highlights.
+        self.on_hide = None
         self.search_text = wx.StaticText(self, label='')
 
-        self.close_btn = CreateButton(self, label='Close', size=(36, 22))
+        self.close_btn = CreateButton(self, label='Close', size=(70, 22))
         self.close_btn.SetToolTip('Close search results')
         self.close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.HidePanel())
 
@@ -107,6 +109,8 @@ class SearchResultsPanel(wx.Panel):
 
     def HidePanel(self):
         self.__SetVisible(False)
+        if self.on_hide:
+            self.on_hide()
 
     def __OnRefresh(self, event):
         if self._rerun_search:

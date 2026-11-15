@@ -22,6 +22,9 @@ class ArgosFrame(wx.Frame):
         self.db = sqlite3.connect(db_path)
         self.view_settings = view_settings
         self._clocks_by_id = None
+
+        # (data_constraints, path_constraints) of the search whose results are being shown, if any.
+        self._active_search = None
         self.dtype_inspector = DataTypeInspector(db_path)
         self.simhier = SimHierarchy(self.db, self.dtype_inspector)
         self.widget_renderer = WidgetRenderer(self)
@@ -30,6 +33,7 @@ class ArgosFrame(wx.Frame):
         self.inspector = DataInspector(self, self)
         self.playback_bar = PlaybackBar(self)
         self.search_results_panel = SearchResultsPanel(self)
+        self.search_results_panel.on_hide = self.__OnSearchResultsHidden
 
         self.menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
@@ -189,6 +193,28 @@ class ArgosFrame(wx.Frame):
 
         self.__ShowSearchResults(results, data_constraints, path_constraints,
                                  lambda: self.RunSearch(data_constraints, path_constraints, cycle_constraints))
+
+        # Widgets highlight any data matching the active search while the results are shown.
+        self._active_search = (data_constraints, path_constraints)
+        self.inspector.RefreshWidgetsOnAllTabs()
+
+    def MatchesActiveSearch(self, elem_path, nvps):
+        """Whether the name/value pairs (a dict or a list of pairs) found at elem_path
+        satisfy the active search, so that widgets can highlight them."""
+        if self._active_search is None or not nvps:
+            return False
+
+        data_constraints, path_constraints = self._active_search
+        if path_constraints and elem_path != path_constraints:
+            return False
+
+        nvps = dict(nvps)
+        return all(k in nvps and str(nvps[k]) == str(v) for k, v in data_constraints.items())
+
+    def __OnSearchResultsHidden(self):
+        if self._active_search is not None:
+            self._active_search = None
+            self.inspector.RefreshWidgetsOnAllTabs()
 
     def __CreateDatabaseSearchResult(self, tick, cid, nvps):
         return self.SearchResult(self, tick, cid, nvps)

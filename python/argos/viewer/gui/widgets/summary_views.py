@@ -306,6 +306,11 @@ class SummaryGrid(wx.Panel):
 
             handler.UpdateValue(value)
 
+            # Only structs can match a search (not simple or integer summaries).
+            if isinstance(handler, SummaryGrid.StructSummary):
+                handler.SetSearchMatch(
+                    self.frame.MatchesActiveSearch(elem_path, Search.NormalizeDataConstraints(handler.GetLabel())))
+
     class SimpleSummary(DefaultStaticText):
         def __init__(self, parent, frame):
             DefaultStaticText.__init__(self, parent, label='TODO')
@@ -348,6 +353,10 @@ class SummaryGrid(wx.Panel):
             else:
                 self.SetLabel('(no data)')
                 self.UnsetToolTip()
+
+        def SetSearchMatch(self, matches: bool):
+            self.SetBackgroundColour(wx.Colour(255, 255, 0) if matches else wx.WHITE)
+            self.Refresh()
 
         def __HandleContextMenu(self, evt, auto_color):
             self.auto_color = auto_color

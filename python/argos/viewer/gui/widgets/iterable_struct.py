@@ -101,6 +101,8 @@ class IterableStruct(wx.Panel):
         else:
             num_rows_shown = 0
 
+        self.__HighlightSearchMatches()
+
         for i in range(num_rows_shown):
             self.grid.ShowRow(i)
 
@@ -109,6 +111,7 @@ class IterableStruct(wx.Panel):
 
         self.utiliz_elem.UpdateUtilizPct(self.frame.widget_renderer.utiliz_handler.GetUtilizPct(self.elem_path))
         self.grid.AutoSizeColumns()
+        self.grid.Refresh()
         self.Layout()
 
     def GetCurrentViewSettings(self):
@@ -176,10 +179,28 @@ class IterableStruct(wx.Panel):
         self.Layout()
 
     def __ClearGrid(self):
+        self.grid.ResetRowLabelBackgroundColours()
         for i in range(self.grid.GetNumberRows()):
             for j in range(self.grid.GetNumberCols()):
                 self.grid.SetCellValue(i, j, '')
                 self.grid.SetCellBackgroundColour(i, j, wx.WHITE)
+                self.grid.RemoveCellBorder(i, j)
+
+    def __HighlightSearchMatches(self):
+        # Matching rows get a yellow row label and a black border around the row.
+        num_cols = self.grid.GetNumberCols()
+        for row in range(self.grid.GetNumberRows()):
+            if not self.frame.MatchesActiveSearch(self.elem_path, self.__GetNameValuePairs(row)):
+                continue
+
+            self.grid.SetRowLabelBackgroundColour(row, wx.Colour(255, 255, 0))
+            for col in range(num_cols):
+                side = wx.TOP | wx.BOTTOM
+                if col == 0:
+                    side |= wx.LEFT
+                if col == num_cols - 1:
+                    side |= wx.RIGHT
+                self.grid.SetCellBorder(row, col, 2, side)
 
     def __EditWidget(self, event):
         assert self.elem_path not in (None, '')
