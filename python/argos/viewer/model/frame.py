@@ -187,7 +187,8 @@ class ArgosFrame(wx.Frame):
                 (self.__CreateDatabaseSearchResult(tick, cid, nvps), None) for tick,cid,nvps in tick_cid_nvps_tuples
             ])
 
-        self.__ShowSearchResults(results)
+        self.__ShowSearchResults(results, data_constraints, path_constraints,
+                                 lambda: self.RunSearch(data_constraints, path_constraints, cycle_constraints))
 
     def __CreateDatabaseSearchResult(self, tick, cid, nvps):
         return self.SearchResult(self, tick, cid, nvps)
@@ -246,8 +247,7 @@ class ArgosFrame(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             data_constraints = dlg.GetDataConstraints()
             path_constraints = dlg.GetPathConstraints()
-            cycle_constraints = dlg.GetCycleConstraints()
-            self.RunSearch(data_constraints, path_constraints, cycle_constraints)
+            self.RunSearch(data_constraints, path_constraints)
 
         dlg.Destroy()
 
@@ -260,7 +260,7 @@ class ArgosFrame(wx.Frame):
         clk_id = self.simhier.GetMetaAtPath(elem_path, 'ClkID')
         return self._clocks_by_id.get(clk_id, ('', None))
 
-    def __ShowSearchResults(self, results):
+    def __ShowSearchResults(self, results, data_constraints, path_constraints, rerun_search):
         # 'results' is a list of (result, tab_name) pairs, where tab_name is None for results
         # that came from the database. They all have a 'widget' field and an 'nvps' field.
         # We will show a wx.ListCtrl with the columns: (auto-color/tag), tick, cyc, clock,
@@ -298,7 +298,11 @@ class ArgosFrame(wx.Frame):
 
             entries.append((tick, cycle, clock_name, r.elem_path, caption, source, data, color, tag))
 
-        self.search_results_panel.ShowResults(entries)
+        search_text = ' '.join(f'{k}({v})' for k, v in data_constraints.items())
+        if path_constraints:
+            search_text += f' in {path_constraints}'
+
+        self.search_results_panel.ShowResults(entries, search_text, rerun_search)
 
     def __GetSearchResultColorAndTag(self, elem_path, pairs, data):
         # Same keying as the detailed packet column in SchedulingLinesWidget: the

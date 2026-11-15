@@ -20,7 +20,14 @@ class SearchResultsPanel(wx.Panel):
         font.SetWeight(wx.FONTWEIGHT_BOLD)
         self.title_text.SetFont(font)
 
-        self.close_btn = CreateButton(self, label='X', size=(36, 22))
+        self.refresh_btn = CreateButton(self, label='Refresh', size=(70, 22))
+        self.refresh_btn.SetToolTip('Rerun the search')
+        self.refresh_btn.Bind(wx.EVT_BUTTON, self.__OnRefresh)
+        self._rerun_search = None
+
+        self.search_text = wx.StaticText(self, label='')
+
+        self.close_btn = CreateButton(self, label='Close', size=(36, 22))
         self.close_btn.SetToolTip('Close search results')
         self.close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.HidePanel())
 
@@ -28,11 +35,16 @@ class SearchResultsPanel(wx.Panel):
         mono_font = wx.Font(self.list_ctrl.GetFont().GetPointSize(), wx.FONTFAMILY_TELETYPE,
                             wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         self.list_ctrl.SetFont(mono_font)
+        self.search_text.SetFont(mono_font)
         for name in self.COLUMNS:
             self.list_ctrl.AppendColumn(name)
 
         header = wx.BoxSizer(wx.HORIZONTAL)
-        header.Add(self.title_text, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5)
+        header.Add(self.title_text, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5)
+        header.Add(wx.StaticLine(self, style=wx.LI_VERTICAL), 0, wx.EXPAND | wx.ALL, 4)
+        header.Add(self.search_text, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 4)
+        header.Add(wx.StaticLine(self, style=wx.LI_VERTICAL), 0, wx.EXPAND | wx.ALL, 4)
+        header.Add(self.refresh_btn, 0, wx.ALL, 2)
         header.Add(self.close_btn, 0, wx.ALL, 2)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -43,14 +55,21 @@ class SearchResultsPanel(wx.Panel):
 
         self.Hide()
 
-    def ShowResults(self, entries: list):
+    def ShowResults(self, entries: list, search_text: str = '', rerun_search=None):
         """Show one row per entry, where each entry is a
         (tick, cyc, clock, path, caption, source, data, color, tag) tuple.
 
         'data' is a list of (name, value) pairs. It is shown as 'name(value)' pairs
         padded so that the same field lines up across rows with the same field names.
         'color' and 'tag' are the row's auto-color and auto-tag, shown in the first column.
+
+        'search_text' describes what was searched for, and 'rerun_search' is called
+        by the Refresh button to run the same search again.
         """
+        self.search_text.SetLabel(search_text)
+        self.Layout()
+        self._rerun_search = rerun_search
+        self.refresh_btn.Enable(rerun_search is not None)
         # Rows with the same field names are assumed to share a struct type, and are
         # aligned together (same approach as the detailed packet column in SchedulingLinesWidget).
         max_lens = {}
@@ -88,6 +107,10 @@ class SearchResultsPanel(wx.Panel):
 
     def HidePanel(self):
         self.__SetVisible(False)
+
+    def __OnRefresh(self, event):
+        if self._rerun_search:
+            self._rerun_search()
 
     def __SetVisible(self, visible: bool):
         if self.IsShown() != visible:

@@ -27,31 +27,10 @@ class Search(wx.Dialog):
         else:
             self.path_constraints = None
 
-        self.cycle_range_chkbox = wx.CheckBox(self, label="Restrict cycles to:")
-        if cycle_range:
-            self.cycle_range_chkbox.SetValue(True)
-        self.cycle_range_chkbox.Bind(wx.EVT_CHECKBOX, self.__ValidateFind)
-
-        self.start_cycle = wx.TextCtrl(
-            self, value=str(cycle_range[0]) if cycle_range else '', size=(60,-1)
-        )
-        self.start_cycle.Bind(wx.EVT_TEXT, self.__ValidateFind)
-
-        self.end_cycle = wx.TextCtrl(
-            self, value=str(cycle_range[1]) if cycle_range else '', size=(60,-1)
-        )
-        self.end_cycle.Bind(wx.EVT_TEXT, self.__ValidateFind)
-
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.data_constraints, 0, wx.TOP | wx.LEFT, 5)
         if self.path_constraints:
             sizer.Add(self.path_constraints, 0, wx.TOP | wx.LEFT, 5)
-
-        hsizer = wx.BoxSizer(wx.HORIZONTAL)
-        hsizer.Add(self.cycle_range_chkbox, 0, wx.RIGHT | wx.EXPAND, 5)
-        hsizer.Add(self.start_cycle, 1, wx.RIGHT | wx.EXPAND, 3)
-        hsizer.Add(self.end_cycle, 1, wx.EXPAND)
-        sizer.Add(hsizer, 1, wx.ALL | wx.EXPAND, 5)
 
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.find_button = wx.Button(self, label="Find")
@@ -93,12 +72,6 @@ class Search(wx.Dialog):
                 return sel
 
         return None
-
-    def GetCycleConstraints(self):
-        if not self.cycle_range_chkbox.IsChecked():
-            return []
-
-        return self.__ValidateCycleRange()
 
     @staticmethod
     def NormalizeDataConstraints(constraints):
@@ -182,35 +155,10 @@ class Search(wx.Dialog):
 
         return start_cycle, end_cycle
 
-    def __ValidateCycleRange(self):
-        """Returns None if the cycle range is valid, otherwise an error message."""
-        playback_bar = self.frame.playback_bar
-        selected_clock = playback_bar.clock_combobox.GetValue()
-        clock_period = playback_bar.clock_periods.get(selected_clock)
-        if not clock_period:
-            return 'A clock must be selected to restrict cycles'
-
-        clock_period = int(clock_period)
-        renderer = self.frame.widget_renderer
-        first_cycle = int(renderer.start_tick) // clock_period
-        last_cycle = int(renderer.end_tick) // clock_period
-        curr_cycle = playback_bar.GetCurrentCycle()
-
-        try:
-            return self.ResolveCycleRange(
-                self.start_cycle.GetValue(),
-                self.end_cycle.GetValue(),
-                first_cycle, last_cycle, curr_cycle
-            )
-        except ValueError as e:
-            return str(e)
-
     def __ValidateFind(self, evt):
         error = None
         if not self.NormalizeDataConstraints(self.data_constraints.GetValue()):
             error = 'uid:1, opcode:0xdeadbeef\nuid(1) opcode(0xdeadbeef)\netc...'
-        elif self.cycle_range_chkbox.IsChecked():
-            error = self.__ValidateCycleRange()
 
         if isinstance(error, str):
             self.find_button.Disable()
@@ -218,13 +166,6 @@ class Search(wx.Dialog):
         else:
             self.find_button.Enable()
             self.find_button.UnsetToolTip()
-
-        if self.cycle_range_chkbox.IsChecked():
-            self.start_cycle.Enable()
-            self.end_cycle.Enable()
-        else:
-            self.start_cycle.Disable()
-            self.end_cycle.Disable()
 
     def __DoFind(self, evt):
         self.EndModal(wx.ID_OK)
