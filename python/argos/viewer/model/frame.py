@@ -163,15 +163,15 @@ class ArgosFrame(wx.Frame):
         results = []
 
         # Give first priority to the on-screen search (find this data on existing widgets).
-        for tab in self.inspector.tabs:
+        # Each result is paired with the name of the tab it was found on.
+        tab_names = self.inspector.GetTabNames()
+        for tab, tab_name in zip(self.inspector.tabs, tab_names):
             for wc in tab.GetWidgetContainers():
                 widget = wc.GetWidget()
                 if widget:
                     result = widget.CreateSearchResults(data_constraints, path_constraints)
                     if result:
-                        results.extend(result)
-
-        results = [r for r in results if r is not None]
+                        results.extend((r, tab_name) for r in result if r is not None)
 
         if cycle_constraints:
             selected_clock = self.playback_bar.clock_combobox.GetValue()
@@ -184,7 +184,7 @@ class ArgosFrame(wx.Frame):
                 tick_range, data_constraints, path_constraints)
 
             results.extend([
-                self.__CreateDatabaseSearchResult(tick, cid, nvps) for tick,cid,nvps in tick_cid_nvps_tuples
+                (self.__CreateDatabaseSearchResult(tick, cid, nvps), None) for tick,cid,nvps in tick_cid_nvps_tuples
             ])
 
         self.__ShowSearchResults(results)
@@ -261,13 +261,18 @@ class ArgosFrame(wx.Frame):
         return self._clocks_by_id.get(clk_id, ('', None))
 
     def __ShowSearchResults(self, results):
-        # They all have a 'widget' field and an 'nvps' field. We will show a wx.ListCtrl
-        # with the columns: (auto-color/tag), tick, cyc, clock, path, widget, data.
+        # 'results' is a list of (result, tab_name) pairs, where tab_name is None for results
+        # that came from the database. They all have a 'widget' field and an 'nvps' field.
+        # We will show a wx.ListCtrl with the columns: (auto-color/tag), tick, cyc, clock,
+        # path, source, data.
         #
         # Some results have a 'tick' field, but for those that don't we will assume
         # it is the current tick.
+        #
+        # The tab name is only shown in the source when there are multiple widget tabs.
+        show_tab_names = len(self.inspector.tabs) > 1
         entries = []
-        for r in results:
+        for r, tab_name in results:
             if hasattr(r, 'tick'):
                 tick = r.tick
             else:
@@ -282,7 +287,14 @@ class ArgosFrame(wx.Frame):
             data = [(str(k), str(v)) for k, v in pairs]
             color, tag = self.__GetSearchResultColorAndTag(r.elem_path, pairs, data)
 
-            entries.append((tick, cycle, clock_name, r.elem_path, type(r.widget).__name__, data, color, tag))
+            if r.widget is None:
+                source = 'Database'
+            else:
+                source = r.widget.GetSearchResultSourceName()
+                if show_tab_names and tab_name:
+                    source = f'{source} ({tab_name})'
+
+            entries.append((tick, cycle, clock_name, r.elem_path, source, data, color, tag))
 
         self.search_results_panel.ShowResults(entries)
 

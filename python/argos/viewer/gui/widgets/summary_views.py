@@ -125,6 +125,9 @@ class SummaryViews(wx.Panel):
 
         return results
 
+    def GetSearchResultSourceName(self):
+        return 'Watchlist'
+
     def __CreateSearchResult(self, elem_path: str, value_handler: DefaultStaticText):
         return self.SearchResult(self, elem_path, value_handler)
 

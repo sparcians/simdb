@@ -145,6 +145,9 @@ class IterableStruct(wx.Panel):
 
         return results
 
+    def GetSearchResultSourceName(self):
+        return 'Queue Inspector'
+
     def __GetNameValuePairs(self, row: int):
         nvps = OrderedDict()
         for i in range(self.grid.GetNumberCols()):

@@ -220,6 +220,9 @@ class SchedulingLinesWidget(wx.Panel):
 
         return results
 
+    def GetSearchResultSourceName(self):
+        return 'Scheduling Lines'
+
     def __CreateSearchResult(self, elem_path: str, nvps: dict, row: int, col: int):
         return self.SearchResult(self, elem_path, nvps, row, col)
 

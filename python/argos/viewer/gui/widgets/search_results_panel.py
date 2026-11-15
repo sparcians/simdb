@@ -8,7 +8,7 @@ class SearchResultsPanel(wx.Panel):
     again with the 'X' button in the top-right corner.
     """
 
-    COLUMNS = ('', 'tick', 'cyc', 'clock', 'path', 'widget', 'data')
+    COLUMNS = ('', 'tick', 'cyc', 'clock', 'path', 'source', 'data')
     TAG_SIZE = (24, 16)
 
     def __init__(self, parent):
