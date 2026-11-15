@@ -376,3 +376,11 @@ class SummaryGrid(wx.Panel):
                 self.SetLabel(label)
             else:
                 self.SetLabel('(no data)')
+
+        # TODO XXX:
+        #   Try to incorporate the search functionality/highlighting
+        #   into the container summary. We show the % full figure,
+        #   but we should be able to highlight this in yellow and
+        #   show something like:
+        #
+        #       30% full (3/10) (2 search matches found)
