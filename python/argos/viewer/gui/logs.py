@@ -1,5 +1,6 @@
 import wx
 import wx.lib.scrolledpanel as scrolled
+from viewer.gui.font_settings import FontRole
 
 class CollectionLogs(scrolled.ScrolledPanel):
     NOTIF_TYPE_LABELS = {0: 'WARNING', 1: 'ERROR', 2: 'MESSAGE'}
@@ -17,8 +18,6 @@ class CollectionLogs(scrolled.ScrolledPanel):
         cursor.execute("SELECT CID, FullPath FROM CollectableTreeNodes")
         paths_by_cid = {cid: fp.replace('root.', '') for cid, fp in cursor.fetchall()}
 
-        mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         grid = wx.GridBagSizer(vgap=2, hgap=10)
@@ -29,15 +28,15 @@ class CollectionLogs(scrolled.ScrolledPanel):
             type_label = self.NOTIF_TYPE_LABELS.get(notif_type, str(notif_type))
 
             tick_text = wx.StaticText(self, label='Tick:{}'.format(int(tick)))
-            tick_text.SetFont(mono10)
+            tick_text.SetFont(frame.TrackFont(tick_text, FontRole.METADATA))
             grid.Add(tick_text, pos=(row, 0))
 
             type_text = wx.StaticText(self, label='Type:{}'.format(type_label))
-            type_text.SetFont(mono10)
+            type_text.SetFont(frame.TrackFont(type_text, FontRole.METADATA))
             grid.Add(type_text, pos=(row, 1))
 
             body = wx.StaticText(self, label=notif_str)
-            body.SetFont(mono10)
+            body.SetFont(frame.TrackFont(body, FontRole.METADATA))
             grid.Add(body, pos=(row + 1, 0), span=(1, 3),
                      flag=wx.EXPAND | wx.BOTTOM, border=6)
 

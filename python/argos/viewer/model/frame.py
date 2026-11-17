@@ -1,4 +1,4 @@
-import wx, sqlite3, os, time
+import wx, sqlite3, os, time, weakref
 from functools import partial
 from viewer.gui.widgets.playback_bar import PlaybackBar
 from viewer.gui.widgets.search_results_panel import SearchResultsPanel
@@ -13,12 +13,39 @@ from viewer.gui.widgets.splitter_window import DirtySplitterWindow
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.button import CreateButton
 from viewer.gui.dialogs.search import Search
+from viewer.gui.dialogs.font_settings import FontSettingsDlg
+from viewer.gui.font_settings import FontSettings, FontRole
+
+def _SetRequesterFont(requester, font):
+    requester.SetFont(font)
+
+class _TrackedFont:
+    __slots__ = ('requester', 'role', 'family', 'style', 'weight', 'size_offset', 'apply')
+
+    def __init__(self, requester, role, family, style, weight, size_offset, apply):
+        self.requester = weakref.ref(requester)
+        self.role = role
+        self.family = family
+        self.style = style
+        self.weight = weight
+        self.size_offset = size_offset
+        self.apply = apply
 
 class ArgosFrame(wx.Frame):
     MAX_SEARCH_HISTORY = 20
 
+    # Buttons created with an explicit size have that size at this font point size,
+    # and are scaled proportionally when the button font size changes.
+    BUTTON_BASE_POINT_SIZE = 10
+
     def __init__(self, db_path, view_settings):
         super().__init__(None, title=db_path)
+
+        # Font sizes are user settings (not part of the layout). Widgets register the
+        # fonts they use with TrackFont() so they can be updated when the sizes change.
+        self.font_settings = FontSettings()
+        self._tracked_fonts = []
+        self._prune_tracked_fonts_at = 256
 
         self.db_path = db_path
         self.db = sqlite3.connect(db_path)
@@ -60,7 +87,12 @@ class ArgosFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.__OnSaveView, save_view)
         self.Bind(wx.EVT_MENU, lambda event: self.Close(), exit_argos)
 
+        settings_menu = wx.Menu()
+        fonts = settings_menu.Append(wx.ID_ANY, '&Fonts...', 'Change the font sizes used throughout Argos')
+        self.Bind(wx.EVT_MENU, self.__OnFontSettings, fonts)
+
         self.menu_bar.Append(file_menu, '&File')
+        self.menu_bar.Append(settings_menu, '&Settings')
         self.SetMenuBar(self.menu_bar)
 
         # Ctrl-F opens the Search dialog. There is no menu item for it, so it needs its own accelerator.
@@ -123,7 +155,7 @@ class ArgosFrame(wx.Frame):
     def CreateWidgetStandardButtons(self, widget, settings_callback, settings_tooltip):
         std_size = (36,22)
         def CreateTheButton(label):
-            return CreateButton(widget, label=label, size=std_size)
+            return self.CreateTrackedButton(widget, label=label, size=std_size)
 
         settings_btn = CreateTheButton(">>")
         settings_btn.Bind(wx.EVT_BUTTON, settings_callback)
@@ -399,11 +431,104 @@ class ArgosFrame(wx.Frame):
         del self.search_history[self.MAX_SEARCH_HISTORY:]
 
     def GetCurrentUserSettings(self):
-        return {'search_history': list(self.search_history)}
+        return {
+            'search_history': list(self.search_history),
+            'fonts': self.font_settings.GetSizes()
+        }
 
     def ApplyUserSettings(self, settings):
         history = settings.get('search_history') or []
         self.search_history = [str(text) for text in history][:self.MAX_SEARCH_HISTORY]
+
+        # Widgets were already created with the default sizes, so they have to be updated
+        # and refreshed. Not in settings files written by older versions.
+        if self.SetFontSizes(settings.get('fonts')):
+            wx.CallAfter(self.inspector.RefreshWidgetsOnAllTabs)
+
+    def TrackFont(self, requester, role, family=wx.FONTFAMILY_MODERN, style=wx.FONTSTYLE_NORMAL,
+                  weight=wx.FONTWEIGHT_NORMAL, size_offset=0, apply=None):
+        """Creates a font for 'requester' whose point size is the user's size for the given
+        FontRole (plus 'size_offset'). Whenever that size changes, 'apply(requester, font)' is
+        called with a new font; by default this is requester.SetFont(font). The caller is
+        responsible for using the returned font initially. The requester is not kept alive."""
+        if len(self._tracked_fonts) >= self._prune_tracked_fonts_at:
+            self._tracked_fonts = [t for t in self._tracked_fonts if t.requester() is not None]
+            self._prune_tracked_fonts_at = max(256, 2 * len(self._tracked_fonts))
+
+        tracked = _TrackedFont(requester, role, family, style, weight, size_offset, apply)
+        self._tracked_fonts.append(tracked)
+        return self.__CreateTrackedFont(tracked)
+
+    def SetFontSizes(self, sizes):
+        """Updates the user's font sizes ({FontRole: point size}) and every tracked font that
+        uses a size that changed. Returns True if anything changed. This does not refresh
+        the widgets' contents, and does not save the settings."""
+        changed_roles = self.font_settings.SetSizes(sizes)
+        if not changed_roles:
+            return False
+
+        live_fonts = []
+        for tracked in self._tracked_fonts:
+            requester = tracked.requester()
+            if requester is None:
+                continue
+
+            if tracked.role in changed_roles:
+                apply = tracked.apply or _SetRequesterFont
+                try:
+                    apply(requester, self.__CreateTrackedFont(tracked))
+                except RuntimeError:
+                    # The wx object was destroyed, but its Python wrapper is still alive.
+                    continue
+
+            live_fonts.append(tracked)
+
+        self._tracked_fonts = live_fonts
+        self.__RelayoutAll(self)
+        self.Refresh()
+        return True
+
+    def __RelayoutAll(self, window):
+        # Controls change size with their font, so every level of nested sizers must be laid out again.
+        for child in window.GetChildren():
+            self.__RelayoutAll(child)
+
+        if window.GetSizer():
+            window.Layout()
+
+    def CreateTrackedButton(self, parent, label, size=wx.DefaultSize):
+        button = CreateButton(parent, label=label, size=size)
+        width, height = size
+        if width > 0 and height > 0:
+            button.argos_base_size = (width, height)
+
+        font = self.TrackFont(button, FontRole.BUTTONS, family=wx.FONTFAMILY_DEFAULT, apply=self.__ApplyButtonFont)
+        self.__ApplyButtonFont(button, font)
+        return button
+
+    def __CreateTrackedFont(self, tracked):
+        size = max(4, self.font_settings.GetSize(tracked.role) + tracked.size_offset)
+        return wx.Font(size, tracked.family, tracked.style, tracked.weight)
+
+    def __ApplyButtonFont(self, button, font):
+        button.SetFont(font)
+        base_size = getattr(button, 'argos_base_size', None)
+        if base_size:
+            scale = font.GetPointSize() / self.BUTTON_BASE_POINT_SIZE
+            size = (round(base_size[0] * scale), round(base_size[1] * scale))
+            button.SetMinSize(size)
+            button.SetSize(size)
+
+    def __OnFontSettings(self, event):
+        dlg = FontSettingsDlg(self, self.font_settings.GetSizes())
+        try:
+            if dlg.ShowModal() == wx.ID_OK and self.SetFontSizes(dlg.GetSizes()):
+                # Font sizes are user settings, so they are saved right away and
+                # do not make the layout dirty.
+                self.view_settings.SaveUserSettings()
+                self.inspector.RefreshWidgetsOnCurrentTab()
+        finally:
+            dlg.Destroy()
 
     def __GetClockForElemPath(self, elem_path):
         if self._clocks_by_id is None:

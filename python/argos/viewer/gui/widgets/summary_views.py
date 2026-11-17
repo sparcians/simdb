@@ -6,6 +6,7 @@ from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
 from viewer.gui.widgets.scheduling_lines import CaptionManager
 from viewer.gui.widgets.static_text import DefaultStaticText
+from viewer.gui.font_settings import FontRole
 from viewer.gui.dialogs.search import Search
 
 class SummaryViews(wx.Panel):
@@ -224,8 +225,6 @@ class SummaryGrid(wx.Panel):
         #   top.cpu.core0.retire
         #     baz
         grid_sizer = wx.GridBagSizer(vgap=5, hgap=5)
-        mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        mono10_bold = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
 
         max_label_len = 0
         parent_paths = list(collectable_grps.keys())
@@ -245,7 +244,7 @@ class SummaryGrid(wx.Panel):
             else:
                 parent_label_text = CaptionManager.GetMinimumUniqueSuffix(parent, parent_paths)
             parent_label = DefaultStaticText(self, label=parent_label_text)
-            parent_label.SetFont(mono10_bold)
+            parent_label.SetFont(frame.TrackFont(parent_label, FontRole.METADATA, weight=wx.FONTWEIGHT_BOLD))
             CaptionManager.ApplyPartialPathTooltip(
                 parent_label, parent, parent_label_text, summary_views.show_full_paths)
             grid_sizer.Add(parent_label, pos=(row,0))
@@ -261,7 +260,7 @@ class SummaryGrid(wx.Panel):
                 label += leaf
                 leaf_label = DefaultStaticText(self, label=label)
                 BindCopyPathMenu(leaf_label, full_path)
-                leaf_label.SetFont(mono10)
+                leaf_label.SetFont(frame.TrackFont(leaf_label, FontRole.METADATA))
                 CaptionManager.ApplyPartialPathTooltip(
                     leaf_label, full_path, label, summary_views.show_full_paths)
                 grid_sizer.Add(leaf_label, pos=(row,0))
@@ -279,7 +278,7 @@ class SummaryGrid(wx.Panel):
                     else:
                         summary_handler = SummaryGrid.SimpleSummary(self, frame)
 
-                summary_handler.SetFont(mono10)
+                summary_handler.SetFont(frame.TrackFont(summary_handler, FontRole.METADATA))
                 grid_sizer.Add(summary_handler, pos=(row,4))
                 grid_sizer.AddGrowableRow(row)
                 self.value_handlers[full_path] = summary_handler

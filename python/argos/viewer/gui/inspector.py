@@ -5,6 +5,7 @@ from viewer.gui.canvas_grid import CanvasGrid
 from viewer.gui.logs import CollectionLogs
 from viewer.gui.widgets.scheduling_lines import SchedulingLinesWidget
 from viewer.gui.view_settings import DirtyReasons
+from viewer.gui.font_settings import FontRole
 from contextlib import contextmanager
 from functools import partial
 
@@ -14,6 +15,9 @@ class DataInspector(wx.aui.AuiNotebook):
 
         self.frame = frame
         self.tabs = []
+
+        self._ApplyTabFont(frame.TrackFont(self, FontRole.TABS, family=wx.FONTFAMILY_DEFAULT,
+                                           apply=DataInspector._ApplyTabFont))
 
         # AuiNotebook (unlike wx.Notebook) emits EVT_AUINOTEBOOK_PAGE_CHANGED
         # during programmatic page mutations (e.g. DeletePage/InsertPage). This
@@ -45,6 +49,18 @@ class DataInspector(wx.aui.AuiNotebook):
             yield
         finally:
             self.__suppress_add_tab_dialog = prev
+
+    def _ApplyTabFont(self, font):
+        # The selected tab is bold, so the tab height is measured with the bold font.
+        selected_font = wx.Font(font)
+        selected_font.SetWeight(wx.FONTWEIGHT_BOLD)
+        self.SetNormalFont(font)
+        self.SetSelectedFont(selected_font)
+        self.SetMeasuringFont(selected_font)
+
+        # Recalculate the tab height for the new font.
+        self.SetTabCtrlHeight(-1)
+        self.Refresh()
 
     def GetCurrentTabWidgetContainers(self):
         tab_idx = self.__SelectedTabIndex()

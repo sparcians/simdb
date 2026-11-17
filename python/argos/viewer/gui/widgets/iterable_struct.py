@@ -5,6 +5,7 @@ from viewer.gui.copy_path_menu import BindCopyPathMenu
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from viewer.gui.widgets.grid import Grid
 from viewer.gui.widgets.static_text import DefaultStaticText
+from viewer.gui.font_settings import FontRole
 
 class IterableStruct(wx.Panel):
     def __init__(self, parent, frame, elem_path):
@@ -21,8 +22,7 @@ class IterableStruct(wx.Panel):
             num_cols -= 1
         assert len(all_field_names) > 0
 
-        mono10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        self.grid = Grid(self, frame, num_rows, num_cols, cell_font=mono10, label_font=mono10, cell_selection_allowed=False)
+        self.grid = Grid(self, frame, num_rows, num_cols, cell_selection_allowed=False)
         self.__SyncGridViewSettings()
 
         for i in range(self.capacity):
@@ -31,10 +31,7 @@ class IterableStruct(wx.Panel):
         self.utiliz_elem = UtilizElement(self, frame, self.capacity)
         location_elem = DefaultStaticText(self, label=elem_path)
         BindCopyPathMenu(location_elem, elem_path)
-
-        font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        location_elem.SetFont(font)
-
+        location_elem.SetFont(frame.TrackFont(location_elem, FontRole.METADATA))
         gear_btn, clear_btn, split_lr, split_tb, maximize_btn = frame.CreateWidgetStandardButtons(
             self, self.__EditWidget, 'Edit widget settings')
 
@@ -237,8 +234,7 @@ class UtilizElement(DefaultStaticText):
         self.frame = frame
         self.capacity = capacity
 
-        font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        self.SetFont(font)
+        self.SetFont(frame.TrackFont(self, FontRole.METADATA))
 
     def UpdateUtilizPct(self, utiliz_pct):
         label = '{}% ({}/{})'.format(round(utiliz_pct * 100), int(utiliz_pct * self.capacity), self.capacity)

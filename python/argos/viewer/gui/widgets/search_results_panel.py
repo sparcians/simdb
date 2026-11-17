@@ -1,5 +1,5 @@
 import wx
-from viewer.gui.widgets.button import CreateButton
+from viewer.gui.font_settings import FontRole
 
 class SearchResultsPanel(wx.Panel):
     """Panel shown above the playback bar that lists search results.
@@ -12,16 +12,16 @@ class SearchResultsPanel(wx.Panel):
     DB_UNITS = ('ticks', 'cycles')
     TAG_SIZE = (24, 16)
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, frame):
+        super().__init__(frame)
+        self.frame = frame
         self.SetBackgroundColour('light gray')
 
         self.title_text = wx.StaticText(self, label='Search results')
-        font = self.title_text.GetFont()
-        font.SetWeight(wx.FONTWEIGHT_BOLD)
-        self.title_text.SetFont(font)
+        self.title_text.SetFont(frame.TrackFont(self.title_text, FontRole.SEARCH_TITLEBAR,
+                                                family=wx.FONTFAMILY_DEFAULT, weight=wx.FONTWEIGHT_BOLD))
 
-        self.refresh_btn = CreateButton(self, label='Refresh', size=(70, 22))
+        self.refresh_btn = frame.CreateTrackedButton(self, label='Refresh', size=(70, 22))
         self.refresh_btn.SetToolTip('Rerun the search')
         self.refresh_btn.Bind(wx.EVT_BUTTON, self.__OnRefresh)
         self._rerun_search = None
@@ -42,7 +42,7 @@ class SearchResultsPanel(wx.Panel):
         self.db_end.SetHint('end')
         self.db_unit = wx.ComboBox(self, choices=list(self.DB_UNITS), style=wx.CB_READONLY, size=(105, 22))
         self.db_unit.SetSelection(0)
-        self.db_search_btn = CreateButton(self, label='Search DB', size=(80, 22))
+        self.db_search_btn = frame.CreateTrackedButton(self, label='Search DB', size=(80, 22))
         for ctrl in (self.db_start, self.db_end):
             ctrl.Bind(wx.EVT_TEXT, self.__ValidateDbRange)
         self.db_unit.Bind(wx.EVT_COMBOBOX, self.__ValidateDbRange)
@@ -50,13 +50,13 @@ class SearchResultsPanel(wx.Panel):
 
         self.search_text = wx.StaticText(self, label='')
 
-        self.close_btn = CreateButton(self, label='Close', size=(70, 22))
+        self.close_btn = frame.CreateTrackedButton(self, label='Close', size=(70, 22))
         self.close_btn.SetToolTip('Close search results')
         self.close_btn.Bind(wx.EVT_BUTTON, lambda evt: self.HidePanel())
 
         self.list_ctrl = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        mono_font = wx.Font(self.list_ctrl.GetFont().GetPointSize(), wx.FONTFAMILY_TELETYPE,
-                            wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        mono_font = frame.TrackFont(self, FontRole.SEARCH_RESULTS, family=wx.FONTFAMILY_TELETYPE,
+                                    apply=SearchResultsPanel._ApplyResultsFont)
         self.list_ctrl.SetFont(mono_font)
         self.search_text.SetFont(mono_font)
 
@@ -65,9 +65,7 @@ class SearchResultsPanel(wx.Panel):
         self.elapsed_text.SetFont(mono_font)
         self.elapsed_text.SetForegroundColour(wx.Colour(0, 128, 0))
         self.elapsed_text.SetToolTip('Time taken by the last search')
-        dc = wx.ClientDC(self)
-        dc.SetFont(mono_font)
-        self.elapsed_text.SetMinSize((dc.GetTextExtent('9.99s')[0], -1))
+        self.__SizeElapsedText(mono_font)
         for name in self.COLUMNS:
             self.list_ctrl.AppendColumn(name)
         self.list_ctrl.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.__OnItemActivated)
@@ -226,6 +224,21 @@ class SearchResultsPanel(wx.Panel):
         self.__SetVisible(False)
         if self.on_hide:
             self.on_hide()
+
+    def _ApplyResultsFont(self, font):
+        self.list_ctrl.SetFont(font)
+        self.search_text.SetFont(font)
+        self.elapsed_text.SetFont(font)
+        self.__SizeElapsedText(font)
+
+        # The tag bitmaps and column widths were built for the old font.
+        if self._row_entries:
+            self.__Render()
+
+    def __SizeElapsedText(self, font):
+        dc = wx.ClientDC(self)
+        dc.SetFont(font)
+        self.elapsed_text.SetMinSize((dc.GetTextExtent('9.99s')[0], -1))
 
     def __OnRefresh(self, event):
         if self._rerun_search:
