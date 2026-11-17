@@ -171,6 +171,9 @@ class UtilizBar(wx.Panel):
         self.static_text.SetLabel('{}%'.format(pct))
         color = self.frame.widget_renderer.utiliz_handler.ConvertUtilizPctToColor(utiliz_pct)
         self.SetBackgroundColour(color)
+        # The label fills the whole bar and defaults to a white background,
+        # which would otherwise hide the panel's color.
+        self.static_text.SetBackgroundColour(color)
 
         bins_filled = round(utiliz_pct * self.capacity)
         tooltip_text = '{}% ({}/{} bins filled)'.format(pct, bins_filled, self.capacity)
