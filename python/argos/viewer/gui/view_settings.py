@@ -15,6 +15,18 @@ class ViewSettings:
         self._read_only = read_only
         self._tick_overridden = False
 
+        # Undo/redo is a linear history of settings yamls plus a pointer ("_undo_index")
+        # into that history representing the currently-applied state. Undo/redo move the
+        # pointer without touching the list. Any new edit made while the pointer isn't at
+        # the end of the list severs the "future" (redo) entries before appending the new
+        # state, e.g. stack A-B-C-D-E with the pointer on B after undoing, followed by an
+        # edit, becomes A-B-F. This stack is kept in memory only; it is never written to
+        # the view file, the database, or the user settings.
+        self._undo_stack = []
+        self._undo_index = -1
+        self._clean_undo_index = -1
+        self._restoring_undo_state = False
+
     @property
     def read_only(self):
         return self._read_only
@@ -52,8 +64,77 @@ class ViewSettings:
             self._dirty_reasons.add(reason)
         elif not dirty:
             self._dirty_reasons.clear()
+            self._clean_undo_index = self._undo_index
+
+        if dirty:
+            self.__PushUndoState()
 
         self.__UpdateTitle()
+
+    def CanUndo(self):
+        return not self._read_only and self._undo_index > 0
+
+    def CanRedo(self):
+        return not self._read_only and self._undo_index < len(self._undo_stack) - 1
+
+    def Undo(self):
+        if not self.CanUndo():
+            return
+        self.__ApplyUndoRedoState(self._undo_index - 1)
+
+    def Redo(self):
+        if not self.CanRedo():
+            return
+        self.__ApplyUndoRedoState(self._undo_index + 1)
+
+    def __PushUndoState(self):
+        # Called whenever SetDirty(True) is called. Severs any redo history past the
+        # current pointer and appends the latest settings snapshot to the stack.
+        if self._read_only or self._restoring_undo_state or self._frame is None:
+            return
+
+        try:
+            snapshot = yaml.safe_dump(self.__GetViewSettings())
+        except Exception:
+            return
+
+        if self._undo_index >= 0 and self._undo_stack[self._undo_index] == snapshot:
+            return
+
+        del self._undo_stack[self._undo_index + 1:]
+        self._undo_stack.append(snapshot)
+        self._undo_index = len(self._undo_stack) - 1
+
+    def __ResetUndoStack(self):
+        # Establishes a fresh undo/redo baseline. Called whenever a new layout is loaded
+        # or reset, so undo history never leaks across different loaded layouts.
+        self._undo_stack = []
+        self._undo_index = -1
+        self._clean_undo_index = -1
+
+        if self._read_only or self._frame is None:
+            return
+
+        try:
+            snapshot = yaml.safe_dump(self.__GetViewSettings())
+        except Exception:
+            return
+
+        self._undo_stack.append(snapshot)
+        self._undo_index = 0
+
+    def __ApplyUndoRedoState(self, index):
+        settings = yaml.safe_load(self._undo_stack[index])
+
+        self._restoring_undo_state = True
+        try:
+            self.__ApplyViewSettings(settings)
+            self._undo_index = index
+            self.SetDirty(self._undo_index != self._clean_undo_index)
+        except Exception as ex:
+            print (f"Error restoring undo/redo state: '{ex}'")
+        finally:
+            self._restoring_undo_state = False
 
     def PostLoad(self, frame, view_file):
         self._frame = frame
@@ -85,6 +166,7 @@ class ViewSettings:
         self._frame.inspector.RefreshWidgetsOnAllTabs()
         if set_as_current:
             self.view_file = view_file
+        self.__ResetUndoStack()
         self.SetDirty(False)
 
     def __ApplyViewSettings(self, settings):
@@ -130,6 +212,7 @@ class ViewSettings:
             settings = yaml.safe_load(row[0])
             self.__ApplyViewSettings(settings)
             self.view_file = None
+            self.__ResetUndoStack()
             self.SetDirty(False)
             return True
         except Exception as ex:
@@ -413,6 +496,7 @@ class ViewSettings:
         self._frame.inspector.RefreshWidgetsOnAllTabs()
 
         self.view_file = None
+        self.__ResetUndoStack()
         self.SetDirty(False)
 
     def __GetViewFileForOpen(self):

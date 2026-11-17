@@ -87,12 +87,20 @@ class ArgosFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.__OnSaveView, save_view)
         self.Bind(wx.EVT_MENU, lambda event: self.Close(), exit_argos)
 
-        settings_menu = wx.Menu()
-        fonts = settings_menu.Append(wx.ID_ANY, '&Fonts...', 'Change the font sizes used throughout Argos')
+        edit_menu = wx.Menu()
+        undo_item = edit_menu.Append(wx.ID_UNDO, '&Undo\tCtrl+Z', 'Undo the last layout change')
+        redo_item = edit_menu.Append(wx.ID_REDO, '&Redo\tCtrl+Y', 'Redo the last undone layout change')
+        edit_menu.AppendSeparator()
+        fonts = edit_menu.Append(wx.ID_ANY, '&Fonts...', 'Change the font sizes used throughout Argos')
+
+        self.Bind(wx.EVT_MENU, self.__OnUndo, undo_item)
+        self.Bind(wx.EVT_MENU, self.__OnRedo, redo_item)
         self.Bind(wx.EVT_MENU, self.__OnFontSettings, fonts)
+        self.Bind(wx.EVT_UPDATE_UI, self.__OnUpdateUndo, undo_item)
+        self.Bind(wx.EVT_UPDATE_UI, self.__OnUpdateRedo, redo_item)
 
         self.menu_bar.Append(file_menu, '&File')
-        self.menu_bar.Append(settings_menu, '&Settings')
+        self.menu_bar.Append(edit_menu, '&Edit')
         self.SetMenuBar(self.menu_bar)
 
         # Ctrl-F opens the Search dialog. There is no menu item for it, so it needs its own accelerator.
@@ -413,6 +421,18 @@ class ArgosFrame(wx.Frame):
 
     def __OnSaveView(self, event):
         self.view_settings.SaveView()
+
+    def __OnUndo(self, event):
+        self.view_settings.Undo()
+
+    def __OnRedo(self, event):
+        self.view_settings.Redo()
+
+    def __OnUpdateUndo(self, event):
+        event.Enable(self.view_settings.CanUndo())
+
+    def __OnUpdateRedo(self, event):
+        event.Enable(self.view_settings.CanRedo())
 
     def __RunSearchDialog(self, event):
         dlg = Search(self)
