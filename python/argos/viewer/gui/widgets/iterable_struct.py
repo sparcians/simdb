@@ -68,6 +68,7 @@ class IterableStruct(wx.Panel):
         tick = widget_renderer.tick
         queue_data = self.frame.data_retriever.Unpack(self.elem_path, tick)
 
+        hex_field_names = set(self.deserializer.GetHexFieldNames())
         auto_colorize_col_name = 'DID' if 'DID' in self.visible_field_names else self.visible_field_names[0]
         self.__ClearGrid()
 
@@ -81,7 +82,15 @@ class IterableStruct(wx.Panel):
                     if field_name == 'DID':
                         continue
 
-                    self.grid.SetCellValue(idx, write_col, str(row_data[read_col][1]))
+                    value = str(row_data[read_col][1])
+                    if field_name in hex_field_names:
+                        horz_align = wx.ALIGN_RIGHT
+                        value += ' '
+                    else:
+                        horz_align = wx.ALIGN_LEFT
+                        value = ' ' + value
+                    self.grid.SetCellValue(idx, write_col, value)
+                    self.grid.SetCellAlignment(idx, write_col, horz_align | wx.ALIGN_CENTER_VERTICAL)
 
                     color_keyval = None
                     for key, keyval in row_data:
@@ -152,8 +161,8 @@ class IterableStruct(wx.Panel):
         nvps = OrderedDict()
         for i in range(self.grid.GetNumberCols()):
             name = self.grid.GetColLabelValue(i)
-            value = self.grid.GetCellValue(row, i)
-            nvps[name] = value
+            # Strip the padding added for display
+            nvps[name] = self.grid.GetCellValue(row, i).strip(' ')
 
         return nvps
 
