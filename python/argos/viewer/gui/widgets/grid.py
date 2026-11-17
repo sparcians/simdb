@@ -27,6 +27,9 @@ class Grid(wx.grid.Grid):
 
         self.SetDefaultRenderer(self.renderer)
 
+        self.row_label_provider = RowLabelAttrProvider()
+        self.GetTable().SetAttrProvider(self.row_label_provider)
+
         # Protect against weird UI settings for users that use dark mode.
         self.SetDefaultCellTextColour(wx.BLACK)
         self.SetDefaultCellBackgroundColour(wx.WHITE)
@@ -119,6 +122,50 @@ class Grid(wx.grid.Grid):
 
         self.Refresh()
         self.AutoSize()
+
+    def SetRowLabelBackgroundColour(self, row, color):
+        # wx.grid only supports one label colour for all rows, so per-row colours
+        # are drawn by a custom row header renderer. Rows without a colour keep
+        # the default look.
+        self.row_label_provider.colors[row] = wx.Colour(color)
+        self.GetGridRowLabelWindow().Refresh()
+
+    def ResetRowLabelBackgroundColours(self):
+        if self.row_label_provider.colors:
+            self.row_label_provider.colors.clear()
+            self.GetGridRowLabelWindow().Refresh()
+
+class RowLabelAttrProvider(wx.grid.GridCellAttrProvider):
+    def __init__(self):
+        super().__init__()
+        self.colors = {}
+        self._default_renderer = wx.grid.GridRowHeaderRendererDefault()
+
+        # wx only keeps a reference to the returned renderer, so they must stay alive here.
+        self._colored_renderers = {}
+
+    def GetRowHeaderRenderer(self, row):
+        if row not in self.colors:
+            return self._default_renderer
+
+        renderer = self._colored_renderers.get(row)
+        if renderer is None:
+            renderer = ColoredRowHeaderRenderer(self.colors)
+            renderer.row = row
+            self._colored_renderers[row] = renderer
+        return renderer
+
+class ColoredRowHeaderRenderer(wx.grid.GridRowHeaderRendererDefault):
+    def __init__(self, colors):
+        super().__init__()
+        self.colors = colors
+        self.row = None
+
+    # wx draws the border first and the label on top of it, so the fill goes here.
+    def DrawBorder(self, grid, dc, rect):
+        dc.SetBrush(wx.Brush(self.colors[self.row]))
+        dc.SetPen(wx.Pen(wx.Colour(150, 150, 150)))
+        dc.DrawRectangle(rect)
 
 class GridCellRenderer(wx.grid.GridCellRenderer):
     def __init__(self, rows, cols, font=None):

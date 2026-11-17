@@ -364,7 +364,8 @@ class ViewSettings:
             'PlaybackBar': self._frame.playback_bar.GetCurrentUserSettings(),
             'DataRetriever': self._frame.data_retriever.GetCurrentUserSettings(),
             'Inspector': self._frame.inspector.GetCurrentUserSettings(),
-            'WidgetRenderer': self._frame.widget_renderer.GetCurrentUserSettings()
+            'WidgetRenderer': self._frame.widget_renderer.GetCurrentUserSettings(),
+            'Frame': self._frame.GetCurrentUserSettings()
         }
 
         with open(settings_file, 'w') as fout:
@@ -390,6 +391,8 @@ class ViewSettings:
                 self._frame.data_retriever.ApplyUserSettings(settings['DataRetriever'])
                 self._frame.inspector.ApplyUserSettings(settings['Inspector'])
                 self._frame.widget_renderer.ApplyUserSettings(settings['WidgetRenderer'])
+                # Not in settings files written by older versions, so don't require it.
+                self._frame.ApplyUserSettings(settings.get('Frame', {}))
                 self._tick_overridden = True
         except Exception as ex:
             print (f"Error loading user settings. Deleting settings file. Error: '{ex}'")

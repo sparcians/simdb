@@ -6,6 +6,7 @@ from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
 from viewer.gui.widgets.scheduling_lines import CaptionManager
 from viewer.gui.widgets.static_text import DefaultStaticText
+from viewer.gui.dialogs.search import Search
 
 class SummaryViews(wx.Panel):
     DEFAULT_SHOW_FULL_PATHS = True
@@ -100,6 +101,36 @@ class SummaryViews(wx.Panel):
         else:
             return False
 
+    def CreateSearchResults(self, data_constraints: dict, path_constraints: str = ''):
+        if path_constraints and path_constraints not in self.elem_paths:
+            return None
+
+        results = []
+
+        for elem_path, handler in self.summary.value_handlers.items():
+            value = handler.GetLabel()
+            value = Search.NormalizeDataConstraints(value)
+            if value:
+                take = True
+                for k,v in data_constraints.items():
+                    if k not in value:
+                        take = False
+                        break
+                    if value[k] != v:
+                        take = False
+                        break
+
+                if take:
+                    results.append(self.__CreateSearchResult(elem_path, handler))
+
+        return results
+
+    def GetSearchResultSourceName(self):
+        return 'Watchlist'
+
+    def __CreateSearchResult(self, elem_path: str, value_handler: DefaultStaticText):
+        return self.SearchResult(self, elem_path, value_handler)
+
     def __Refresh(self):
         if len(self.elem_paths):
             self.SetBackgroundColour('white')
@@ -146,6 +177,13 @@ class SummaryViews(wx.Panel):
 
         self.summary.UpdateWidgetData()
         self.Layout()
+
+    class SearchResult:
+        def __init__(self, widget: SummaryViews, elem_path: str, value_handler: DefaultStaticText):
+            self.widget = widget
+            self.elem_path = elem_path
+            self.value_handler = value_handler
+            self.nvps = Search.NormalizeDataConstraints(value_handler.GetLabel())
 
 class SummaryGrid(wx.Panel):
     def __init__(self, parent, frame, elem_paths, summary_views):
@@ -268,6 +306,11 @@ class SummaryGrid(wx.Panel):
 
             handler.UpdateValue(value)
 
+            # Only structs can match a search (not simple or integer summaries).
+            if isinstance(handler, SummaryGrid.StructSummary):
+                handler.SetSearchMatch(
+                    self.frame.MatchesActiveSearch(elem_path, Search.NormalizeDataConstraints(handler.GetLabel())))
+
     class SimpleSummary(DefaultStaticText):
         def __init__(self, parent, frame):
             DefaultStaticText.__init__(self, parent, label='TODO')
@@ -311,6 +354,10 @@ class SummaryGrid(wx.Panel):
                 self.SetLabel('(no data)')
                 self.UnsetToolTip()
 
+        def SetSearchMatch(self, matches: bool):
+            self.SetBackgroundColour(wx.Colour(255, 255, 0) if matches else wx.WHITE)
+            self.Refresh()
+
         def __HandleContextMenu(self, evt, auto_color):
             self.auto_color = auto_color
 
@@ -329,3 +376,11 @@ class SummaryGrid(wx.Panel):
                 self.SetLabel(label)
             else:
                 self.SetLabel('(no data)')
+
+        # TODO XXX:
+        #   Try to incorporate the search functionality/highlighting
+        #   into the container summary. We show the % full figure,
+        #   but we should be able to highlight this in yellow and
+        #   show something like:
+        #
+        #       30% full (3/10) (2 search matches found)

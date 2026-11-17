@@ -44,6 +44,9 @@ class SchedulingLinesWidget(wx.Panel):
         self.grid = None
         self._prev_current_cycle_col = None
         self._detailed_pkt_tooltips = {}
+
+        # Original (width, side) of cells given a search-match border, to put back on the next refresh.
+        self._search_cell_borders = {}
         self.rasterizers = {}
         self.scalar_row_by_elem_path = {}
         self.scalar_elem_paths = set(frame.simhier.GetScalarStatsElemPaths()) | set(frame.simhier.GetScalarStructsElemPaths())
@@ -169,6 +172,82 @@ class SchedulingLinesWidget(wx.Panel):
 
         self.__Refresh()
         self.frame.view_settings.SetDirty(reason=DirtyReasons.SchedulingLinesWidgetChanged)
+
+    def CreateSearchResults(self, data_constraints: dict, path_constraints: str = ''):
+        if path_constraints and path_constraints not in self.caption_mgr.GetAllMatchingElemPaths():
+            return []
+
+        if not self.grid or not data_constraints:
+            return []
+
+        # Search the unpacked timeline data that was used to rasterize the grid
+        # (self._ranges) rather than the cells' text. The cells only hold the short
+        # auto-tag letter (e.g. 'A'), whereas the data holds the real (name, value)
+        # pairs. No per-cell metadata is needed: the sample column comes from
+        # self._sample_col_by_time and the row from the rasterizer / scalar row.
+        elem_paths = [path_constraints] if path_constraints else self.caption_mgr.GetAllMatchingElemPaths()
+        constraints = [(k, str(v)) for k, v in data_constraints.items()]
+
+        results = []
+        for elem_path in elem_paths:
+            vals = self._ranges.get(elem_path)
+            if not vals:
+                continue
+
+            is_scalar = elem_path in self.scalar_elem_paths
+            if is_scalar:
+                scalar_row = self.scalar_row_by_elem_path.get(elem_path)
+                if scalar_row is None:
+                    continue
+
+            for time_val, data in zip(vals['TimeVals'], vals['DataVals']):
+                col = self._sample_col_by_time.get(time_val)
+                if col is None or data is None:
+                    continue
+
+                # Scalar structs hold one list of (name, value) pairs; queues hold one
+                # such list per bin. Plain scalar values have no names to match.
+                if is_scalar:
+                    bins = [(scalar_row, data, None)] if isinstance(data, (list, tuple)) else []
+                else:
+                    bins = []
+                    for bin_idx, annos in enumerate(data):
+                        rasterizer = self.rasterizers.get((elem_path, bin_idx))
+                        if annos and rasterizer:
+                            bins.append((rasterizer.row, annos, bin_idx))
+
+                for row, annos, bin_idx in bins:
+                    nvps = OrderedDict((k, str(v)) for k, v in annos)
+                    if all(nvps.get(k) == v for k, v in constraints):
+                        results.append(self.__CreateSearchResult(elem_path, nvps, row, col, bin_idx))
+
+        return results
+
+    def GetSearchResultSourceName(self):
+        return 'Scheduling Lines'
+
+    def __CreateSearchResult(self, elem_path: str, nvps: dict, row: int, col: int, bin_idx):
+        caption = self.__GetCustomCaption(elem_path, bin_idx)
+        return self.SearchResult(self, elem_path, nvps, row, col, caption)
+
+    def __GetCustomCaption(self, elem_path, bin_idx):
+        # Only captions explicitly set in the CaptionManager (custom_captions) count.
+        # The default caption derived from the elem path is not one, so it gives ''.
+        segment = {} if bin_idx is None else {'bin': bin_idx}
+        custom_caption = self.caption_mgr.GetCustomCaption(self.__SegmentElemPathTooltip(elem_path, segment))
+        if custom_caption is not None:
+            return custom_caption
+
+        if bin_idx is not None:
+            range_caption = self.caption_mgr.GetRangeCaption(elem_path, bin_idx)
+            if range_caption is not None:
+                return f'{range_caption}[{bin_idx}]'
+
+            container_caption = self.caption_mgr.GetCustomCaption(elem_path)
+            if container_caption is not None:
+                return f'{container_caption}[{bin_idx}]'
+
+        return ''
 
     def __AddElement(self, elem_path):
         assert elem_path not in self.caption_mgr.GetAllMatchingElemPaths()
@@ -348,6 +427,7 @@ class SchedulingLinesWidget(wx.Panel):
                 sizer.Detach(self.grid)
                 self.grid.Destroy()
             self._prev_current_cycle_col = None
+            self._search_cell_borders = {}
 
             self.grid = Grid(self, self.frame, total_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
             self.grid.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.__OnGridCellRightClick)
@@ -449,6 +529,10 @@ class SchedulingLinesWidget(wx.Panel):
         else:
             # Grid shape is unchanged: only clear the cycle-dependent data cells so
             # values from cycles that scrolled out of the sample window don't linger.
+            for (row, col), (width, side) in self._search_cell_borders.items():
+                self.grid.SetCellBorder(row, col, width, side)
+            self._search_cell_borders = {}
+
             for row in range(num_rows):
                 for col in range(1, max_data_col + 1):
                     self.grid.SetCellValue(row, col, '')
@@ -515,6 +599,10 @@ class SchedulingLinesWidget(wx.Panel):
 
     def __RasterizeAllCells(self):
         self._detailed_pkt_tooltips = {}
+
+        # Rows are highlighted again below for any that match the active search.
+        for row in range(self._num_data_rows):
+            self.grid.SetCellBackgroundColour(row, 0, (255, 255, 255))
         if self.enable_tooltips and self._bad_path_rows:
             max_data_col = self.grid.GetNumberCols() - 1
             if self.show_detailed_queue_packets:
@@ -544,6 +632,8 @@ class SchedulingLinesWidget(wx.Panel):
                     time_val = vals['TimeVals'][i]
                     time_cycle = int(time_val) // clock_period
                     text = self.__ScalarValueToString(value)
+                    matches_search = isinstance(value, (list, tuple)) and \
+                        self.frame.MatchesActiveSearch(elem_path, value)
 
                     auto_colorize_column = self.frame.data_retriever.GetAutoColorizeColumn(elem_path)
                     auto_colorize_key = None
@@ -567,6 +657,8 @@ class SchedulingLinesWidget(wx.Panel):
                             self.grid.SetCellBackgroundColour(row, col, auto_color)
                             if self.enable_tooltips:
                                 self.grid.SetCellToolTip(row, col, text)
+                            if matches_search:
+                                self.HighlightSearchMatch(row, [col])
                             break
 
                     if detailed_pkt_col != -1 and time_cycle == current_cycle:
@@ -574,6 +666,8 @@ class SchedulingLinesWidget(wx.Panel):
                         self.grid.SetCellAlignment(row, detailed_pkt_col, wx.ALIGN_CENTER_VERTICAL)
                         self.grid.SetCellBackgroundColour(row, detailed_pkt_col, auto_color)
                         self._detailed_pkt_tooltips[row] = text
+                        if matches_search:
+                            self.HighlightSearchMatch(row, [detailed_pkt_col])
                 continue
 
             time_vals = vals['TimeVals']
@@ -669,6 +763,17 @@ class SchedulingLinesWidget(wx.Panel):
         self.Layout()
         self.Update()
         self.Refresh()
+
+    def HighlightSearchMatch(self, row, cols):
+        """Draws a 2px black border around the given cells (keeping their colours) and
+        highlights the row's label in yellow, for data matching the active search."""
+        for col in cols:
+            if (row, col) not in self._search_cell_borders:
+                self._search_cell_borders[(row, col)] = (
+                    self.grid.GetCellBorderWidth(row, col), self.grid.GetCellBorderSide(row, col))
+            self.grid.SetCellBorder(row, col, 2, wx.ALL)
+
+        self.grid.SetCellBackgroundColour(row, 0, (255, 255, 0))
 
     def __RerouteUnpackedDataToRasterizer(self, time_val, elem_path, bin_idx, annos):
         key = (elem_path, bin_idx)
@@ -907,6 +1012,36 @@ class SchedulingLinesWidget(wx.Panel):
     def __EditWidget(self, evt):
         widget_container = self.GetParent()
         widget_container.LaunchSchedulingLinesViewer()
+
+    class SearchResult:
+        def __init__(self, widget: SchedulingLinesWidget, elem_path: str, nvps: dict, row: int, col: int, caption: str = ''):
+            self.widget = widget
+            self.nvps = nvps
+            self.row = row
+            self.col = col
+
+            cycle = widget.grid.GetColLabelValue(col)
+            assert cycle
+            try:
+                cycle = int(cycle)
+            except:
+                # We are using relative cycles e.g. '-4' or '+10'
+                assert cycle[0] in ('-', '+')
+                if cycle[0] == '-':
+                    delta = -1 * int(cycle[1:])
+                else:
+                    delta = int(cycle[1:])
+
+                cycle = widget.frame.playback_bar.GetCurrentCycle()
+                cycle += delta
+
+            selected_clock = widget.frame.playback_bar.clock_combobox.GetValue()
+            period = widget.frame.playback_bar.clock_periods.get(selected_clock)
+
+            assert period
+            self.tick = cycle * period
+            self.elem_path = elem_path
+            self.caption = caption
 
 class CaptionManager:
     MINIMUM_CAPTION_PATH_PARTS = 2
@@ -1175,6 +1310,7 @@ class Rasterizer:
         selected_clock = self.frame.playback_bar.clock_combobox.GetValue()
         clock_period = int(self.frame.playback_bar.clock_periods[selected_clock])
         time_cycle = int(time_val) // clock_period
+        matches_search = self.frame.MatchesActiveSearch(elem_path, annos)
 
         for col in range(self.grid.GetNumberCols()):
             if not self.grid.IsColShown(col):
@@ -1189,6 +1325,8 @@ class Rasterizer:
                 border_width = 1 if show_border else self.grid.GetCellBorderWidth(self.row, col)
                 border_side = wx.ALL if show_border else self.grid.GetCellBorderSide(self.row, col)
                 self.grid.SetCellBorder(self.row, col, border_width, border_side)
+                if matches_search:
+                    self.widget.HighlightSearchMatch(self.row, [col])
                 break
 
         if self.detailed_pkt_col != -1 and time_cycle == self.frame.playback_bar.GetCurrentCycle():
@@ -1205,3 +1343,5 @@ class Rasterizer:
             self.widget._detailed_pkt_tooltips[self.row] = stringized_tooltip
             if show_border:
                 self.grid.SetCellBorder(self.row, self.detailed_pkt_col, 1, wx.ALL)
+            if matches_search:
+                self.widget.HighlightSearchMatch(self.row, [self.detailed_pkt_col])
