@@ -105,9 +105,17 @@ class ViewSettings:
         self._undo_stack.append(snapshot)
         self._undo_index = len(self._undo_stack) - 1
 
-    def __ResetUndoStack(self):
+    def __ResetUndoStack(self, settings=None):
         # Establishes a fresh undo/redo baseline. Called whenever a new layout is loaded
         # or reset, so undo history never leaks across different loaded layouts.
+        #
+        # When the caller already has the authoritative settings dict (parsed from a view
+        # file or the database), it must be passed in here rather than re-derived from the
+        # live widget tree. PostLoad() runs while the frame is still frozen and not yet
+        # shown (see Workspace.__DoPostLoad), so freshly-created splitter windows have not
+        # been realized on screen yet; querying their sash positions at that point can
+        # capture stale/incorrect values that don't match what was actually in the settings
+        # we just applied, corrupting the first Undo back to this baseline.
         self._undo_stack = []
         self._undo_index = -1
         self._clean_undo_index = -1
@@ -116,7 +124,9 @@ class ViewSettings:
             return
 
         try:
-            snapshot = yaml.safe_dump(self.__GetViewSettings())
+            if settings is None:
+                settings = self.__GetViewSettings()
+            snapshot = yaml.safe_dump(settings)
         except Exception:
             return
 
@@ -154,6 +164,7 @@ class ViewSettings:
             dlg.Destroy()
             return
 
+        settings = None
         try:
             with open(view_file, 'r') as fin:
                 settings = yaml.load(fin, Loader=yaml.FullLoader)
@@ -162,11 +173,13 @@ class ViewSettings:
             print (f"Error loading layout file '{view_file}': '{ex}'")
             self.__ResetDefaultViewSettings()
             set_as_current = False
+            settings = None
 
         self._frame.inspector.RefreshWidgetsOnAllTabs()
         if set_as_current:
             self.view_file = view_file
-        self.__ResetUndoStack()
+        if settings is not None:
+            self.__ResetUndoStack(settings)
         self.SetDirty(False)
 
     def __ApplyViewSettings(self, settings):
@@ -212,7 +225,7 @@ class ViewSettings:
             settings = yaml.safe_load(row[0])
             self.__ApplyViewSettings(settings)
             self.view_file = None
-            self.__ResetUndoStack()
+            self.__ResetUndoStack(settings)
             self.SetDirty(False)
             return True
         except Exception as ex:
