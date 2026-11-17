@@ -248,7 +248,7 @@ class ViewSettings:
         if self._read_only:
             return True
 
-        self.__SaveUserSettings()
+        self.SaveUserSettings()
 
         if not self._dirty:
             return True
@@ -293,7 +293,7 @@ class ViewSettings:
 
     def OnFrameClosing(self):
         # Returns True if Argos can be closed after calling this method.
-        self.__SaveUserSettings()
+        self.SaveUserSettings()
 
         if self._read_only:
             return True
@@ -353,7 +353,7 @@ class ViewSettings:
 
         self._frame.SetTitle(title)
 
-    def __SaveUserSettings(self):
+    def SaveUserSettings(self):
         settings_dir = os.path.expanduser('~/.argos')
         if not os.path.exists(settings_dir):
             os.makedirs(settings_dir)

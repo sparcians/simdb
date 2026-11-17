@@ -1,18 +1,26 @@
 import wx, wx.grid
+from viewer.gui.font_settings import FontRole
 
 class Grid(wx.grid.Grid):
-    def __init__(self, parent, frame, rows, cols, cell_font=None, label_font=None, cell_selection_allowed=True, **kwargs):
+    def __init__(self, parent, frame, rows, cols, cell_selection_allowed=True, font_size_offset=0, **kwargs):
         super().__init__(parent, **kwargs)
         self.frame = frame
-        self.renderer = GridCellRenderer(rows, cols, cell_font)
 
-        if label_font:
-            self.SetLabelFont(label_font)
+        # The cell and label fonts follow the user's font settings. 'font_size_offset' makes this grid's fonts
+        # relatively larger/smaller than those settings (e.g. for compact grids).
+        self.cell_font = frame.TrackFont(self, FontRole.GRID_CELLS, size_offset=font_size_offset,
+                                         apply=Grid._ApplyCellFont)
+        self.renderer = GridCellRenderer(rows, cols, self.cell_font)
+
+        self.SetLabelFont(frame.TrackFont(self, FontRole.GRID_LABELS, size_offset=font_size_offset,
+                                          apply=Grid._ApplyLabelFont))
 
         if cell_selection_allowed:
             self.CreateGrid(rows, cols)
         else:
             self.CreateGrid(rows, cols, wx.grid.Grid.GridSelectNone)
+
+        self._min_col_label_size = self.GetColLabelSize()
 
         self.EnableEditing(False)
         self.DisableDragColMove()
@@ -92,6 +100,27 @@ class Grid(wx.grid.Grid):
 
     def SetCellFont(self, row, col, font):
         self.renderer.SetCellFont(row, col, font)
+
+    def _ApplyCellFont(self, font):
+        self.cell_font = font
+        self.renderer.SetFontEverywhere(font)
+
+        # Rows keep the height they had for the previous font, so size them for the new one.
+        dc = wx.ClientDC(self)
+        dc.SetFont(font)
+        self.SetDefaultRowSize(dc.GetTextExtent('Ag')[1] + 4, True)
+        self.Refresh()
+
+    def _ApplyLabelFont(self, font):
+        self.SetLabelFont(font)
+
+        # Vertical column labels are sized by the owner of the grid.
+        if self.GetColLabelTextOrientation() == wx.HORIZONTAL:
+            dc = wx.ClientDC(self)
+            dc.SetFont(font)
+            self.SetColLabelSize(max(self._min_col_label_size, dc.GetTextExtent('Ag')[1] + 8))
+
+        self.Refresh()
 
     def UsePadding(self, row, col, pad):
         self.renderer.UsePadding(row, col, pad)
@@ -207,6 +236,11 @@ class GridCellRenderer(wx.grid.GridCellRenderer):
 
     def SetCellFont(self, row, col, font):
         self.cells[row][col].SetFont(font)
+
+    def SetFontEverywhere(self, font):
+        for row in self.cells:
+            for cell in row:
+                cell.SetFont(font)
 
     def UsePadding(self, row, col, pad):
         self.cells[row][col].UsePadding(pad)

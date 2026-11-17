@@ -413,15 +413,6 @@ class SchedulingLinesWidget(wx.Panel):
             self.grid.GetNumberRows() != total_rows or self.grid.GetNumberCols() != num_cols
         )
 
-        # Create 8-point monospace font for the grid cells
-        font8 = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-
-        # Create 10-point font for the grid column labels
-        font10 = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-
-        cell_font = font8 if self.minimize_grid_cells else font10
-        label_font = font8 if self.minimize_grid_cells else font10
-
         if needs_full_rebuild:
             if self.grid:
                 sizer.Detach(self.grid)
@@ -429,7 +420,10 @@ class SchedulingLinesWidget(wx.Panel):
             self._prev_current_cycle_col = None
             self._search_cell_borders = {}
 
-            self.grid = Grid(self, self.frame, total_rows, num_cols, cell_font=cell_font, label_font=label_font, cell_selection_allowed=False)
+            # Minimized grids use smaller fonts than the user's settings.
+            font_size_offset = -2 if self.minimize_grid_cells else 0
+            self.grid = Grid(self, self.frame, total_rows, num_cols, cell_selection_allowed=False,
+                             font_size_offset=font_size_offset)
             self.grid.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.__OnGridCellRightClick)
             self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.__OnGridMouseMotion)
             self.grid.EnableGridLines(False)
@@ -782,7 +776,7 @@ class SchedulingLinesWidget(wx.Panel):
 
     def __SetMinimizedRowHeights(self):
         dc = wx.ScreenDC()
-        dc.SetFont(wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        dc.SetFont(self.grid.cell_font)
         _, height = dc.GetTextExtent('Ag')
         self.grid.SetRowMinimalAcceptableHeight(height)
         self.grid.SetDefaultRowSize(height, True)
@@ -796,7 +790,7 @@ class SchedulingLinesWidget(wx.Panel):
         # Column labels are drawn vertically, so their text height sets the minimum width.
         min_width = dc.GetTextExtent('Ag')[1]
 
-        dc.SetFont(wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        dc.SetFont(self.grid.cell_font)
         self.grid.SetColMinimalAcceptableWidth(1)
         for col in range(self.grid.GetNumberCols()):
             if not self.grid.IsColShown(col):
@@ -816,8 +810,7 @@ class SchedulingLinesWidget(wx.Panel):
             self.rasterizers = {}
             self._caption_path_by_row = {}
 
-        font_size = 8 if self.minimize_grid_cells else 10
-        font = wx.Font(font_size, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        font = self.grid.cell_font
         for row in range(self.grid.GetNumberRows()):
             self.grid.SetCellFont(row, col, font)
             if col > 0:

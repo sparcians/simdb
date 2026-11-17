@@ -4,6 +4,7 @@ from viewer.gui.dialogs.widget_data_selections import QueueUtilizEditDlg
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.scheduling_lines import CaptionManager
 from viewer.gui.widgets.static_text import DefaultStaticText
+from viewer.gui.font_settings import FontRole
 
 class QueueUtilizWidget(wx.Panel):
     DEFAULT_SHOW_FULL_PATHS = False
@@ -143,9 +144,8 @@ class QueueUtilizWidget(wx.Panel):
             sizer.Add(elem_path)
             sizer.Add(utiliz_bar)
 
-        font = wx.Font(10, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         for elem in self._elem_path_text_boxes:
-            elem.SetFont(font)
+            elem.SetFont(self.frame.TrackFont(elem, FontRole.METADATA))
 
         if not had_sizer:
             self.panel.SetSizer(sizer)
@@ -160,8 +160,7 @@ class UtilizBar(wx.Panel):
         self.elem_path = elem_path
         self.capacity = frame.simhier.GetCapacityByElemPath(elem_path)
         self.static_text = DefaultStaticText(self, label='0%')
-        font = wx.Font(8, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        self.static_text.SetFont(font)
+        self.static_text.SetFont(frame.TrackFont(self.static_text, FontRole.METADATA, size_offset=-2))
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.static_text, 1, wx.ALIGN_LEFT | wx.EXPAND)
@@ -178,7 +177,7 @@ class UtilizBar(wx.Panel):
         self.SetToolTip(tooltip_text)
         self.static_text.SetToolTip(tooltip_text)
 
-        height = 20
+        height = max(20, self.static_text.GetBestSize().height)
         width = round(utiliz_pct * 200)
         if width == 0:
             assert color == (255, 255, 255)
