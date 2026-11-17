@@ -215,6 +215,12 @@ class SimpleDeserializer:
         self._converter = self.CONVERTERS[dtype_name]
         self._num_bytes = self.NUM_BYTES[dtype_name]
         self._formatter = _make_simple_output_formatter(dtype_name, special_formatter or "")
+        self._is_hex = (
+            (special_formatter or "").strip().lower() == "hex" and dtype_name in _INTEGRAL_DISPLAY_DTYPES
+        )
+
+    def IsHex(self):
+        return self._is_hex
 
     def GetNumBytes(self):
         return self._num_bytes
@@ -297,6 +303,9 @@ class ContigContainerDeserializer:
         # TODO cnyce
         return self.GetAllFieldNames()
 
+    def GetHexFieldNames(self):
+        return self._bin_deserializer.GetHexFieldNames()
+
     def GetBinNumBytes(self):
         return self._bin_deserializer.GetNumBytes()
 
@@ -330,6 +339,9 @@ class SparseContainerDeserializer:
     def GetVisibleFieldNames(self):
         # TODO cnyce
         return self.GetAllFieldNames()
+
+    def GetHexFieldNames(self):
+        return self._bin_deserializer.GetHexFieldNames()
 
     def GetBinNumBytes(self):
         # Account for uint16_t bin index for each element
@@ -374,6 +386,10 @@ class StructDeserializer:
 
     def GetVisibleFieldNames(self):
         return copy.deepcopy(self._visible_field_names)
+
+    def GetHexFieldNames(self):
+        return [name for name, deserializer in self._field_deserializers
+                if isinstance(deserializer, SimpleDeserializer) and deserializer.IsHex()]
 
     def SetVisibleFieldNames(self, field_names):
         # type: (list) -> None
