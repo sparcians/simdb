@@ -2,6 +2,7 @@ import wx, re
 from collections import OrderedDict
 from viewer.model.data_deserializers import StructDeserializer
 from viewer.gui.copy_path_menu import BindCopyPathMenu
+from viewer.gui.search_menu import ShowSearchMenu
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.dialogs.widget_data_selections import SummaryViewsEditDlg
 from viewer.gui.widgets.scheduling_lines import CaptionManager
@@ -274,7 +275,7 @@ class SummaryGrid(wx.Panel):
                     if dtype_name in ('char', 'unsigned char', 'short', 'unsigned short', 'int', 'unsigned int', 'long', 'unsigned long', 'long long', 'unsigned long long'):
                         summary_handler = SummaryGrid.IntegerSummary(self, frame)
                     elif isinstance(frame.dtype_inspector.GetDeserializer(dtype_name), StructDeserializer):
-                        summary_handler = SummaryGrid.StructSummary(self, frame, summary_views)
+                        summary_handler = SummaryGrid.StructSummary(self, frame, summary_views, full_path)
                     else:
                         summary_handler = SummaryGrid.SimpleSummary(self, frame)
 
@@ -331,14 +332,18 @@ class SummaryGrid(wx.Panel):
             self.SetLabel(value)
 
     class StructSummary(DefaultStaticText):
-        def __init__(self, parent, frame, summary_views):
+        def __init__(self, parent, frame, summary_views, elem_path):
             DefaultStaticText.__init__(self, parent, label='TODO')
             self.frame = frame
             self.summary_views = summary_views
+            self.elem_path = elem_path
             self.auto_color = True
+            self.nvps = []
+            self.Bind(wx.EVT_CONTEXT_MENU, self.__OnContextMenu)
 
         def UpdateValue(self, value):
             label = []
+            self.nvps = []
             if value is not None:
                 for field_name, field_value in value:
                     if field_name == 'DID' and not self.summary_views.show_did:
@@ -346,12 +351,16 @@ class SummaryGrid(wx.Panel):
                     field_value = str(field_value)
                     field_value = re.sub(r'\s+', ' ', field_value)
                     label.append(f'{field_name}({field_value})')
+                    self.nvps.append((field_name, field_value))
                 label = ' '.join(label)
                 self.SetLabel(label)
                 self.SetToolTip(label)
             else:
                 self.SetLabel('(no data)')
                 self.UnsetToolTip()
+
+        def __OnContextMenu(self, evt):
+            ShowSearchMenu(self, self.frame, self.elem_path, self.nvps)
 
         def SetSearchMatch(self, matches: bool):
             self.SetBackgroundColour(wx.Colour(255, 255, 0) if matches else wx.WHITE)

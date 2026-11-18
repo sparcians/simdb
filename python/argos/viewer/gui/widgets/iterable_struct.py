@@ -2,6 +2,7 @@ import wx, wx.grid
 from collections.abc import Iterable
 from collections import OrderedDict
 from viewer.gui.copy_path_menu import BindCopyPathMenu
+from viewer.gui.search_menu import ShowSearchMenu
 from viewer.gui.dialogs.widget_data_selections import WidgetDataSelectionsDlg
 from viewer.gui.widgets.grid import Grid
 from viewer.gui.widgets.static_text import DefaultStaticText
@@ -24,6 +25,7 @@ class IterableStruct(wx.Panel):
 
         self.grid = Grid(self, frame, num_rows, num_cols, cell_selection_allowed=False)
         self.__SyncGridViewSettings()
+        self.grid.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.__OnGridCellRightClick)
 
         for i in range(self.capacity):
             self.grid.SetRowLabelValue(i, str(i))
@@ -165,6 +167,17 @@ class IterableStruct(wx.Panel):
             nvps[name] = self.grid.GetCellValue(row, i).strip(' ')
 
         return nvps
+
+    def __OnGridCellRightClick(self, event):
+        row, col = event.GetRow(), event.GetCol()
+        if not self.grid.IsRowShown(row):
+            return
+
+        nvps = self.__GetNameValuePairs(row)
+        if not any(nvps.values()):
+            return
+
+        ShowSearchMenu(self.grid, self.frame, self.elem_path, nvps.items(), self.grid.GetColLabelValue(col))
 
     def __CreateSearchResult(self, nvps: OrderedDict, row: int):
         return self.SearchResult(self, nvps, row)
