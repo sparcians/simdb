@@ -466,6 +466,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_search_syntax">13.1. Search syntax</a></li>
 <li><a href="#_the_search_results_panel">13.2. The search results panel</a></li>
 <li><a href="#_highlighting_matches_in_widgets">13.3. Highlighting matches in widgets</a></li>
+<li><a href="#_searching_from_a_widgets_context_menu">13.4. Searching from a widget&#8217;s context menu</a></li>
 </ul>
 </li>
 <li><a href="#sec-widget-deep-dives">14. Widget Deep Dives</a>
@@ -1137,6 +1138,34 @@ matches yourself; they&#8217;re visually called out wherever they already appear
 on screen.</p>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_searching_from_a_widgets_context_menu">13.4. Searching from a widget&#8217;s context menu</h3>
+<div class="paragraph">
+<p>You can also start a search without typing anything: right-click struct data
+and choose <strong>Search</strong>. The submenu lists every field of that struct as
+<code>name:value</code>, and picking one searches for that field/value (limited to that
+struct&#8217;s element path).</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Queue Inspector</strong>: right-click a grid cell. The clicked column&#8217;s field is
+listed first, then a separator, then all of the row&#8217;s fields.</p>
+</li>
+<li>
+<p><strong>Watchlist</strong>: right-click a struct&#8217;s value. (Integer, simple, and container
+values have no search menu.)</p>
+</li>
+<li>
+<p><strong>Scheduling Lines</strong>: right-click a data cell (or the detailed packet column)
+that holds a struct. The menu lists all of that struct&#8217;s fields.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The <strong>Queue Utilizations</strong> widget has no search menu.</p>
+</div>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -1148,7 +1177,7 @@ on screen.</p>
 <div class="content">
 <img src="images/widget-queue-inspector.png" alt="A Queue Inspector widget">
 </div>
-<div class="title">Figure 7. A Queue Inspector widget showing a fetch queue&#8217;s contents</div>
+<div class="title">Figure 7. A Queue Inspector widget showing a fetch queues&#8217;s contents</div>
 </div>
 </div>
 <div class="sect2">
@@ -1186,7 +1215,7 @@ on screen.</p>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2026-11-17 18:02:52 -0600
+Last updated 2026-11-17 18:39:20 -0600
 </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.18.3/highlight.min.js"></script>

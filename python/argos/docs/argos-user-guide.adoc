@@ -445,6 +445,22 @@ its own data that matches the active search -- you don't have to hunt for
 matches yourself; they're visually called out wherever they already appear
 on screen.
 
+=== Searching from a widget's context menu
+
+You can also start a search without typing anything: right-click struct data
+and choose *Search*. The submenu lists every field of that struct as
+`name:value`, and picking one searches for that field/value (limited to that
+struct's element path).
+
+* *Queue Inspector*: right-click a grid cell. The clicked column's field is
+  listed first, then a separator, then all of the row's fields.
+* *Watchlist*: right-click a struct's value. (Integer, simple, and container
+  values have no search menu.)
+* *Scheduling Lines*: right-click a data cell (or the detailed packet column)
+  that holds a struct. The menu lists all of that struct's fields.
+
+The *Queue Utilizations* widget has no search menu.
+
 [#sec-widget-deep-dives]
 == Widget Deep Dives
 

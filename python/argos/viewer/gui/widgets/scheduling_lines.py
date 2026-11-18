@@ -1,6 +1,7 @@
 import wx, copy, re, os
 from collections import OrderedDict
 from viewer.gui.copy_path_menu import ShowCopyPathMenu
+from viewer.gui.search_menu import ShowSearchMenu
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.grid import Grid
 
@@ -952,11 +953,50 @@ class SchedulingLinesWidget(wx.Panel):
         return '{}[{}]'.format(elem_path, segment['bin'])
 
     def __OnGridCellRightClick(self, event):
-        if event.GetCol() == 0:
-            path = self._caption_path_by_row.get(event.GetRow())
+        row, col = event.GetRow(), event.GetCol()
+        if col == 0:
+            path = self._caption_path_by_row.get(row)
             if path is not None:
                 ShowCopyPathMenu(self.grid, path)
-    
+            return
+
+        found = self.__FindStructAtCell(row, col)
+        if found:
+            elem_path, annos = found
+            nvps = [(k, v) for k, v in annos if k != 'DID' or self.show_did]
+            ShowSearchMenu(self.grid, self.frame, elem_path, nvps)
+
+    def __FindStructAtCell(self, row, col):
+        """Returns the (elem_path, name/value pairs) of the struct drawn in the grid cell,
+        or None if the cell holds no struct."""
+        if col == self.num_samples_before + self.num_samples_after + 3 and self.show_detailed_queue_packets:
+            col = self._current_cycle_col
+
+        time_val = next((t for t, c in self._sample_col_by_time.items() if c == col), None)
+        if time_val is None:
+            return None
+
+        for elem_path, vals in self._ranges.items():
+            try:
+                data = vals['DataVals'][vals['TimeVals'].index(time_val)]
+            except ValueError:
+                continue
+
+            if data is None:
+                continue
+
+            if elem_path in self.scalar_elem_paths:
+                if self.scalar_row_by_elem_path.get(elem_path) == row and isinstance(data, (list, tuple)) and data:
+                    return elem_path, data
+                continue
+
+            for bin_idx, annos in enumerate(data):
+                rasterizer = self.rasterizers.get((elem_path, bin_idx))
+                if annos and rasterizer and rasterizer.row == row:
+                    return elem_path, annos
+
+        return None
+
     def __OnGridMouseMotion(self, evt):
         x, y = self.grid.CalcUnscrolledPosition(evt.GetX(), evt.GetY())
         row, col = self.grid.XYToCell(x, y)
