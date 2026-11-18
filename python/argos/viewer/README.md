@@ -13,9 +13,9 @@ viewer answers *"now that it's captured, how do I look at it?"*
 ## Launching
 
 ```bash
-python argos.py --database path/to/collected.db
-python argos.py --database path/to/collected.db --layout-file layout.alf
-python argos.py --database path/to/collected.db --read-only
+python3 argos.py --database path/to/collected.db
+python3 argos.py --database path/to/collected.db --layout-file layout.alf
+python3 argos.py --database path/to/collected.db --read-only
 ```
 
 - `--database` (required): the Argos-collected database to open.

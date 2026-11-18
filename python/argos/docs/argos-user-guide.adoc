@@ -1,0 +1,471 @@
+= Argos User Guide
+:doctype: book
+:toc: left
+:toclevels: 3
+:sectnums:
+:sectnumlevels: 2
+:icons: font
+:source-highlighter: highlight.js
+:experimental:
+:imagesdir: images
+
+[colophon]
+= About This Guide
+
+This guide covers the *Argos viewer* -- the desktop GUI you use to open a
+SimDB-collected database and replay a simulation run. It is a hands-on,
+task-oriented companion: how to open a run, build a view out of widgets,
+navigate through simulated time, save and share what you built, and search
+across it.
+
+It does not cover the *Argos collector* (the C++ side that captures data
+inside your simulator) or SimDB's on-disk formats. For those, see the
+link:../../../docs/book/book.html#part-vii[Argos case study] in the SimDB
+book, which this guide supersedes for everything about the viewer's user
+interface.
+
+[NOTE]
+====
+Some screenshots below are placeholders describing what still needs to be
+captured. They are marked clearly wherever they occur.
+====
+
+[#sec-intro]
+== Introduction
+
+Argos is SimDB's flagship application: a simulation data *collector* plus a
+desktop *viewer*. The collector runs inside your simulator and streams the
+state of the objects you have marked for collection into a single SQLite
+database as the simulation runs. The viewer opens that database afterward and
+lets you *replay* the run -- scrubbing back and forth through simulated time
+while a set of composable widgets show you what each collected object looked
+like at any instant.
+
+Because collection is checkpoint-based (periodic full snapshots plus small
+deltas in between), the viewer reconstructs an object's exact value at any
+requested tick by starting from the most recent snapshot and replaying the
+deltas up to that point. This happens behind the scenes; you just move the
+playback controls and the widgets update.
+
+[#sec-opening]
+== Opening Argos
+
+The viewer is launched from the command line as `argos.py`:
+
+[source,bash]
+----
+python3 argos.py --database path/to/collected.db
+python3 argos.py --database path/to/collected.db --layout-file layout.alf
+python3 argos.py --database path/to/collected.db --layout-file layout.alf --read-only
+----
+
+[cols="1,3", options="header"]
+|===
+| Flag | Meaning
+
+| `--database`
+| *Required.* Path to the SimDB database produced by the Argos collector.
+
+| `--layout-file`
+| *Optional.* Path to a saved xref:sec-layout-files[layout file] (`*.alf`) to
+open with. If supplied, this layout is always used, even if the database has
+a last-known view saved from a previous session.
+
+| `--read-only`
+| *Optional.* Opens the viewer with save dialogs and layout persistence
+disabled. The window title never shows unsaved changes, and nothing is
+written back to the database or to a layout file. Most often combined with
+`--layout-file`, to open a shared/prepared layout for viewing without risk of
+modifying it.
+|===
+
+=== Tested environment
+
+Argos is regularly exercised against the following versions. Other versions
+may work, but these are the ones it's verified against:
+
+[cols="1,3", options="header"]
+|===
+| Component | Version
+
+| Python
+| `Python 3.14.4`
+
+| wxPython
+| `4.2.5 gtk3 (phoenix) wxWidgets 3.2.9`
+|===
+
+Check what you have installed with:
+
+[source,bash]
+----
+python3 --version
+python3 -c "import wx; print(wx.version())"
+----
+
+=== The main window
+
+On first launch against a database you have not viewed before, you are met
+with an almost-empty workspace: a single tab ("Tab 1") filling the window,
+one empty canvas cell showing a *Quick Links* menu, and the playback bar
+along the bottom.
+
+.Argos on first launch, showing the Quick Links menu and playback bar
+image::opening-first-launch.png[Argos on first launch, showing the Quick Links menu,role=text-center]
+
+The window has three parts, top to bottom:
+
+1. *Menu bar* -- `File` (new/open/save layout, exit) and `Edit` (undo/redo,
+   font settings).
+2. *Data inspector* -- a row of tabs, each holding a splittable *canvas* you
+   fill with widgets. A trailing `Add Tab` page creates new tabs.
+3. *Playback bar* -- the clock selector, current cycle/tick readout, step
+   buttons, and the scrubber slider.
+
+=== Reopening a view
+
+There are two ways to get back to a view you built previously, depending on
+where you saved it (see xref:sec-layout-files[Layout Files] for how saving
+works):
+
+* *Saved into the database* -- if you made changes and saved them back into
+  `sim.db` itself (rather than to a separate `*.alf` file), simply reopening
+  the same database reloads that view automatically:
++
+[source,bash]
+----
+python3 argos.py --database sim.db
+# ... make changes, save back into sim.db ...
+
+python3 argos.py --database sim.db
+# reopens with the view you left it in
+----
+
+* *Saved to a layout file* -- if you saved to a `*.alf` file instead, pass
+  that file back in with `--layout-file` to reload it:
++
+[source,bash]
+----
+python3 argos.py --database sim.db
+# ... make changes, save to view.alf ...
+
+python3 argos.py --database sim.db --layout-file view.alf
+----
+
+See xref:sec-view-vs-user[View settings vs. user settings] for what is and
+isn't captured by a saved view.
+
+[#sec-quick-links]
+== Displaying a Widget: Quick Links
+
+Every empty canvas cell shows a *Quick Links* menu -- this is how you build
+up a view. It has two groups of hyperlinks:
+
+* *Widgets* -- one link per widget kind: *Queue Inspector*, *Queue
+  Utilizations*, *Scheduling Lines*, and *Watchlist*. Clicking one opens a
+  small dialog where you pick *which* collected object(s) the widget should
+  show (for example, which queue to inspect), and then the widget replaces
+  the Quick Links in that cell.
+* *Canvas* -- *Split left/right* and *Split top/bottom*, which divide the
+  cell in two. Each new half again shows its own Quick Links, so you build a
+  multi-widget layout by splitting and filling, cell by cell.
+
+Choosing data is part of creating each widget, right where that widget will
+live -- there is no separate "browse everything" panel.
+
+[#sec-widgets-overview]
+== Available Widgets
+
+[cols="1,3", options="header"]
+|===
+| Widget | What it shows
+
+| *Queue Inspector*
+| A tabular view of a container object (a queue, buffer, or similar), with
+per-row auto-colorization so values are easy to scan as you move through time.
+Rows are colorized based on the underlying DID value (or the first field value
+if a DID was not provided).
+
+| *Queue Utilizations*
+| Occupancy of one or more container objects over time, shown as a percentage
+of each queue's configured capacity.
+
+| *Scheduling Lines*
+| A timeline-style view of scheduled activity for the elements you select,
+over a configurable window of ticks before and after the current position.
+
+| *Watchlist*
+| An aggregate view gathering several selected collectables (scalars,
+container contents, etc.) side by side.
+|===
+
+Screenshots of each widget are in xref:sec-widget-deep-dives[Widget Deep
+Dives] below, which also has a fuller walkthrough of Scheduling Lines, the
+most involved of the four.
+
+[#sec-widget-toolbar]
+== The Widget Toolbar
+
+Every populated widget has a small toolbar of five buttons in its top-left
+corner:
+
+.A Queue Inspector widget showing its toolbar with all five standard buttons: `>>`, `X`, `\|`, `-`, `@`
+image::widget-toolbar.png[A Queue Inspector widget showing its toolbar,role=text-center]
+
+[cols="1,3", options="header"]
+|===
+| Button | Action
+
+| `>>`
+| Opens the widget's own settings/selection dialog (the same dialog shown
+when the widget was created), so you can change what it displays.
+
+| `X`
+| Clears the widget, returning that cell to an empty Quick Links cell.
+
+| `\|`
+| Splits this cell left/right, keeping the current widget in one half and an
+empty Quick Links cell in the other.
+
+| `-`
+| Splits this cell top/bottom, same idea as `\|` but stacked vertically.
+
+| `@`
+| *Maximize.* Clears every other widget on the current tab, leaving only this
+one. (This does not delete other tabs -- just the other widgets on this one.)
+|===
+
+[#sec-arranging]
+== Arranging Multiple Widgets
+
+.A tab split into three cells: a Queue Inspector, a Watchlist, and a Queue Utilizations widget
+image::arranging-multi-widget-layout.png[A tab split into three widgets,role=text-center]
+
+There are three ways to display more than one widget at a time:
+
+* *Add a tab* -- click the trailing `Add Tab` page in the data inspector to
+  create a new tab with its own independent canvas. Right-click a tab to
+  rename or delete it.
+* *Split left/right* -- divides a cell into two side-by-side cells, either
+  from an empty cell's Quick Links or from the `|` button on an existing
+  widget.
+* *Split top/bottom* -- divides a cell into two stacked cells, from Quick
+  Links or the `-` button.
+
+Splitting is recursive: each half can be split again, so you can build an
+arbitrarily fine grid of widgets on one tab. Use the `@` (Maximize) button on
+any widget to quickly collapse a tab back down to just that one widget.
+
+[#sec-navigating]
+== Navigating Data
+
+The playback bar is how you move through simulated time; every visible
+widget updates to show its objects' state at the instant you land on.
+
+[cols="1,3", options="header"]
+|===
+| Control | Behavior
+
+| *Clock dropdown*
+| Selects which clock's edges you step by. Databases may contain a single
+clock or several; with multiple clocks you can also choose
+`<any clk edge>` to step by every clock's edges. Each object only updates on
+the edges of the clock it was collected against.
+
+| *Step buttons* (`-30`/`-10`/`-3`/`-1` and `+1`/`+3`/`+10`/`+30`)
+| Jump by a fixed number of cycles of the selected clock (or ticks, if no
+clock is selected), snapping to that clock's cycle boundaries.
+
+| *Scrubber slider*
+| Spans the whole run from its first to last recorded tick. Drag to preview;
+widgets refresh once you release it.
+
+| *Cycle/tick readout*
+| The current `cycle:N` / `tick:N` labels are styled like hyperlinks --
+click either one to pop open a small text box and type an exact cycle or
+tick to jump to.
+
+| `cyc-start:N` / `cyc-end:N`
+| Click either label to jump straight to the start or end of the run.
+|===
+
+[#sec-view-vs-user]
+== View Settings vs. User Settings
+
+Argos keeps two separate, independently-persisted sets of settings, which is
+worth understanding before you start saving layouts:
+
+[cols="1,1,3", options="header"]
+|===
+| | Question it answers | Examples
+
+| *View settings* (the *layout*)
+| "What do I want to look at?"
+| Which tabs exist, how each canvas is split, which widgets are placed where
+and their individual settings (displayed columns, colorization, selected
+elements), and the selected clock.
+
+| *User settings*
+| "How do I want to look at it?"
+| Font sizes for each UI role, your search history, and the tick/cycle you
+were last viewing.
+|===
+
+View settings are what gets saved to a xref:sec-layout-files[layout file].
+User settings are saved once, globally, to `~/.argos/user_settings.yaml`, and
+are restored automatically every time you open Argos -- independent of which
+database or layout you open. Changing a user setting (for example, resizing
+fonts) never marks the layout as dirty and is not part of the undo/redo
+history described below.
+
+The one deliberate exception: the current playback position is tracked as a
+*user* setting (so returning to the same database picks up where you left
+off), but it is explicitly excluded from the layout file itself -- a layout
+describes how to look at a run, not where in time you last paused, so sharing
+a layout file doesn't drag a colleague to your current tick.
+
+[#sec-layout-files]
+== Layout Files (`*.alf`)
+
+A *layout file* captures your view settings so you can reopen it later or
+share it with a colleague: the tabs, how each canvas is split, which widgets
+are placed where, their individual settings, and the selected clock.
+
+* *File > New Layout* (`Ctrl+N`) -- resets the canvas to a blank layout.
+* *File > Open Layout* (`Ctrl+O`) -- opens a saved `*.alf` file.
+* *File > Save Layout* (`Ctrl+S`) -- saves the current layout. If it has
+  never been saved before, you are prompted for a file to save to.
+* `--layout-file` on the command line loads a layout file immediately on
+  startup (see xref:sec-opening[Opening Argos]).
+
+The window title shows the current layout file's name, with a trailing `*`
+whenever there are unsaved changes.
+
+If you close Argos with unsaved changes and no layout file is in use, you are
+offered a choice: save to a new `*.alf` file, or save silently as the
+database's "last known view" so the same layout reopens automatically next
+time you open that database without naming a layout file.
+
+[#sec-undo-redo]
+== Undo and Redo
+
+Argos supports undo/redo for layout changes, via *Edit > Undo*
+(`Ctrl+Z`) and *Edit > Redo* (`Ctrl+Y`).
+
+The undo/redo history covers changes that dirty the layout: creating,
+removing, or splitting a widget, maximizing a tab down to one widget, adding,
+renaming, or deleting a tab, moving a splitter's sash, and changing a
+widget's own settings (displayed columns, auto-colorization, which elements a
+Scheduling Lines or Watchlist widget tracks, and so on).
+
+The history is kept in memory only -- it is never written to the layout
+file, the database, or the user settings file -- and is reset whenever a new
+layout is loaded. Changing a xref:sec-font-settings[font setting] does not
+push an undo entry, since fonts are a user setting rather than part of the
+layout.
+
+[#sec-font-settings]
+== Font Settings
+
+*Edit > Fonts...* opens a dialog with independent point-size controls grouped
+into *Global* (buttons, tabs), *Widgets* (metadata text, grid labels, grid
+cells), and *Search* (results titlebar, results list).
+
+.The `Edit > Fonts...` dialog, with independent spinners grouped into Global, Widgets, and Search
+image::font-settings-dialog.png[The Fonts dialog,role=text-center]
+
+Font sizes are a *user setting*, not part of the layout: changing them does
+not mark the current layout as dirty, does not create an undo/redo entry, and
+is remembered globally the next time you open Argos against any database.
+
+[#sec-logs-tab]
+== The Logs Tab
+
+A fixed, non-editable *Logs* tab appears as the first tab -- but only when
+the collected run actually recorded notifications worth surfacing (warnings,
+errors, or informational messages written to the collector's notifications
+table during the run). If a run recorded nothing, there is no Logs tab at
+all.
+
+.The Logs tab, showing a warning that was recorded during collection
+image::logs-tab.png[The Logs tab,role=text-center]
+
+Each entry shows the tick it occurred at, its type, and the message text, in
+the order it was recorded.
+
+[#sec-search]
+== Searching (`Ctrl-F`)
+
+`Ctrl-F` opens the Search dialog from anywhere in Argos (it has no menu
+item -- it is a keyboard-only accelerator).
+
+.The `Ctrl-F` Search dialog (top) and the resulting search results panel with on-screen matches highlighted and the "Search DB" controls (bottom)
+image::search-dialog-and-results.png[The Search dialog and results panel,role=text-center]
+
+=== Search syntax
+
+Searches are written as a list of field/value constraints, in either of two
+equivalent forms:
+
+[source]
+----
+uid:123 opcode:0xdeadbeef
+uid(123) opcode(0xdeadbeef)
+----
+
+Fields can be separated by spaces or commas, values may be decimal or `0x`
+hex, and any number of fields can be combined. The *Find* button stays
+disabled (with a tooltip showing an example) until the text parses as a valid
+set of constraints.
+
+=== The search results panel
+
+Running a search opens a panel above the playback bar with one row per match.
+Results appear in two groups:
+
+* Matches found among the data already on screen, across every tab, shown
+  first.
+* *Search DB* results -- an explicit, separate search of the underlying
+  database over a tick/cycle range, which can be slower than scanning what is
+  already loaded. The panel has its own `start`/`end`/unit (ticks or cycles)
+  fields and a *Search DB* button so you can search a specific window of the
+  run (searching the entire database is possible but can take a while on
+  large runs).
+
+Each row shows the tick, cycle, clock, element path, and matched
+field/value pairs, plus the auto-color/tag used to highlight that row's data
+(see below). Double-clicking a *Search DB* row jumps the playback position to
+that result's tick. *Refresh* reruns the active search (useful after you
+navigate or change what's on screen); *Close* hides the panel.
+
+=== Highlighting matches in widgets
+
+While search results are shown, every widget on every tab highlights any of
+its own data that matches the active search -- you don't have to hunt for
+matches yourself; they're visually called out wherever they already appear
+on screen.
+
+[#sec-widget-deep-dives]
+== Widget Deep Dives
+
+=== Queue Inspector
+
+.A Queue Inspector widget showing a fetch queues's contents
+image::widget-queue-inspector.png[A Queue Inspector widget,role=text-center]
+
+=== Queue Utilizations
+
+.A Queue Utilizations widget showing container occupancy over time
+image::widget-queue-utilizations.png[A Queue Utilizations widget,role=text-center]
+
+=== Watchlist
+
+.A Watchlist widget, built by right-clicking collectables in the "Edit Data Selections" dialog
+image::widget-watchlist.png[A Watchlist widget,role=text-center]
+
+=== Scheduling Lines
+
+.A Scheduling Lines widget showing scheduled activity across a window of ticks
+image::widget-scheduling-lines.png[A Scheduling Lines widget,role=text-center]
+
+TBD.
