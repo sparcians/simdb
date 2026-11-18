@@ -1,7 +1,7 @@
 = Argos User Guide
 :doctype: book
 :toc: left
-:toclevels: 3
+:toclevels: 4
 :sectnums:
 :sectnumlevels: 2
 :icons: font
@@ -484,4 +484,132 @@ image::widget-watchlist.png[A Watchlist widget,role=text-center]
 .A Scheduling Lines widget showing scheduled activity across a window of ticks
 image::widget-scheduling-lines.png[A Scheduling Lines widget,role=text-center]
 
-TBD.
+A Scheduling Lines widget gives a bird's-eye view of collected data spanning a
+wide range of cycles. Everything about what it shows and how is configured
+through its `>>` settings dialog ("Edit Data Selections"), covered setting by
+setting below. That dialog also has its own *Help* button with this same
+reference built in, so it's always on hand while you're using the widget.
+
+==== Selections
+
+.The Edit Data Selections dialog: a hierarchy tree to pick elements, and the current selections list with reorder/add/remove controls
+image::sched-lines-selections.png[The Edit Data Selections dialog for a Scheduling Lines widget,role=text-center]
+
+The top half of the dialog is shared by every widget that lets you pick more
+than one element. Double-click a leaf in the tree (or right-click a node to
+add/remove its whole subtree) to add it to the *Current Selections* list on
+the right. From there you can:
+
+* Reorder the selected rows with the up/down arrow buttons -- this is the
+  order the rows are drawn in the widget, top to bottom.
+* Add a row by typing a path directly with `+` (useful for a path that isn't
+  in the tree yet).
+* Remove the selected rows with `X`.
+
+==== Sample window
+
+.The same widget with a symmetric 15/15 sample window (top) versus an asymmetric 5-before/25-after window (bottom)
+image::sched-lines-sample-window.png[Two Scheduling Lines widgets with different sample windows,role=text-center]
+
+*Num samples before current cycle* and *Num samples after current cycle*
+control how many cycles are drawn on either side of the current position,
+from 1 to 200 each -- but the two numbers can't add up to more than 250. The
+window doesn't have to be symmetric: the example above pairs an even 15/15
+split with an asymmetric 5-before/25-after window that leans further into
+the future.
+
+==== Show detailed queue packets
+
+.With "Show detailed queue packets" checked (top) versus unchecked (bottom)
+image::sched-lines-show-details.png[Show detailed queue packets toggled on and off,role=text-center]
+
+When checked, a far-right column shows each row's full expanded annotations
+at the current cycle (its field/value pairs) -- the same detail you'd
+otherwise only get from a tooltip or the search results panel.
+
+==== Hide always-empty queue bins
+
+.With "Hide always-empty queue bins" checked (top) versus unchecked (bottom)
+image::sched-lines-hide-empty-bins.png[Hide always-empty queue bins toggled on and off,role=text-center]
+
+A container is shown one row per bin, up to its full capacity. When checked,
+bins that were never collected at any point in the run are squashed into a
+single row (e.g. `scheduler_queue[2]` for a queue with capacity 8 that never
+held more than 3 elements). When unchecked, every bin up to capacity is
+expanded in the grid, and the bins that were never used stay empty for the
+whole run.
+
+==== Show DID
+
+.With "Show DID" checked (top) versus unchecked (bottom)
+image::sched-lines-show-did.png[Show DID toggled on and off,role=text-center]
+
+When checked -- and the collected data actually has a DID field -- the DID is
+shown alongside the uid in the detailed packet column and in grid cell
+tooltips.
+
+==== Minimize grid cells
+
+.With "Minimize grid cells" checked (top) versus unchecked (bottom)
+image::sched-lines-minimize-grid-cells.png[Minimize grid cells toggled on and off,role=text-center]
+
+When checked, the grid is rendered with smaller fonts and tighter padding, so
+more rows and columns fit on screen at once -- useful once you've selected a
+lot of elements or widened the sample window.
+
+==== Use relative cycles for column labels
+
+.With "Use relative cycles for column labels" checked (top) versus unchecked (bottom)
+image::sched-lines-use-rel-cycles.png[Use relative cycles for column labels toggled on and off,role=text-center]
+
+When checked, column headers are labeled relative to the current cycle
+(`-10` ... `-1`, the current cycle, `+1` ... `+10`). When unchecked, column
+headers show absolute cycle numbers instead.
+
+==== Captions
+
+By default, the caption shown in the far-left column for each selection is
+its full element path, e.g. `top.cpu.core0.decode.FetchQueue[3]`. You can
+shorten this per selection from the *Caption* column in the selections list,
+or go further with the *Edit Captions* button for per-bin overrides.
+
+===== default-caption
+
+.The default caption: each row is labeled with its full element path
+image::sched-lines-default-caption.png[Default captions showing full element paths,role=text-center]
+
+With no caption set (`<default>`), every bin of a selected container is
+labeled with its full path, e.g. `top.cpu.core0.decode.FetchQueue[9]` down to
+`...FetchQueue[0]`.
+
+===== simple-caption
+
+.A simple caption: "FQ" replaces the full path for every bin of this queue
+image::sched-lines-simple-caption.png[A simple caption applied to a whole queue,role=text-center]
+
+Changing a selection's `<default>` caption to a short name, e.g. `FQ`,
+renames every bin of that container at once -- the rows become `FQ[9]` down
+to `FQ[0]` instead of the full path.
+
+===== bin-captions
+
+.The Edit Captions dialog overriding individual bins: bins 2 and 3 keep the queue's "FQ" caption, bin 1 is renamed to "FQOne", bin 0 to "FQZero", and bins 4 and up are hidden
+image::sched-lines-bin-captions.png[Per-bin caption overrides in the Edit Captions dialog,role=text-center]
+
+Click *Edit Captions* to override individual bins without touching the rest
+of a queue's caption. Each entry maps an element path -- optionally a bin
+range like `[4-end]` or `[2-5]` -- to a caption:
+
+* A caption for a specific bin always wins over a range that also covers it;
+  among overlapping ranges, the one with the highest start index wins.
+* Setting a bin's (or range's) caption to `<hide>` omits it from the widget
+  entirely -- useful when a container's capacity includes bins that don't
+  make sense for a given layout.
+* Bins that were never collected are omitted by default; appending
+  `, <fixed>` to a caption (e.g. `P0, <fixed>`) always shows that bin anyway,
+  hatched out with a tooltip explaining it was never collected.
+
+In the example above, `top.cpu.core0.decode.FetchQueue` keeps its queue-wide
+`FQ` caption for bins 2 and 3, bin 1 is renamed to `FQOne`, bin 0 to
+`FQZero`, and bins 4 and up are hidden -- leaving just four rows: `FQ[3]`,
+`FQ[2]`, `FQOne`, `FQZero`.

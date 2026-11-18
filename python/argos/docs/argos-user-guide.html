@@ -474,7 +474,24 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_queue_inspector">14.1. Queue Inspector</a></li>
 <li><a href="#_queue_utilizations">14.2. Queue Utilizations</a></li>
 <li><a href="#_watchlist">14.3. Watchlist</a></li>
-<li><a href="#_scheduling_lines">14.4. Scheduling Lines</a></li>
+<li><a href="#_scheduling_lines">14.4. Scheduling Lines</a>
+<ul class="sectlevel3">
+<li><a href="#_selections">Selections</a></li>
+<li><a href="#_sample_window">Sample window</a></li>
+<li><a href="#_show_detailed_queue_packets">Show detailed queue packets</a></li>
+<li><a href="#_hide_always_empty_queue_bins">Hide always-empty queue bins</a></li>
+<li><a href="#_show_did">Show DID</a></li>
+<li><a href="#_minimize_grid_cells">Minimize grid cells</a></li>
+<li><a href="#_use_relative_cycles_for_column_labels">Use relative cycles for column labels</a></li>
+<li><a href="#_captions">Captions</a>
+<ul class="sectlevel4">
+<li><a href="#_default_caption">default-caption</a></li>
+<li><a href="#_simple_caption">simple-caption</a></li>
+<li><a href="#_bin_captions">bin-captions</a></li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -1207,7 +1224,206 @@ that holds a struct. The menu lists all of that struct&#8217;s fields.</p>
 <div class="title">Figure 10. A Scheduling Lines widget showing scheduled activity across a window of ticks</div>
 </div>
 <div class="paragraph">
-<p>TBD.</p>
+<p>A Scheduling Lines widget gives a bird&#8217;s-eye view of collected data spanning a
+wide range of cycles. Everything about what it shows and how is configured
+through its <code>&gt;&gt;</code> settings dialog ("Edit Data Selections"), covered setting by
+setting below. That dialog also has its own <strong>Help</strong> button with this same
+reference built in, so it&#8217;s always on hand while you&#8217;re using the widget.</p>
+</div>
+<div class="sect3">
+<h4 id="_selections">Selections</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-selections.png" alt="The Edit Data Selections dialog for a Scheduling Lines widget">
+</div>
+<div class="title">Figure 11. The Edit Data Selections dialog: a hierarchy tree to pick elements, and the current selections list with reorder/add/remove controls</div>
+</div>
+<div class="paragraph">
+<p>The top half of the dialog is shared by every widget that lets you pick more
+than one element. Double-click a leaf in the tree (or right-click a node to
+add/remove its whole subtree) to add it to the <strong>Current Selections</strong> list on
+the right. From there you can:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Reorder the selected rows with the up/down arrow buttons&#8201;&#8212;&#8201;this is the
+order the rows are drawn in the widget, top to bottom.</p>
+</li>
+<li>
+<p>Add a row by typing a path directly with <code>+</code> (useful for a path that isn&#8217;t
+in the tree yet).</p>
+</li>
+<li>
+<p>Remove the selected rows with <code>X</code>.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_sample_window">Sample window</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-sample-window.png" alt="Two Scheduling Lines widgets with different sample windows">
+</div>
+<div class="title">Figure 12. The same widget with a symmetric 15/15 sample window (top) versus an asymmetric 5-before/25-after window (bottom)</div>
+</div>
+<div class="paragraph">
+<p><strong>Num samples before current cycle</strong> and <strong>Num samples after current cycle</strong>
+control how many cycles are drawn on either side of the current position,
+from 1 to 200 each&#8201;&#8212;&#8201;but the two numbers can&#8217;t add up to more than 250. The
+window doesn&#8217;t have to be symmetric: the example above pairs an even 15/15
+split with an asymmetric 5-before/25-after window that leans further into
+the future.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_show_detailed_queue_packets">Show detailed queue packets</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-show-details.png" alt="Show detailed queue packets toggled on and off">
+</div>
+<div class="title">Figure 13. With "Show detailed queue packets" checked (top) versus unchecked (bottom)</div>
+</div>
+<div class="paragraph">
+<p>When checked, a far-right column shows each row&#8217;s full expanded annotations
+at the current cycle (its field/value pairs)&#8201;&#8212;&#8201;the same detail you&#8217;d
+otherwise only get from a tooltip or the search results panel.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_hide_always_empty_queue_bins">Hide always-empty queue bins</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-hide-empty-bins.png" alt="Hide always-empty queue bins toggled on and off">
+</div>
+<div class="title">Figure 14. With "Hide always-empty queue bins" checked (top) versus unchecked (bottom)</div>
+</div>
+<div class="paragraph">
+<p>A container is shown one row per bin, up to its full capacity. When checked,
+bins that were never collected at any point in the run are squashed into a
+single row (e.g. <code>scheduler_queue[2]</code> for a queue with capacity 8 that never
+held more than 3 elements). When unchecked, every bin up to capacity is
+expanded in the grid, and the bins that were never used stay empty for the
+whole run.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_show_did">Show DID</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-show-did.png" alt="Show DID toggled on and off">
+</div>
+<div class="title">Figure 15. With "Show DID" checked (top) versus unchecked (bottom)</div>
+</div>
+<div class="paragraph">
+<p>When checked&#8201;&#8212;&#8201;and the collected data actually has a DID field&#8201;&#8212;&#8201;the DID is
+shown alongside the uid in the detailed packet column and in grid cell
+tooltips.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_minimize_grid_cells">Minimize grid cells</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-minimize-grid-cells.png" alt="Minimize grid cells toggled on and off">
+</div>
+<div class="title">Figure 16. With "Minimize grid cells" checked (top) versus unchecked (bottom)</div>
+</div>
+<div class="paragraph">
+<p>When checked, the grid is rendered with smaller fonts and tighter padding, so
+more rows and columns fit on screen at once&#8201;&#8212;&#8201;useful once you&#8217;ve selected a
+lot of elements or widened the sample window.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_use_relative_cycles_for_column_labels">Use relative cycles for column labels</h4>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-use-rel-cycles.png" alt="Use relative cycles for column labels toggled on and off">
+</div>
+<div class="title">Figure 17. With "Use relative cycles for column labels" checked (top) versus unchecked (bottom)</div>
+</div>
+<div class="paragraph">
+<p>When checked, column headers are labeled relative to the current cycle
+(<code>-10</code> &#8230;&#8203; <code>-1</code>, the current cycle, <code>+1</code> &#8230;&#8203; <code>+10</code>). When unchecked, column
+headers show absolute cycle numbers instead.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_captions">Captions</h4>
+<div class="paragraph">
+<p>By default, the caption shown in the far-left column for each selection is
+its full element path, e.g. <code>top.cpu.core0.decode.FetchQueue[3]</code>. You can
+shorten this per selection from the <strong>Caption</strong> column in the selections list,
+or go further with the <strong>Edit Captions</strong> button for per-bin overrides.</p>
+</div>
+<div class="sect4">
+<h5 id="_default_caption">default-caption</h5>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-default-caption.png" alt="Default captions showing full element paths">
+</div>
+<div class="title">Figure 18. The default caption: each row is labeled with its full element path</div>
+</div>
+<div class="paragraph">
+<p>With no caption set (<code>&lt;default&gt;</code>), every bin of a selected container is
+labeled with its full path, e.g. <code>top.cpu.core0.decode.FetchQueue[9]</code> down to
+<code>&#8230;&#8203;FetchQueue[0]</code>.</p>
+</div>
+</div>
+<div class="sect4">
+<h5 id="_simple_caption">simple-caption</h5>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-simple-caption.png" alt="A simple caption applied to a whole queue">
+</div>
+<div class="title">Figure 19. A simple caption: "FQ" replaces the full path for every bin of this queue</div>
+</div>
+<div class="paragraph">
+<p>Changing a selection&#8217;s <code>&lt;default&gt;</code> caption to a short name, e.g. <code>FQ</code>,
+renames every bin of that container at once&#8201;&#8212;&#8201;the rows become <code>FQ[9]</code> down
+to <code>FQ[0]</code> instead of the full path.</p>
+</div>
+</div>
+<div class="sect4">
+<h5 id="_bin_captions">bin-captions</h5>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/sched-lines-bin-captions.png" alt="Per-bin caption overrides in the Edit Captions dialog">
+</div>
+<div class="title">Figure 20. The Edit Captions dialog overriding individual bins: bins 2 and 3 keep the queue&#8217;s "FQ" caption, bin 1 is renamed to "FQOne", bin 0 to "FQZero", and bins 4 and up are hidden</div>
+</div>
+<div class="paragraph">
+<p>Click <strong>Edit Captions</strong> to override individual bins without touching the rest
+of a queue&#8217;s caption. Each entry maps an element path&#8201;&#8212;&#8201;optionally a bin
+range like <code>[4-end]</code> or <code>[2-5]</code>&#8201;&#8212;&#8201;to a caption:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>A caption for a specific bin always wins over a range that also covers it;
+among overlapping ranges, the one with the highest start index wins.</p>
+</li>
+<li>
+<p>Setting a bin&#8217;s (or range&#8217;s) caption to <code>&lt;hide&gt;</code> omits it from the widget
+entirely&#8201;&#8212;&#8201;useful when a container&#8217;s capacity includes bins that don&#8217;t
+make sense for a given layout.</p>
+</li>
+<li>
+<p>Bins that were never collected are omitted by default; appending
+<code>, &lt;fixed&gt;</code> to a caption (e.g. <code>P0, &lt;fixed&gt;</code>) always shows that bin anyway,
+hatched out with a tooltip explaining it was never collected.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>In the example above, <code>top.cpu.core0.decode.FetchQueue</code> keeps its queue-wide
+<code>FQ</code> caption for bins 2 and 3, bin 1 is renamed to <code>FQOne</code>, bin 0 to
+<code>FQZero</code>, and bins 4 and up are hidden&#8201;&#8212;&#8201;leaving just four rows: <code>FQ[3]</code>,
+<code>FQ[2]</code>, <code>FQOne</code>, <code>FQZero</code>.</p>
+</div>
+</div>
 </div>
 </div>
 </div>
@@ -1215,7 +1431,7 @@ that holds a struct. The menu lists all of that struct&#8217;s fields.</p>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2026-11-17 18:39:20 -0600
+Last updated 2026-11-18 12:56:12 -0600
 </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.18.3/highlight.min.js"></script>
