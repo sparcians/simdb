@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="generator" content="Asciidoctor 2.0.16">
+<meta name="generator" content="Asciidoctor 2.0.26">
 <title>SimDB: The Complete Guide</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
@@ -84,10 +84,10 @@ code{font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;font-weight:400;
 ul,ol,dl{line-height:1.6;margin-bottom:1.25em;list-style-position:outside;font-family:inherit}
 ul,ol{margin-left:1.5em}
 ul li ul,ul li ol{margin-left:1.25em;margin-bottom:0}
-ul.square li ul,ul.circle li ul,ul.disc li ul{list-style:inherit}
-ul.square{list-style-type:square}
 ul.circle{list-style-type:circle}
 ul.disc{list-style-type:disc}
+ul.square{list-style-type:square}
+ul.circle ul:not([class]),ul.disc ul:not([class]),ul.square ul:not([class]){list-style:inherit}
 ol li ul,ol li ol{margin-left:1.25em;margin-bottom:0}
 dl dt{margin-bottom:.3125em;font-weight:bold}
 dl dd{margin-bottom:1.25em}
@@ -116,7 +116,6 @@ h1 strong,h2 strong,h3 strong,#toctitle strong,.sidebarblock>.content>.title str
 :not(pre):not([class^=L])>code{font-size:.9375em;font-style:normal!important;letter-spacing:0;padding:.1em .5ex;word-spacing:-.15em;background:#f7f7f8;border-radius:4px;line-height:1.45;text-rendering:optimizeSpeed}
 pre{color:rgba(0,0,0,.9);font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;line-height:1.45;text-rendering:optimizeSpeed}
 pre code,pre pre{color:inherit;font-size:inherit;line-height:inherit}
-pre>code{display:block}
 pre.nowrap,pre.nowrap pre{white-space:pre;word-wrap:normal}
 em em{font-style:normal}
 strong strong{font-weight:400}
@@ -140,7 +139,7 @@ p a>code:hover{color:rgba(0,0,0,.9)}
 #content::before{content:none}
 #header>h1:first-child{color:rgba(0,0,0,.85);margin-top:2.25rem;margin-bottom:0}
 #header>h1:first-child+#toc{margin-top:8px;border-top:1px solid #dddddf}
-#header>h1:only-child,body.toc2 #header>h1:nth-last-child(2){border-bottom:1px solid #dddddf;padding-bottom:8px}
+#header>h1:only-child{border-bottom:1px solid #dddddf;padding-bottom:8px}
 #header .details{border-bottom:1px solid #dddddf;line-height:1.45;padding-top:.25em;padding-bottom:.25em;padding-left:.25em;color:rgba(0,0,0,.6);display:flex;flex-flow:row wrap}
 #header .details span:first-child{margin-left:-.125em}
 #header .details span.email a{color:rgba(0,0,0,.85)}
@@ -162,6 +161,7 @@ p a>code:hover{color:rgba(0,0,0,.9)}
 #toctitle{color:#7a2518;font-size:1.2em}
 @media screen and (min-width:768px){#toctitle{font-size:1.375em}
 body.toc2{padding-left:15em;padding-right:0}
+body.toc2 #header>h1:nth-last-child(2){border-bottom:1px solid #dddddf;padding-bottom:8px}
 #toc.toc2{margin-top:0!important;background:#f8f8f7;position:fixed;width:15em;left:0;top:0;border-right:1px solid #e7e7e9;border-top-width:0!important;border-bottom-width:0!important;z-index:1000;padding:1.25em 1em;height:100%;overflow:auto}
 #toc.toc2 #toctitle{margin-top:0;margin-bottom:.8rem;font-size:1.2em}
 #toc.toc2>ul{font-size:.9em;margin-bottom:0}
@@ -193,7 +193,8 @@ body.toc2.toc-right{padding-left:0;padding-right:20em}}
 #content h1>a.link:hover,h2>a.link:hover,h3>a.link:hover,#toctitle>a.link:hover,.sidebarblock>.content>.title>a.link:hover,h4>a.link:hover,h5>a.link:hover,h6>a.link:hover{color:#a53221}
 details,.audioblock,.imageblock,.literalblock,.listingblock,.stemblock,.videoblock{margin-bottom:1.25em}
 details{margin-left:1.25rem}
-details>summary{cursor:pointer;display:block;position:relative;line-height:1.6;margin-bottom:.625rem;-webkit-tap-highlight-color:transparent}
+details>summary{cursor:pointer;display:block;position:relative;line-height:1.6;margin-bottom:.625rem;outline:none;-webkit-tap-highlight-color:transparent}
+details>summary::-webkit-details-marker{display:none}
 details>summary::before{content:"";border:solid transparent;border-left:solid;border-width:.3em 0 .3em .5em;position:absolute;top:.5em;left:-1.25rem;transform:translateX(15%)}
 details[open]>summary::before{border:solid transparent;border-top:solid;border-width:.5em .3em 0;transform:translateY(15%)}
 details>summary::after{content:"";width:1.25rem;height:1em;position:absolute;top:.3em;left:-1.25rem}
@@ -207,19 +208,17 @@ table.tableblock.fit-content>caption.title{white-space:nowrap;width:0}
 .admonitionblock>table td.content{padding-left:1.125em;padding-right:1.25em;border-left:1px solid #dddddf;color:rgba(0,0,0,.6);word-wrap:anywhere}
 .admonitionblock>table td.content>:last-child>:last-child{margin-bottom:0}
 .exampleblock>.content{border:1px solid #e6e6e6;margin-bottom:1.25em;padding:1.25em;background:#fff;border-radius:4px}
-.exampleblock>.content>:first-child{margin-top:0}
-.exampleblock>.content>:last-child{margin-bottom:0}
 .sidebarblock{border:1px solid #dbdbd6;margin-bottom:1.25em;padding:1.25em;background:#f3f3f2;border-radius:4px}
-.sidebarblock>:first-child{margin-top:0}
-.sidebarblock>:last-child{margin-bottom:0}
 .sidebarblock>.content>.title{color:#7a2518;margin-top:0;text-align:center}
-.exampleblock>.content>:last-child>:last-child,.exampleblock>.content .olist>ol>li:last-child>:last-child,.exampleblock>.content .ulist>ul>li:last-child>:last-child,.exampleblock>.content .qlist>ol>li:last-child>:last-child,.sidebarblock>.content>:last-child>:last-child,.sidebarblock>.content .olist>ol>li:last-child>:last-child,.sidebarblock>.content .ulist>ul>li:last-child>:last-child,.sidebarblock>.content .qlist>ol>li:last-child>:last-child{margin-bottom:0}
+.exampleblock>.content>:first-child,.sidebarblock>.content>:first-child{margin-top:0}
+.exampleblock>.content>:last-child,.exampleblock>.content>:last-child>:last-child,.exampleblock>.content .olist>ol>li:last-child>:last-child,.exampleblock>.content .ulist>ul>li:last-child>:last-child,.exampleblock>.content .qlist>ol>li:last-child>:last-child,.sidebarblock>.content>:last-child,.sidebarblock>.content>:last-child>:last-child,.sidebarblock>.content .olist>ol>li:last-child>:last-child,.sidebarblock>.content .ulist>ul>li:last-child>:last-child,.sidebarblock>.content .qlist>ol>li:last-child>:last-child{margin-bottom:0}
 .literalblock pre,.listingblock>.content>pre{border-radius:4px;overflow-x:auto;padding:1em;font-size:.8125em}
 @media screen and (min-width:768px){.literalblock pre,.listingblock>.content>pre{font-size:.90625em}}
 @media screen and (min-width:1280px){.literalblock pre,.listingblock>.content>pre{font-size:1em}}
 .literalblock pre,.listingblock>.content>pre:not(.highlight),.listingblock>.content>pre[class=highlight],.listingblock>.content>pre[class^="highlight "]{background:#f7f7f8}
 .literalblock.output pre{color:#f7f7f8;background:rgba(0,0,0,.9)}
 .listingblock>.content{position:relative}
+.listingblock pre>code{display:block}
 .listingblock code[data-lang]::before{display:none;content:attr(data-lang);position:absolute;font-size:.75em;top:.425rem;right:.5rem;line-height:1;text-transform:uppercase;color:inherit;opacity:.5}
 .listingblock:hover code[data-lang]::before{display:block}
 .listingblock.terminal pre .command::before{content:attr(data-prompt);padding-right:.5em;color:inherit;opacity:.5}
@@ -235,9 +234,8 @@ pre.prettyprint li:not(:first-child) code[data-lang]::before{display:none}
 table.linenotable{border-collapse:separate;border:0;margin-bottom:0;background:none}
 table.linenotable td[class]{color:inherit;vertical-align:top;padding:0;line-height:inherit;white-space:normal}
 table.linenotable td.code{padding-left:.75em}
-table.linenotable td.linenos{border-right:1px solid;opacity:.35;padding-right:.5em}
-pre.pygments .lineno{border-right:1px solid;opacity:.35;display:inline-block;margin-right:.75em}
-pre.pygments .lineno::before{content:"";margin-right:-.125em}
+table.linenotable td.linenos,pre.pygments .linenos{border-right:1px solid;opacity:.35;padding-right:.5em;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}
+pre.pygments span.linenos{display:inline-block;margin-right:.75em}
 .quoteblock{margin:0 1em 1.25em 1.5em;display:table}
 .quoteblock:not(.excerpt)>.title{margin-left:-1.5em;margin-bottom:.75em}
 .quoteblock blockquote,.quoteblock p{color:rgba(0,0,0,.85);font-size:1.15rem;line-height:1.75;word-spacing:.1em;letter-spacing:0;font-style:italic;text-align:justify}
@@ -274,7 +272,7 @@ table.frame-none>colgroup+*>:first-child>*,table.frame-sides>colgroup+*>:first-c
 table.frame-none>:last-child>:last-child>*,table.frame-sides>:last-child>:last-child>*{border-bottom-width:0}
 table.frame-none>*>tr>:first-child,table.frame-ends>*>tr>:first-child{border-left-width:0}
 table.frame-none>*>tr>:last-child,table.frame-ends>*>tr>:last-child{border-right-width:0}
-table.stripes-all tr,table.stripes-odd tr:nth-of-type(odd),table.stripes-even tr:nth-of-type(even),table.stripes-hover tr:hover{background:#f8f8f7}
+table.stripes-all>*>tr,table.stripes-odd>*>tr:nth-of-type(odd),table.stripes-even>*>tr:nth-of-type(even),table.stripes-hover>*>tr:hover{background:#f8f8f7}
 th.halign-left,td.halign-left{text-align:left}
 th.halign-right,td.halign-right{text-align:right}
 th.halign-center,td.halign-center{text-align:center}
@@ -290,10 +288,11 @@ ol{margin-left:1.75em}
 ul li ol{margin-left:1.5em}
 dl dd{margin-left:1.125em}
 dl dd:last-child,dl dd:last-child>:last-child{margin-bottom:0}
-ol>li p,ul>li p,ul dd,ol dd,.olist .olist,.ulist .ulist,.ulist .olist,.olist .ulist{margin-bottom:.625em}
+li p,ul dd,ol dd,.olist .olist,.ulist .ulist,.ulist .olist,.olist .ulist{margin-bottom:.625em}
 ul.checklist,ul.none,ol.none,ul.no-bullet,ol.no-bullet,ol.unnumbered,ul.unstyled,ol.unstyled{list-style-type:none}
 ul.no-bullet,ol.no-bullet,ol.unnumbered{margin-left:.625em}
 ul.unstyled,ol.unstyled{margin-left:0}
+li>p:empty:only-child::before{content:"";display:inline-block}
 ul.checklist>li>p:first-child{margin-left:-1em}
 ul.checklist>li>p:first-child>.fa-square-o:first-child,ul.checklist>li>p:first-child>.fa-check-square-o:first-child{width:1.25em;font-size:.8em;position:relative;bottom:.125em}
 ul.checklist>li>p:first-child>input[type=checkbox]:first-child{margin-right:.25em}
@@ -329,15 +328,13 @@ a.image{text-decoration:none;display:inline-block}
 a.image object{pointer-events:none}
 sup.footnote,sup.footnoteref{font-size:.875em;position:static;vertical-align:super}
 sup.footnote a,sup.footnoteref a{text-decoration:none}
-sup.footnote a:active,sup.footnoteref a:active{text-decoration:underline}
+sup.footnote a:active,sup.footnoteref a:active,#footnotes .footnote a:first-of-type:active{text-decoration:underline}
 #footnotes{padding-top:.75em;padding-bottom:.75em;margin-bottom:.625em}
 #footnotes hr{width:20%;min-width:6.25em;margin:-.25em 0 .75em;border-width:1px 0 0}
 #footnotes .footnote{padding:0 .375em 0 .225em;line-height:1.3334;font-size:.875em;margin-left:1.2em;margin-bottom:.2em}
 #footnotes .footnote a:first-of-type{font-weight:bold;text-decoration:none;margin-left:-1.05em}
 #footnotes .footnote:last-of-type{margin-bottom:0}
 #content #footnotes{margin-top:-.625em;margin-bottom:0;padding:.75em 0}
-.gist .file-data>table{border:0;background:#fff;width:100%;margin-bottom:0}
-.gist .file-data>table td.line-data{width:99%}
 div.unbreakable{page-break-inside:avoid}
 .big{font-size:larger}
 .small{font-size:smaller}
@@ -394,7 +391,7 @@ b.conum *{color:inherit!important}
 dt,th.tableblock,td.content,div.footnote{text-rendering:optimizeLegibility}
 h1,h2,p,td.content,span.alt,summary{letter-spacing:-.01em}
 p strong,td.content strong,div.footnote strong{letter-spacing:-.005em}
-p,blockquote,dt,td.content,span.alt,summary{font-size:1.0625rem}
+p,blockquote,dt,td.content,td.hdlist1,span.alt,summary{font-size:1.0625rem}
 p{margin-bottom:1.25rem}
 .sidebarblock p,.sidebarblock dt,.sidebarblock td.content,p.tableblock{font-size:1em}
 .exampleblock>.content{background:#fffef7;border-color:#e0e0dc;box-shadow:0 1px 4px #e0e0dc}
@@ -752,17 +749,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_the_contract_from_the_viewers_side">The contract, from the viewer&#8217;s side</a></li>
 </ul>
 </li>
-<li><a href="#ch-34-argos-viewer">34. The Argos Viewer</a>
-<ul class="sectlevel2">
-<li><a href="#_opening_a_database_2">Opening a database</a></li>
-<li><a href="#_quick_links_building_a_view_from_an_empty_cell">Quick Links: building a view from an empty cell</a></li>
-<li><a href="#_tabs_and_the_splittable_canvas">Tabs and the splittable canvas</a></li>
-<li><a href="#_widgets">Widgets</a></li>
-<li><a href="#_the_playback_bar_moving_through_time">The playback bar: moving through time</a></li>
-<li><a href="#_a_thin_client_by_design">A thin client, by design</a></li>
-<li><a href="#_layout_files_saving_and_sharing_a_layout">Layout files: saving and sharing a layout</a></li>
-</ul>
-</li>
+<li><a href="#ch-34-argos-viewer">34. The Argos Viewer</a></li>
 <li><a href="#ch-35-end-to-end">35. End-to-End</a>
 <ul class="sectlevel2">
 <li><a href="#_the_three_steps">The three steps</a></li>
@@ -934,10 +921,12 @@ collection-and-visualization application.</p>
 <h1 id="part-i" class="sect0">Part I: Why SimDB</h1>
 <div class="openblock partintro">
 <div class="content">
-This part answers the question a brand-new user asks first: <em>"What is SimDB, and
+<div class="paragraph">
+<p>This part answers the question a brand-new user asks first: <em>"What is SimDB, and
 why would I choose it over the tools I already know?"</em> No code yet&#8201;&#8212;&#8201;just the
 problem, the landscape, and the mental model you will carry through the rest of
-the book.
+the book.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -1712,8 +1701,10 @@ flows.</p>
 <h1 id="part-ii" class="sect0">Part II: Getting Started</h1>
 <div class="openblock partintro">
 <div class="content">
-Move from concepts to a running program. By the end of this part the reader has
-SimDB installed, building in their project, and has written a first database.
+<div class="paragraph">
+<p>Move from concepts to a running program. By the end of this part the reader has
+SimDB installed, building in their project, and has written a first database.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -2144,9 +2135,11 @@ full.</p>
 <h1 id="part-iii" class="sect0">Part III: The SQLite Interface</h1>
 <div class="openblock partintro">
 <div class="content">
-SimDB&#8217;s SQLite layer is useful on its own, with no pipelines involved. This part
+<div class="paragraph">
+<p>SimDB&#8217;s SQLite layer is useful on its own, with no pipelines involved. This part
 is a complete tour of the data layer: schema, inserts, queries, transactions,
-blobs, and inspection.
+blobs, and inspection.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -3087,9 +3080,11 @@ data off the critical path and onto its own threads.</p>
 <h1 id="part-iv" class="sect0">Part IV: Concurrent Pipelines</h1>
 <div class="openblock partintro">
 <div class="content">
-Here SimDB&#8217;s second pillar appears: safe, high-throughput concurrent pipelines
+<div class="paragraph">
+<p>Here SimDB&#8217;s second pillar appears: safe, high-throughput concurrent pipelines
 that feed SQLite without contention. This part builds a working pipeline from
-first principles.
+first principles.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -4039,9 +4034,11 @@ lifecycle&#8201;&#8212;&#8201;is exactly what <a href="#part-v">Part V</a> takes
 <h1 id="part-v" class="sect0">Part V: The App Framework</h1>
 <div class="openblock partintro">
 <div class="content">
-Pipelines and schemas are composed inside <em>apps</em>. This part shows how SimDB apps
+<div class="paragraph">
+<p>Pipelines and schemas are composed inside <em>apps</em>. This part shows how SimDB apps
 are defined, registered, enabled, and run&#8201;&#8212;&#8201;including many apps sharing one
-database.
+database.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -4943,9 +4940,11 @@ techniques that build on the framework you have just learned.</p>
 <h1 id="part-vi" class="sect0">Part VI: Advanced Pipeline Techniques</h1>
 <div class="openblock partintro">
 <div class="content">
-Once the basics work, these techniques handle synchronization, low-latency
+<div class="paragraph">
+<p>Once the basics work, these techniques handle synchronization, low-latency
 retrieval of in-flight data, determinism, cross-thread database access, and how
-stages are scheduled onto threads.
+stages are scheduled onto threads.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -5743,9 +5742,11 @@ collection-and-visualization application.</p>
 <h1 id="part-vii" class="sect0">Part VII: Case Study&#8201;&#8212;&#8201;Argos</h1>
 <div class="openblock partintro">
 <div class="content">
-Argos is SimDB&#8217;s flagship application: a simulation data <em>collector</em> plus a
+<div class="paragraph">
+<p>Argos is SimDB&#8217;s flagship application: a simulation data <em>collector</em> plus a
 Python <em>viewer</em>. It exercises nearly every SimDB feature and is the best way to
-see the pieces working together end-to-end.
+see the pieces working together end-to-end.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -6353,209 +6354,58 @@ turns all of this back into something you can explore.</p>
 <h2 id="ch-34-argos-viewer">34. The Argos Viewer</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>The viewer is the read side of Argos: a desktop application that opens a collected
-database and lets you <strong>replay</strong> the simulation, scrubbing back and forth through
-simulated time to watch collected objects change. Where the collector chapter was
-about features and encodings, this one is about <strong>what you see and do</strong>&#8201;&#8212;&#8201;it is
-deliberately a user&#8217;s tour of the interface, not a look under the hood.</p>
-</div>
-<div class="sect2">
-<h3 id="_opening_a_database_2">Opening a database</h3>
-<div class="paragraph">
-<p>You point the viewer at a collected database, and optionally at a saved layout.
-When you open a run for the first time, you are met with an almost-empty
-workspace: a single canvas tab filling most of the window, and the playback
-controls along the bottom. The canvas does not sit blank, though&#8201;&#8212;&#8201;an empty cell
-shows a small <strong>Quick Links</strong> menu (described next) that is your starting point for
-building a view. Nothing is visualized yet because you have not chosen anything to
-look at.</p>
+<p>The viewer is the read side of Argos: a desktop application that opens a
+collected database and lets you <strong>replay</strong> the simulation, scrubbing back and
+forth through simulated time while a set of composable widgets show you what
+every collected object looked like at any instant.</p>
 </div>
 <div class="imageblock text-center">
 <div class="content">
-<img src="images/argos-first-launch.png" alt="Argos on first open: an empty canvas showing the Quick Links menu">
+<img src="images/argos-viewer-hero.png" alt="A populated Argos canvas with three widgets">
 </div>
-<div class="title">Figure 3. Argos on first open: an empty canvas showing the Quick Links menu, with the playback bar at the bottom</div>
+<div class="title">Figure 3. A populated Argos canvas: a Queue Inspector, a Watchlist, and a Queue Utilizations widget, all updating together as you scrub through time</div>
 </div>
 <div class="paragraph">
-<p>If you have looked at this data before, the viewer reopens your last layout
-automatically; you can also hand it a saved <strong>layout file</strong> to jump straight to a
-prepared arrangement (more on those below).</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_quick_links_building_a_view_from_an_empty_cell">Quick Links: building a view from an empty cell</h3>
-<div class="paragraph">
-<p>Every empty canvas cell displays a <strong>Quick Links</strong> menu&#8201;&#8212;&#8201;a short bulleted list of
-hyperlinks&#8201;&#8212;&#8201;and this is how you populate the viewer. It has two groups:</p>
+<p>A few highlights:</p>
 </div>
 <div class="ulist">
 <ul>
 <li>
-<p><strong>Widgets</strong>&#8201;&#8212;&#8201;one link per kind of widget you can create in that cell: <strong>Queue
-Inspector</strong>, <strong>Queue Utilizations</strong>, <strong>Scheduling Lines</strong>, and <strong>Watchlist</strong>. Clicking
-one opens a small dialog to choose <strong>which</strong> collected objects it should show (for
-example, which queue to inspect, or which elements to draw scheduling lines
-for), and then places the widget in that cell.</p>
+<p>You build a view by splitting the canvas and dropping in widgets&#8201;&#8212;&#8201;Queue Inspector, Queue Utilizations, Scheduling Lines, Watchlist&#8201;&#8212;&#8201;choosing
+what each one shows as you create it.</p>
 </li>
 <li>
-<p><strong>Canvas</strong>&#8201;&#8212;&#8201;links to <strong>Split left/right</strong> and <strong>Split top/bottom</strong>, which divide the
-cell in two. The freshly created empty half again shows its own Quick Links, so
-you build up a multi-widget layout by splitting and filling, cell by cell.</p>
+<p>The playback bar scrubs through the whole run; every widget updates in
+step, reconstructed on demand from the nearest snapshot and its deltas.</p>
+</li>
+<li>
+<p>A view can be saved as a <strong>layout file</strong> and reopened or shared later.</p>
+</li>
+<li>
+<p>Argos is a deliberately <strong>thin client</strong>: it never loads a whole run into
+memory, only what the current view and tick require, so a multi-gigabyte
+database opens as readily as a small one.</p>
 </li>
 </ul>
 </div>
-<div class="paragraph">
-<p>This is the mental model that replaces any single "browse everything" panel:
-choosing data is part of creating each widget, right where that widget will live.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_tabs_and_the_splittable_canvas">Tabs and the splittable canvas</h3>
-<div class="paragraph">
-<p>The workspace is organized as a <strong>data inspector</strong> of tabs, each holding one
-<strong>canvas</strong>. A trailing <code>+</code> ("Add Tab") page creates a new tab for a different
-arrangement, and you can right-click a tab to rename or delete it. When the run
-recorded notifications worth surfacing (the sporadic messages from the collector&#8217;s
-<code>Notifications</code> table), a fixed <strong>Logs</strong> tab appears as well.</p>
-</div>
-<div class="paragraph">
-<p>Within a tab, the canvas is recursively splittable&#8201;&#8212;&#8201;every split leaves two
-cells, each of which can hold a widget or be split again&#8201;&#8212;&#8201;so you can arrange many
-widgets side by side and watch related objects together. Splitting is available
-both from the Quick Links of an empty cell and from a populated widget itself.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_widgets">Widgets</h3>
-<div class="paragraph">
-<p>Widgets are how collected objects are actually visualized. Each is created from a
-Quick Links entry and then configured through its own selection dialog and
-settings. The viewer ships several kinds, each suited to a different shape of
-data.</p>
-</div>
-<div class="paragraph">
-<p><strong>Queue Inspector</strong>&#8201;&#8212;&#8201;a tabular view of a container object such as a queue or
-buffer. You choose which columns are visible, and per-column <strong>auto-colorization</strong>
-tints values so patterns jump out as you scrub through time.</p>
-</div>
-<div class="imageblock text-center">
-<div class="content">
-<img src="images/argos-queue-inspector.png" alt="A Queue Inspector widget with colorized columns">
-</div>
-<div class="title">Figure 4. A Queue Inspector widget with configurable columns and per-column auto-colorization</div>
-</div>
-<div class="paragraph">
-<p><strong>Queue Utilizations</strong>&#8201;&#8212;&#8201;how full container objects are over time, scaled against
-the queue&#8217;s max capacity given to the <code>ArgosCollector</code>.</p>
-</div>
-<div class="imageblock text-center">
-<div class="content">
-<img src="images/argos-queue-utilizations.png" alt="A queue-utilizations widget">
-</div>
-<div class="title">Figure 5. A Queue Utilizations widget showing container occupancy over time</div>
-</div>
-<div class="paragraph">
-<p><strong>Scheduling Lines</strong>&#8201;&#8212;&#8201;a timeline-style view of scheduled activity across the
-elements you select, over a configurable window of ticks before and after the
-current position.</p>
-</div>
-<div class="imageblock text-center">
-<div class="content">
-<img src="images/argos-scheduling-lines.png" alt="A scheduling-lines widget">
-</div>
-<div class="title">Figure 6. A Scheduling Lines widget showing scheduled activity across a window of ticks</div>
-</div>
-<div class="paragraph">
-<p><strong>Watchlist</strong>&#8201;&#8212;&#8201;an aggregate/summary view gathering several selected objects
-together.</p>
-</div>
-<div class="imageblock text-center">
-<div class="content">
-<img src="images/argos-watchlist.png" alt="A watchlist / summary widget">
-</div>
-<div class="title">Figure 7. A Watchlist widget aggregating several selected objects</div>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_the_playback_bar_moving_through_time">The playback bar: moving through time</h3>
-<div class="paragraph">
-<p>The bottom of the window is where Argos becomes a <strong>replay</strong> tool rather than a
-static viewer. The playback bar has a clock selector (for multi-clock runs), a
-readout of the current cycle/tick, step buttons for jumping by fixed amounts in
-either direction, and a scrubber that spans the whole run from start to end.</p>
-</div>
-<div class="paragraph">
-<p>As you move the playback position, every widget updates to show its objects'
-state <strong>at that instant</strong>&#8201;&#8212;&#8201;reconstructed behind the scenes from the nearest full
-snapshot plus the deltas up to that tick, exactly the encoding from the previous
-two chapters. You never think about snapshots or deltas; you just move the slider
-and watch the system evolve. In a multi-clock database, each object updates only
-on the edges of the clock it was collected against.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_a_thin_client_by_design">A thin client, by design</h3>
-<div class="paragraph">
-<p>It is worth being explicit about what the viewer does <strong>not</strong> do, because it shapes
-how Argos scales. The viewer is a deliberately <strong>lightweight, thin client</strong>: it
-never loads a whole run into memory. When you land on a tick, it reads only the
-blobs it needs to reconstruct exactly what the visible widgets are showing, right
-then. Move to another tick and it does the work again for the new position.</p>
-</div>
-<div class="paragraph">
-<p>It does not even cache blobs it has already decoded&#8201;&#8212;&#8201;revisiting a tick re-reads
-and re-replays it from scratch. (A cache might be a reasonable future
-optimization; today there simply isn&#8217;t one.) What makes this practical is that the
-viewer is <strong>fast at deserializing and replaying</strong> the compressed snapshot-and-delta
-blobs, so on-demand reconstruction stays responsive even though nothing is kept
-around.</p>
-</div>
-<div class="paragraph">
-<p>The upshot is a viewer whose memory footprint is tied to <strong>what is on screen</strong>, not
-to the size of the database. A multi-gigabyte run opens as readily as a small one,
-because Argos only ever pulls the slice of data the current view and tick require.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_layout_files_saving_and_sharing_a_layout">Layout files: saving and sharing a layout</h3>
-<div class="paragraph">
-<p>A carefully arranged view is worth keeping, so the viewer can save your layout to a
-<strong>layout file</strong>. It captures the whole arrangement&#8201;&#8212;&#8201;the tabs, how each canvas is
-split, which widgets sit where, the columns and colorization chosen for each
-object, and the selected clock&#8201;&#8212;&#8201;so you can reopen it later or hand it to a
-colleague to reproduce your exact setup. The window title marks when there are
-unsaved changes, and the viewer remembers your most recent layout and restores it
-automatically the next time you open the same data without naming a layout file.</p>
-</div>
-<div class="paragraph">
-<p>One deliberate exception: the <strong>playback position</strong>&#8201;&#8212;&#8201;the specific tick you happen to
-be viewing&#8201;&#8212;&#8201;is treated as a per-session preference and is <strong>not</strong> stored in the
-shared layout file. A layout file describes how to look at a run, not where in time you
-last paused, so sharing one does not drag your colleague to your current tick.</p>
-</div>
-<div class="admonitionblock note">
+<div class="admonitionblock tip">
 <table>
 <tr>
 <td class="icon">
-<i class="fa icon-note" title="Note"></i>
+<i class="fa icon-tip" title="Tip"></i>
 </td>
 <td class="content">
 <div class="paragraph">
-<p>The viewer is intentionally described here at the level of features and workflow.
-Its implementation is being revised, so this chapter avoids tying anything to
-specific internals&#8201;&#8212;&#8201;what a user does with the canvas, Quick Links, widgets,
-playback bar, and layout files is what matters, and that is stable.</p>
+<p>This chapter stays at the thirty-thousand-foot view on purpose. For everything
+about actually <strong>using</strong> the viewer&#8201;&#8212;&#8201;opening a database, building and
+arranging widgets, navigating time, saving layouts, undo/redo, fonts, search,
+and a deep dive on each widget&#8201;&#8212;&#8201;see the
+<a href="../../python/argos/docs/argos-user-guide.html">Argos User Guide</a>, which is
+the maintained, authoritative reference for the viewer&#8217;s interface.</p>
 </div>
 </td>
 </tr>
 </table>
-</div>
-<div class="paragraph">
-<p>That is the viewer as an instrument: open a run, create widgets from an empty
-cell&#8217;s Quick Links (choosing their data as you go), compose them on a splittable
-canvas, and scrub through simulated time while everything updates in step. All
-that remains is to see the two halves working together in a single, concrete run&#8201;&#8212;&#8201;the end-to-end walkthrough that closes the case study.</p>
-</div>
 </div>
 </div>
 </div>
@@ -7808,9 +7658,11 @@ the narrative through Parts <a href="#part-i">Part I</a>--<a href="#part-viii">P
 <h1 id="part-ix" class="sect0">Part IX: Reference &amp; Appendices</h1>
 <div class="openblock partintro">
 <div class="content">
-Quick-reference material for day-to-day lookups. The narrative parts of this book
+<div class="paragraph">
+<p>Quick-reference material for day-to-day lookups. The narrative parts of this book
 explain <strong>why</strong> and <strong>when</strong>; this part is <strong>what</strong> and <strong>where</strong>&#8201;&#8212;&#8201;headers, macros,
-lifecycle calls, glossary terms, common failure modes, and migration paths.
+lifecycle calls, glossary terms, common failure modes, and migration paths.</p>
+</div>
 </div>
 </div>
 <div class="sect1">
@@ -8665,14 +8517,14 @@ process / teardown); everything else is SQL, analysis scripts, or a viewer on th
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2026-07-14 10:08:22 -0500
+Last updated 2026-09-15 15:57:14 -0500
 </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.18.3/highlight.min.js"></script>
 <script>
 if (!hljs.initHighlighting.called) {
   hljs.initHighlighting.called = true
-  ;[].slice.call(document.querySelectorAll('pre.highlight > code')).forEach(function (el) { hljs.highlightBlock(el) })
+  ;[].slice.call(document.querySelectorAll('pre.highlight > code[data-lang]')).forEach(function (el) { hljs.highlightBlock(el) })
 }
 </script>
 </body>

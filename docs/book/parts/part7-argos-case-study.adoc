@@ -423,153 +423,35 @@ turns all of this back into something you can explore.
 [#ch-34-argos-viewer]
 == The Argos Viewer
 
-The viewer is the read side of Argos: a desktop application that opens a collected
-database and lets you *replay* the simulation, scrubbing back and forth through
-simulated time to watch collected objects change. Where the collector chapter was
-about features and encodings, this one is about *what you see and do* -- it is
-deliberately a user's tour of the interface, not a look under the hood.
+The viewer is the read side of Argos: a desktop application that opens a
+collected database and lets you *replay* the simulation, scrubbing back and
+forth through simulated time while a set of composable widgets show you what
+every collected object looked like at any instant.
 
-=== Opening a database
+.A populated Argos canvas: a Queue Inspector, a Watchlist, and a Queue Utilizations widget, all updating together as you scrub through time
+image::argos-viewer-hero.png[A populated Argos canvas with three widgets,role=text-center]
 
-You point the viewer at a collected database, and optionally at a saved layout.
-When you open a run for the first time, you are met with an almost-empty
-workspace: a single canvas tab filling most of the window, and the playback
-controls along the bottom. The canvas does not sit blank, though -- an empty cell
-shows a small *Quick Links* menu (described next) that is your starting point for
-building a view. Nothing is visualized yet because you have not chosen anything to
-look at.
+A few highlights:
 
-.Argos on first open: an empty canvas showing the Quick Links menu, with the playback bar at the bottom
-image::argos-first-launch.png[Argos on first open: an empty canvas showing the Quick Links menu,role=text-center]
+* You build a view by splitting the canvas and dropping in widgets --
+  Queue Inspector, Queue Utilizations, Scheduling Lines, Watchlist -- choosing
+  what each one shows as you create it.
+* The playback bar scrubs through the whole run; every widget updates in
+  step, reconstructed on demand from the nearest snapshot and its deltas.
+* A view can be saved as a *layout file* and reopened or shared later.
+* Argos is a deliberately *thin client*: it never loads a whole run into
+  memory, only what the current view and tick require, so a multi-gigabyte
+  database opens as readily as a small one.
 
-If you have looked at this data before, the viewer reopens your last layout
-automatically; you can also hand it a saved *layout file* to jump straight to a
-prepared arrangement (more on those below).
-
-=== Quick Links: building a view from an empty cell
-
-Every empty canvas cell displays a *Quick Links* menu -- a short bulleted list of
-hyperlinks -- and this is how you populate the viewer. It has two groups:
-
-* *Widgets* -- one link per kind of widget you can create in that cell: *Queue
-  Inspector*, *Queue Utilizations*, *Scheduling Lines*, and *Watchlist*. Clicking
-  one opens a small dialog to choose *which* collected objects it should show (for
-  example, which queue to inspect, or which elements to draw scheduling lines
-  for), and then places the widget in that cell.
-* *Canvas* -- links to *Split left/right* and *Split top/bottom*, which divide the
-  cell in two. The freshly created empty half again shows its own Quick Links, so
-  you build up a multi-widget layout by splitting and filling, cell by cell.
-
-This is the mental model that replaces any single "browse everything" panel:
-choosing data is part of creating each widget, right where that widget will live.
-
-=== Tabs and the splittable canvas
-
-The workspace is organized as a *data inspector* of tabs, each holding one
-*canvas*. A trailing `+` ("Add Tab") page creates a new tab for a different
-arrangement, and you can right-click a tab to rename or delete it. When the run
-recorded notifications worth surfacing (the sporadic messages from the collector's
-`Notifications` table), a fixed *Logs* tab appears as well.
-
-Within a tab, the canvas is recursively splittable -- every split leaves two
-cells, each of which can hold a widget or be split again -- so you can arrange many
-widgets side by side and watch related objects together. Splitting is available
-both from the Quick Links of an empty cell and from a populated widget itself.
-
-=== Widgets
-
-Widgets are how collected objects are actually visualized. Each is created from a
-Quick Links entry and then configured through its own selection dialog and
-settings. The viewer ships several kinds, each suited to a different shape of
-data.
-
-*Queue Inspector* -- a tabular view of a container object such as a queue or
-buffer. You choose which columns are visible, and per-column *auto-colorization*
-tints values so patterns jump out as you scrub through time.
-
-.A Queue Inspector widget with configurable columns and per-column auto-colorization
-image::argos-queue-inspector.png[A Queue Inspector widget with colorized columns,role=text-center]
-
-*Queue Utilizations* -- how full container objects are over time, scaled against
-the queue's max capacity given to the `ArgosCollector`.
-
-.A Queue Utilizations widget showing container occupancy over time
-image::argos-queue-utilizations.png[A queue-utilizations widget,role=text-center]
-
-*Scheduling Lines* -- a timeline-style view of scheduled activity across the
-elements you select, over a configurable window of ticks before and after the
-current position.
-
-.A Scheduling Lines widget showing scheduled activity across a window of ticks
-image::argos-scheduling-lines.png[A scheduling-lines widget,role=text-center]
-
-*Watchlist* -- an aggregate/summary view gathering several selected objects
-together.
-
-.A Watchlist widget aggregating several selected objects
-image::argos-watchlist.png[A watchlist / summary widget,role=text-center]
-
-=== The playback bar: moving through time
-
-The bottom of the window is where Argos becomes a *replay* tool rather than a
-static viewer. The playback bar has a clock selector (for multi-clock runs), a
-readout of the current cycle/tick, step buttons for jumping by fixed amounts in
-either direction, and a scrubber that spans the whole run from start to end.
-
-As you move the playback position, every widget updates to show its objects'
-state *at that instant* -- reconstructed behind the scenes from the nearest full
-snapshot plus the deltas up to that tick, exactly the encoding from the previous
-two chapters. You never think about snapshots or deltas; you just move the slider
-and watch the system evolve. In a multi-clock database, each object updates only
-on the edges of the clock it was collected against.
-
-=== A thin client, by design
-
-It is worth being explicit about what the viewer does *not* do, because it shapes
-how Argos scales. The viewer is a deliberately *lightweight, thin client*: it
-never loads a whole run into memory. When you land on a tick, it reads only the
-blobs it needs to reconstruct exactly what the visible widgets are showing, right
-then. Move to another tick and it does the work again for the new position.
-
-It does not even cache blobs it has already decoded -- revisiting a tick re-reads
-and re-replays it from scratch. (A cache might be a reasonable future
-optimization; today there simply isn't one.) What makes this practical is that the
-viewer is *fast at deserializing and replaying* the compressed snapshot-and-delta
-blobs, so on-demand reconstruction stays responsive even though nothing is kept
-around.
-
-The upshot is a viewer whose memory footprint is tied to *what is on screen*, not
-to the size of the database. A multi-gigabyte run opens as readily as a small one,
-because Argos only ever pulls the slice of data the current view and tick require.
-
-=== Layout files: saving and sharing a layout
-
-A carefully arranged view is worth keeping, so the viewer can save your layout to a
-*layout file*. It captures the whole arrangement -- the tabs, how each canvas is
-split, which widgets sit where, the columns and colorization chosen for each
-object, and the selected clock -- so you can reopen it later or hand it to a
-colleague to reproduce your exact setup. The window title marks when there are
-unsaved changes, and the viewer remembers your most recent layout and restores it
-automatically the next time you open the same data without naming a layout file.
-
-One deliberate exception: the *playback position* -- the specific tick you happen to
-be viewing -- is treated as a per-session preference and is *not* stored in the
-shared layout file. A layout file describes how to look at a run, not where in time you
-last paused, so sharing one does not drag your colleague to your current tick.
-
-[NOTE]
+[TIP]
 ====
-The viewer is intentionally described here at the level of features and workflow.
-Its implementation is being revised, so this chapter avoids tying anything to
-specific internals -- what a user does with the canvas, Quick Links, widgets,
-playback bar, and layout files is what matters, and that is stable.
+This chapter stays at the thirty-thousand-foot view on purpose. For everything
+about actually *using* the viewer -- opening a database, building and
+arranging widgets, navigating time, saving layouts, undo/redo, fonts, search,
+and a deep dive on each widget -- see the
+link:../../python/argos/docs/argos-user-guide.html[Argos User Guide], which is
+the maintained, authoritative reference for the viewer's interface.
 ====
-
-That is the viewer as an instrument: open a run, create widgets from an empty
-cell's Quick Links (choosing their data as you go), compose them on a splittable
-canvas, and scrub through simulated time while everything updates in step. All
-that remains is to see the two halves working together in a single, concrete run
--- the end-to-end walkthrough that closes the case study.
 
 [#ch-35-end-to-end]
 == End-to-End
