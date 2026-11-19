@@ -1,7 +1,7 @@
 import wx, copy, re, os
 from collections import OrderedDict
 from viewer.gui.copy_path_menu import ShowCopyPathMenu
-from viewer.gui.search_menu import ShowSearchMenu
+from viewer.gui.search_menu import ShowSearchMenu, ShowDisabledSearchMenu
 from viewer.gui.view_settings import DirtyReasons
 from viewer.gui.widgets.grid import Grid
 
@@ -965,6 +965,8 @@ class SchedulingLinesWidget(wx.Panel):
             elem_path, annos = found
             nvps = [(k, v) for k, v in annos if k != 'DID' or self.show_did]
             ShowSearchMenu(self.grid, self.frame, elem_path, nvps)
+        else:
+            ShowDisabledSearchMenu(self.grid, 'There is no struct data in this cell to search for.')
 
     def __FindStructAtCell(self, row, col):
         """Returns the (elem_path, name/value pairs) of the struct drawn in the grid cell,
