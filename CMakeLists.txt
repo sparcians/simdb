@@ -86,35 +86,40 @@ write_basic_package_version_file(
 
 include(GNUInstallDirs)
 
+# Install components:
+#   simdb  - C++ headers and CMake package files
+#   argos  - Argos viewer (python runtime + launcher)
+# A plain "cmake --install" installs both. To install them to different
+# prefixes, run "cmake --install <build> --component <name> --prefix <dir>".
 install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/SimDBConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/SimDBConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SimDB
+    COMPONENT simdb
 )
 
 install(
     DIRECTORY include/simdb
     DESTINATION include
-)
-
-install(
-    DIRECTORY python/argos/
-    DESTINATION bin/argos_runtime
-    FILES_MATCHING
-    PATTERN "*.py"
-)
-
-install(
-    PROGRAMS python/argos/argos
-    DESTINATION bin
+    COMPONENT simdb
 )
 
 install(TARGETS simdb
     EXPORT SimDBTargets
+    COMPONENT simdb
 )
 
 install(EXPORT SimDBTargets
     NAMESPACE SimDB::
     DESTINATION lib/cmake/SimDB
+    COMPONENT simdb
+)
+
+install(
+    DIRECTORY python/argos/
+    DESTINATION bin/argos_runtime
+    COMPONENT argos
+    FILES_MATCHING
+    PATTERN "*.py"
 )

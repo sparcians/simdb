@@ -37,3 +37,28 @@ def ShowSearchMenu(window, frame, elem_path, nvps, clicked_field=None):
         window.PopupMenu(menu)
     finally:
         menu.Destroy()
+
+
+def ShowDisabledSearchMenu(window, reason):
+    """Pops up a context menu whose 'Search' entry is disabled. The reason it is
+    unavailable is set as the item's help text and shown as a tooltip over the
+    window while the menu is up (native popup menus have no tooltips of their own)."""
+    menu = wx.Menu()
+    item = menu.Append(wx.ID_ANY, 'Search')
+    item.SetHelp(reason)
+    item.Enable(False)
+
+    def OnHighlight(event):
+        if event.GetId() == item.GetId():
+            window.SetToolTip(reason)
+        else:
+            window.UnsetToolTip()
+        event.Skip()
+
+    menu.Bind(wx.EVT_MENU_HIGHLIGHT, OnHighlight)
+    window.SetToolTip(reason)
+    try:
+        window.PopupMenu(menu)
+    finally:
+        window.UnsetToolTip()
+        menu.Destroy()
