@@ -116,10 +116,22 @@ install(EXPORT SimDBTargets
     COMPONENT simdb
 )
 
-install(
-    DIRECTORY python/argos/
-    DESTINATION bin/argos_runtime
-    COMPONENT argos
-    FILES_MATCHING
-    PATTERN "*.py"
-)
+# Variables are not preserved into install scripts, so bake in the source path.
+install(CODE "set(_argos_src [[${SIMDB_BASE}/python/argos/]])" COMPONENT argos)
+
+install(CODE [[
+    set(_runtime_dir "bin/argos_runtime")
+
+    if(DEFINED ENV{ARGOS_RUNTIME_POSTFIX} AND
+       NOT "$ENV{ARGOS_RUNTIME_POSTFIX}" STREQUAL "")
+        string(APPEND _runtime_dir "-$ENV{ARGOS_RUNTIME_POSTFIX}")
+    endif()
+
+    file(INSTALL
+        DESTINATION "${CMAKE_INSTALL_PREFIX}/${_runtime_dir}"
+        TYPE DIRECTORY
+        FILES "${_argos_src}"
+        FILES_MATCHING
+        PATTERN "*.py"
+    )
+]] COMPONENT argos)
