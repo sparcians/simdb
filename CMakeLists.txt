@@ -119,6 +119,8 @@ install(EXPORT SimDBTargets
 # Variables are not preserved into install scripts, so bake in the source path.
 install(CODE "set(_argos_src [[${SIMDB_BASE}/python/argos/]])" COMPONENT argos)
 
+# Install the *.py files, plus all *.html and *.png files found under the
+# python/argos/docs/** directory structure.
 install(CODE [[
     set(_runtime_dir "bin/argos_runtime")
 
@@ -133,5 +135,6 @@ install(CODE [[
         FILES "${_argos_src}"
         FILES_MATCHING
         PATTERN "*.py"
+        REGEX "/docs/.*\\.(html|png)$"
     )
 ]] COMPONENT argos)
